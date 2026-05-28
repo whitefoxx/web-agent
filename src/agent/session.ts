@@ -10,7 +10,14 @@
  */
 
 import type { ParsedCommand } from '../connectors/messages';
-import { log, warn } from '../runtime/log';
+import { log } from '../runtime/log';
+import {
+  deleteSessionFromDb,
+  getSession,
+  listSessions as listSessionsFromDb,
+  putSession,
+  type ListOptions,
+} from './session-store';
 
 export interface UserTurn {
   role: 'user';
@@ -77,8 +84,9 @@ export interface SessionState {
   history: Turn[];
 }
 
-const STORAGE_KEY_PREFIX = 'webchat:session:';
-const SESSION_INDEX_KEY = 'webchat:sessionIds';
+/* Persistent storage is delegated to session-store.ts (IndexedDB). The
+ * helpers below preserve the previous chrome.storage.session API so
+ * orchestrator / service-worker call sites don't change. */
 
 export function makeSession(id: string): SessionState {
   return {
@@ -126,63 +134,21 @@ export function appendTurn(s: SessionState, t: Turn): void {
   s.updatedAt = Date.now();
 }
 
-function safeStorageSession(): chrome.storage.StorageArea | null {
-  try {
-    return chrome?.storage?.session ?? null;
-  } catch {
-    return null;
-  }
-}
-
 export async function saveSession(s: SessionState): Promise<void> {
-  const store = safeStorageSession();
-  if (!store) return;
-  try {
-    await store.set({ [STORAGE_KEY_PREFIX + s.id]: s });
-    const idx = await loadIndex();
-    if (!idx.includes(s.id)) {
-      idx.push(s.id);
-      await store.set({ [SESSION_INDEX_KEY]: idx });
-    }
-  } catch (e) {
-    warn('session', 'saveSession failed', e);
-  }
+  s.updatedAt = Date.now();
+  await putSession(s);
 }
 
 export async function loadSession(id: string): Promise<SessionState | null> {
-  const store = safeStorageSession();
-  if (!store) return null;
-  try {
-    const r = await store.get(STORAGE_KEY_PREFIX + id);
-    const s = r?.[STORAGE_KEY_PREFIX + id] as SessionState | undefined;
-    return s ?? null;
-  } catch (e) {
-    warn('session', 'loadSession failed', e);
-    return null;
-  }
+  return getSession(id);
 }
 
-export async function loadIndex(): Promise<string[]> {
-  const store = safeStorageSession();
-  if (!store) return [];
-  try {
-    const r = await store.get(SESSION_INDEX_KEY);
-    return (r?.[SESSION_INDEX_KEY] as string[]) ?? [];
-  } catch {
-    return [];
-  }
+export async function listSessions(opts: ListOptions = {}): Promise<SessionState[]> {
+  return listSessionsFromDb(opts);
 }
 
 export async function deleteSession(id: string): Promise<void> {
-  const store = safeStorageSession();
-  if (!store) return;
-  try {
-    await store.remove(STORAGE_KEY_PREFIX + id);
-    const idx = (await loadIndex()).filter((x) => x !== id);
-    await store.set({ [SESSION_INDEX_KEY]: idx });
-  } catch (e) {
-    warn('session', 'deleteSession failed', e);
-  }
+  await deleteSessionFromDb(id);
 }
 
 export function makeSessionId(): string {
