@@ -433,17 +433,48 @@ async function handleUserMessage(m: UserMessageReq): Promise<void> {
   await driveSession(session, m.text, /* resume */ false, /* continuation */ false);
 }
 
-/** Returns the conversationId currently visible at the given tab's URL,
- * or null if the tab is gone / on a non-conv URL (homepage, login, etc.).
- * Used after openOrFocusTab to detect when DeepSeek redirected away from
- * a deleted conversation. */
-async function landedConvIdFor(tabId: number): Promise<string | null> {
-  try {
-    const t = await chrome.tabs.get(tabId);
-    return parseConversationUrl(t.url)?.conversationId ?? null;
-  } catch {
-    return null;
+/** Poll a tab's URL until it's been the same for `quietMs`, or `maxMs`
+ * elapses. Returns the last URL observed. Used after openOrFocusTab to
+ * defeat the race against DeepSeek's client-side redirect when the conv
+ * we're trying to reattach to was deleted: the tab is created at
+ * /a/chat/s/<deletedId>, the SPA mounts, fetches the conv, gets a 404,
+ * and only then history.replaceState('/'). A naive chrome.tabs.get()
+ * straight after openOrFocusTab catches the URL pre-redirect ~70% of
+ * the time and falsely concludes "conv survived". */
+async function waitForTabUrlStable(
+  tabId: number,
+  opts: { quietMs?: number; maxMs?: number } = {},
+): Promise<string> {
+  const quietMs = opts.quietMs ?? 800;
+  const maxMs = opts.maxMs ?? 4000;
+  const t0 = Date.now();
+  let lastUrl = '';
+  let lastChangeAt = Date.now();
+  while (Date.now() - t0 < maxMs) {
+    let url: string;
+    try {
+      const t = await chrome.tabs.get(tabId);
+      url = t.url ?? '';
+    } catch {
+      return lastUrl;
+    }
+    if (url !== lastUrl) {
+      lastUrl = url;
+      lastChangeAt = Date.now();
+    } else if (url && Date.now() - lastChangeAt >= quietMs) {
+      return url;
+    }
+    await sleep(150);
   }
+  return lastUrl;
+}
+
+/** Wait for the tab URL to settle, then return the conversationId visible
+ * there (or null for homepage / non-conv URLs). The wait is what makes
+ * this robust against DeepSeek's deleted-conv redirect race. */
+async function landedConvIdFor(tabId: number): Promise<string | null> {
+  const stableUrl = await waitForTabUrlStable(tabId);
+  return parseConversationUrl(stableUrl)?.conversationId ?? null;
 }
 
 /** Returns the session's existing chatbot tab id if all of these hold:
