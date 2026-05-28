@@ -57,6 +57,14 @@ export function buildContinuationReminder(userText: string): string {
   ].join('\n');
 }
 
+/** Max chars of a tool result the chatbot sees in any one iteration. Sized
+ * for a 64K-token DeepSeek context: a typical token is ~3 chars (mixed
+ * Chinese + English + JSON punctuation), so 64K chars ≈ 20K tokens —
+ * leaves plenty for the rest of the conv history + first-turn prompt + the
+ * chatbot's reply. If a tool genuinely returns more than this, prefer
+ * adding pagination / filtering args to the tool over bumping this number. */
+const MAX_TOOL_RESULT_CHARS = 64_000;
+
 /** Wrap a tool execution result as the next "user message" the chatbot sees. */
 export function formatToolResultPrompt(opts: {
   tool: string;
@@ -69,7 +77,7 @@ export function formatToolResultPrompt(opts: {
   const head = opts.ok ? `## 工具结果 — ${opts.tool}` : `## 工具失败 — ${opts.tool}`;
   const argLine = opts.args ? `\n参数: ${safeStringify(opts.args)}` : '';
   const bodyLines = opts.ok
-    ? ['```json', truncate(safeStringify(opts.result), 8000), '```']
+    ? ['```json', truncate(safeStringify(opts.result), MAX_TOOL_RESULT_CHARS), '```']
     : [`错误: ${opts.error ?? '(unknown)'}`];
   return [
     head + argLine,
