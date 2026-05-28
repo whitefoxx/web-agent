@@ -44,6 +44,20 @@ export interface AbortSessionReq {
   sessionId: string;
 }
 
+/** Acknowledge a paused session: open the bound conversation in a fresh tab
+ * and re-run the orchestrator with the saved pendingPrompt (if any). */
+export interface ResumeSessionReq {
+  type: 'RESUME_SESSION';
+  sessionId: string;
+}
+
+/** Drop a paused session for good (deletes from storage, lets user start
+ * fresh). */
+export interface DiscardSessionReq {
+  type: 'DISCARD_SESSION';
+  sessionId: string;
+}
+
 export interface EnsureChatbotTabReq {
   type: 'ENSURE_CHATBOT_TAB';
   chatbot: 'deepseek';
@@ -84,6 +98,38 @@ export interface SessionDoneEvt {
   sessionId: string;
   reason: 'no_more_commands' | 'done_signal' | 'max_iterations' | 'error' | 'user_abort';
   error?: string;
+}
+
+/** Iteration entered a specific phase — used by the SidePanel to drive the
+ * grey progress banner ("DeepSeek tab #N 思考中…" / "正在生成…" etc.). */
+export interface IterationProgressEvt {
+  type: 'ITERATION_PROGRESS';
+  sessionId: string;
+  iterationId: string;
+  iteration: number;
+  phase:
+    | 'starting' // orchestrator about to inject
+    | 'injecting' // INJECT_PROMPT just sent
+    | 'awaiting' // chatbot is generating
+    | 'streaming' // partial textLen available
+    | 'completed'; // response received & parsed
+  /** Only set for `streaming`: current visible char count of the assistant
+   * message (so the SidePanel can show "正在生成 (~XXX 字)…"). */
+  textLen?: number;
+}
+
+/** Session is paused because its bound chatbot tab disappeared (closed,
+ * navigated away, or the user switched the tab to a different DeepSeek
+ * conversation). The SidePanel disables the input and surfaces a red
+ * banner with Resume / Discard buttons. */
+export interface SessionPausedEvt {
+  type: 'SESSION_PAUSED';
+  sessionId: string;
+  reason: 'tab_closed' | 'tab_navigated_away' | 'conv_mismatch' | 'tab_not_ready';
+  /** Saved deepseek conversation URL — Resume opens a new tab here. */
+  conversationUrl: string | null;
+  /** The prompt that was about to be injected when pause happened, if any. */
+  pendingPromptPreview?: string;
 }
 
 export interface ChatbotTabStatusEvt {
@@ -130,6 +176,19 @@ export interface ChatbotResponseEvt {
   cleanedText: string;
   commands: ParsedCommand[];
   reasoningText?: string;
+  /** location.href when the response was finalised. Lets SW capture the
+   * deepseek conversation UUID — first message redirects to
+   * `/a/chat/s/<uuid>`, subsequent ones keep it. */
+  currentUrl?: string;
+}
+
+/** Connector emits this periodically while it's waiting for a response so
+ * the SidePanel can show "正在生成 (~XXX 字)…". */
+export interface ChatbotStreamingEvt {
+  type: 'CHATBOT_STREAMING';
+  sessionId: string;
+  iterationId: string;
+  textLen: number;
 }
 
 export interface InjectAckEvt {
@@ -178,18 +237,23 @@ export interface PongConnectorEvt {
 export type Message =
   | UserMessageReq
   | AbortSessionReq
+  | ResumeSessionReq
+  | DiscardSessionReq
   | EnsureChatbotTabReq
   | RequestLogsReq
   | GetSessionStateReq
   | AssistantTurnEvt
   | ToolTraceEvt
   | SessionDoneEvt
+  | SessionPausedEvt
+  | IterationProgressEvt
   | ChatbotTabStatusEvt
   | LogsResponse
   | LogEntryEvt
   | InjectPromptReq
   | PingConnectorReq
   | ChatbotResponseEvt
+  | ChatbotStreamingEvt
   | InjectAckEvt
   | ChatbotBusyEvt
   | ChatbotErrorEvt

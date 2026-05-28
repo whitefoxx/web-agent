@@ -36,6 +36,7 @@ import type {
   ChatbotBusyEvt,
   ChatbotErrorEvt,
   ChatbotResponseEvt,
+  ChatbotStreamingEvt,
   ConnectorReadyEvt,
   InjectAckEvt,
   InjectPromptReq,
@@ -48,6 +49,7 @@ const RESPONSE_QUIET_MS = 1500; // text must be unchanged this long → done
 const RESPONSE_TIMEOUT_MS = 5 * 60 * 1000;
 const SEND_BUTTON_WAIT_MS = 8000;
 const TEXTAREA_WAIT_MS = 60_000; // waits for login flow
+const STREAMING_NOTIFY_MS = 1000; // send CHATBOT_STREAMING at most once per second
 
 /** Backoff schedule for clicking DeepSeek's own retry button when its server
  * reports "busy". On the Nth busy detection we wait BUSY_RETRY_BACKOFFS[N]
@@ -69,6 +71,7 @@ interface ActiveWatch {
   busyRetryCount: number;
   phase: WatchPhase;
   lastSnapshot: string;
+  lastStreamingNotifyTs: number;
 }
 
 let activeWatch: ActiveWatch | null = null;
@@ -192,6 +195,7 @@ function startWatch(sessionId: string, iterationId: string, baselineKey: number)
     busyRetryCount: 0,
     phase: 'observing',
     lastSnapshot: '',
+    lastStreamingNotifyTs: 0,
   };
   activeWatch = watch;
 
@@ -219,6 +223,12 @@ function startWatch(sessionId: string, iterationId: string, baselineKey: number)
     if (watch.stabilityHandle) {
       clearTimeout(watch.stabilityHandle);
       watch.stabilityHandle = null;
+    }
+    // Throttled streaming notification so SidePanel can show "正在生成 (~N 字)…".
+    const now = Date.now();
+    if (now - watch.lastStreamingNotifyTs > STREAMING_NOTIFY_MS) {
+      watch.lastStreamingNotifyTs = now;
+      void sendStreaming(watch.sessionId, watch.iterationId, snapshot.length);
     }
   }
 
@@ -320,6 +330,7 @@ function startWatch(sessionId: string, iterationId: string, baselineKey: number)
       cleanedText: parsed.cleanedText,
       reasoningText: reasoning || undefined,
       commands: parsed.commands,
+      currentUrl: location.href,
     });
   }
 
@@ -406,6 +417,7 @@ async function sendChatbotResponse(p: {
   cleanedText: string;
   reasoningText?: string;
   commands: import('../messages').ParsedCommand[];
+  currentUrl?: string;
 }): Promise<void> {
   const evt: ChatbotResponseEvt = {
     type: 'CHATBOT_RESPONSE',
@@ -415,6 +427,21 @@ async function sendChatbotResponse(p: {
     cleanedText: p.cleanedText,
     reasoningText: p.reasoningText,
     commands: p.commands,
+    currentUrl: p.currentUrl,
+  };
+  await sendToSW(evt);
+}
+
+async function sendStreaming(
+  sessionId: string,
+  iterationId: string,
+  textLen: number,
+): Promise<void> {
+  const evt: ChatbotStreamingEvt = {
+    type: 'CHATBOT_STREAMING',
+    sessionId,
+    iterationId,
+    textLen,
   };
   await sendToSW(evt);
 }

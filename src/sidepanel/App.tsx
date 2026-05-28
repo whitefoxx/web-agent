@@ -2,19 +2,24 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { Markdown } from './Markdown';
 import type { UiTurn } from './types';
 import {
+  type AbortSessionReq,
   type AssistantTurnEvt,
   type ChatbotBusyEvt,
+  type ChatbotStreamingEvt,
   type ChatbotTabStatusEvt,
+  type DiscardSessionReq,
+  type EnsureChatbotTabReq,
+  type IterationProgressEvt,
   type LogEntryEvt,
   type LogsResponse,
   type Message,
+  type RequestLogsReq,
+  type ResumeSessionReq,
   type SessionDoneEvt,
+  type SessionPausedEvt,
   type ToolTrace,
   type ToolTraceEvt,
   type UserMessageReq,
-  type AbortSessionReq,
-  type EnsureChatbotTabReq,
-  type RequestLogsReq,
 } from '../connectors/messages';
 import type { LogEntry, LogConfig } from '../runtime/log';
 import { getLogConfig, setLogConfig, subscribeLog } from '../runtime/log';
@@ -22,11 +27,25 @@ import { makeSessionId } from '../agent/session';
 
 const DEEPSEEK_URL = 'https://chat.deepseek.com';
 
+interface ProgressState {
+  iteration: number;
+  phase: 'injecting' | 'awaiting' | 'streaming';
+  textLen?: number;
+}
+
+interface PausedState {
+  reason: 'tab_closed' | 'tab_navigated_away' | 'conv_mismatch' | 'tab_not_ready';
+  conversationUrl: string | null;
+  pendingPromptPreview?: string;
+}
+
 export function App() {
   const [turns, setTurns] = useState<UiTurn[]>([]);
   const [input, setInput] = useState('');
   const [running, setRunning] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [progress, setProgress] = useState<ProgressState | null>(null);
+  const [paused, setPaused] = useState<PausedState | null>(null);
   const [tabStatus, setTabStatus] = useState<ChatbotTabStatusEvt | null>(null);
   const [showDrawer, setShowDrawer] = useState(false);
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -67,6 +86,15 @@ export function App() {
       case 'SESSION_DONE':
         onSessionDone(m as SessionDoneEvt);
         break;
+      case 'SESSION_PAUSED':
+        onSessionPaused(m as SessionPausedEvt);
+        break;
+      case 'ITERATION_PROGRESS':
+        onIterationProgress(m as IterationProgressEvt);
+        break;
+      case 'CHATBOT_STREAMING':
+        onChatbotStreaming(m as ChatbotStreamingEvt);
+        break;
       case 'CHATBOT_TAB_STATUS':
         setTabStatus(m as ChatbotTabStatusEvt);
         break;
@@ -91,6 +119,28 @@ export function App() {
         ts: Date.now(),
       },
     ]);
+  }
+
+  function onIterationProgress(m: IterationProgressEvt): void {
+    if (m.phase === 'completed') {
+      setProgress(null);
+    } else if (m.phase === 'injecting' || m.phase === 'awaiting') {
+      setProgress({ iteration: m.iteration, phase: m.phase });
+    }
+  }
+
+  function onChatbotStreaming(m: ChatbotStreamingEvt): void {
+    setProgress({ iteration: -1, phase: 'streaming', textLen: m.textLen });
+  }
+
+  function onSessionPaused(m: SessionPausedEvt): void {
+    setRunning(false);
+    setProgress(null);
+    setPaused({
+      reason: m.reason,
+      conversationUrl: m.conversationUrl,
+      pendingPromptPreview: m.pendingPromptPreview,
+    });
   }
 
   function onAssistantTurn(m: AssistantTurnEvt): void {
@@ -123,7 +173,16 @@ export function App() {
 
   function onSessionDone(m: SessionDoneEvt): void {
     setRunning(false);
-    setSessionId(null);
+    setProgress(null);
+    setPaused(null);
+    // NOTE: deliberately NOT clearing sessionId — follow-up messages stay
+    // in the same DeepSeek conversation so the chatbot keeps context. The
+    // user explicitly starts a new conversation via the header "+ 新对话"
+    // button (which calls onNewChat). On 'user_abort' / 'error' we also
+    // drop the binding since the session ended unhealthy.
+    if (m.reason === 'error' || m.reason === 'user_abort') {
+      setSessionId(null);
+    }
     setTurns((cur) => [
       ...cur,
       {
@@ -157,18 +216,23 @@ export function App() {
 
   async function onSend(): Promise<void> {
     const text = input.trim();
-    if (!text || running) return;
-    const sid = makeSessionId();
+    if (!text || running || paused) return;
+    // Reuse sessionId across follow-up messages so the SW can continue in
+    // the same DeepSeek conversation. Only allocate a new one if we're
+    // starting fresh (no prior session) or the previous one ended.
+    const sid = sessionId ?? makeSessionId();
     setSessionId(sid);
     setRunning(true);
     setInput('');
+    setProgress({ iteration: 0, phase: 'injecting' });
     setTurns((cur) => [...cur, { role: 'user', text, ts: Date.now() }]);
     const req: UserMessageReq = { type: 'USER_MESSAGE', sessionId: sid, text };
-    try {
-      await chrome.runtime.sendMessage(req);
-    } catch (e) {
+    // Fire-and-forget: SW early-acks. All further progress arrives via
+    // events (ITERATION_PROGRESS / ASSISTANT_TURN / SESSION_DONE / ...).
+    chrome.runtime.sendMessage(req).catch((e) => {
       setRunning(false);
       setSessionId(null);
+      setProgress(null);
       setTurns((cur) => [
         ...cur,
         {
@@ -178,13 +242,55 @@ export function App() {
           ts: Date.now(),
         },
       ]);
-    }
+    });
   }
 
   function onAbort(): void {
     if (!sessionId) return;
     const req: AbortSessionReq = { type: 'ABORT_SESSION', sessionId };
     void chrome.runtime.sendMessage(req).catch(() => {});
+  }
+
+  function onResume(): void {
+    if (!sessionId) return;
+    const req: ResumeSessionReq = { type: 'RESUME_SESSION', sessionId };
+    setPaused(null);
+    setRunning(true);
+    setProgress({ iteration: 0, phase: 'injecting' });
+    chrome.runtime.sendMessage(req).catch((e) => {
+      setRunning(false);
+      setProgress(null);
+      setTurns((cur) => [
+        ...cur,
+        {
+          role: 'system',
+          text: `恢复失败：${e instanceof Error ? e.message : String(e)}`,
+          level: 'error',
+          ts: Date.now(),
+        },
+      ]);
+    });
+  }
+
+  function onDiscard(): void {
+    if (!sessionId) return;
+    const req: DiscardSessionReq = { type: 'DISCARD_SESSION', sessionId };
+    chrome.runtime.sendMessage(req).catch(() => {});
+    setPaused(null);
+    setRunning(false);
+    setSessionId(null);
+    setProgress(null);
+  }
+
+  function onNewChat(): void {
+    if (running) {
+      // Abort the current run first so the SW doesn't hold the tab.
+      onAbort();
+    }
+    setSessionId(null);
+    setTurns([]);
+    setProgress(null);
+    setPaused(null);
   }
 
   function onOpenDeepseek(): void {
@@ -196,11 +302,6 @@ export function App() {
       }, 1500);
       setTimeout(() => clearInterval(t), 60_000);
     });
-  }
-
-  function onClearChat(): void {
-    if (running) return;
-    setTurns([]);
   }
 
   function onKeyDown(ev: KeyboardEvent): void {
@@ -234,8 +335,12 @@ export function App() {
           {statusText}
         </span>
         <span class="header-actions">
-          <button class="icon-btn" title="清空当前对话" onClick={onClearChat} disabled={running}>
-            ⟳
+          <button
+            class="icon-btn"
+            title="开始一个新对话（结束当前对话，DeepSeek 会换新的 conversation）"
+            onClick={onNewChat}
+          >
+            + 新对话
           </button>
           <button class="icon-btn" title="设置 / 日志" onClick={() => setShowDrawer((v) => !v)}>
             ⚙
@@ -248,20 +353,24 @@ export function App() {
         {turns.map((t, i) => (
           <TurnView key={i} turn={t} />
         ))}
+        {progress && !paused && <ProgressBanner progress={progress} />}
+        {paused && <PausedBanner paused={paused} onResume={onResume} onDiscard={onDiscard} />}
       </div>
 
       <footer>
         <div class="input-row">
           <textarea
             placeholder={
-              statusKind === 'err'
-                ? '先点击右上角连接 DeepSeek…'
-                : '问我点什么，比如：帮我看看小红书首页最近有什么内容'
+              paused
+                ? '会话已暂停，先点上方"恢复"或"丢弃"…'
+                : statusKind === 'err'
+                  ? '先点击右上角连接 DeepSeek…'
+                  : '问我点什么，比如：帮我看看小红书首页最近有什么内容'
             }
             value={input}
             onInput={(e) => setInput((e.target as HTMLTextAreaElement).value)}
             onKeyDown={onKeyDown}
-            disabled={statusKind === 'err'}
+            disabled={statusKind === 'err' || !!paused}
             rows={2}
           />
           {running ? (
@@ -272,7 +381,7 @@ export function App() {
             <button
               class="primary"
               onClick={onSend}
-              disabled={!input.trim() || statusKind === 'err'}
+              disabled={!input.trim() || statusKind === 'err' || !!paused}
             >
               发送
             </button>
@@ -295,6 +404,70 @@ export function App() {
         />
       )}
     </>
+  );
+}
+
+function ProgressBanner({ progress }: { progress: ProgressState }) {
+  const label =
+    progress.phase === 'injecting'
+      ? `正在把消息注入到 DeepSeek tab…`
+      : progress.phase === 'streaming'
+        ? `DeepSeek 正在生成 (~${progress.textLen ?? 0} 字)…`
+        : `DeepSeek 思考中… (iter ${progress.iteration})`;
+  return (
+    <div class="progress-banner">
+      <span class="dots">
+        <span class="d1" />
+        <span class="d2" />
+        <span class="d3" />
+      </span>
+      <span>{label}</span>
+    </div>
+  );
+}
+
+function PausedBanner({
+  paused,
+  onResume,
+  onDiscard,
+}: {
+  paused: PausedState;
+  onResume: () => void;
+  onDiscard: () => void;
+}) {
+  const reasonText =
+    paused.reason === 'tab_closed'
+      ? 'DeepSeek 标签页已关闭'
+      : paused.reason === 'tab_navigated_away'
+        ? 'DeepSeek 标签页跳到了其他网站'
+        : paused.reason === 'conv_mismatch'
+          ? '该标签页切换到了另一个 DeepSeek 会话'
+          : 'DeepSeek 标签页未就绪';
+  return (
+    <div class="paused-banner">
+      <div class="title">⏸ 会话已暂停 · {reasonText}</div>
+      {paused.conversationUrl && (
+        <div class="hint">
+          恢复将打开原会话:{' '}
+          <a href={paused.conversationUrl} target="_blank" rel="noopener noreferrer">
+            {paused.conversationUrl.replace('https://chat.deepseek.com', '')}
+          </a>
+        </div>
+      )}
+      {paused.pendingPromptPreview && (
+        <div class="hint preview">未送达的消息预览: {paused.pendingPromptPreview}…</div>
+      )}
+      <div class="actions">
+        {paused.conversationUrl && (
+          <button class="primary" onClick={onResume}>
+            恢复
+          </button>
+        )}
+        <button class="secondary" onClick={onDiscard}>
+          丢弃
+        </button>
+      </div>
+    </div>
   );
 }
 

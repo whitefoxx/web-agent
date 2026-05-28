@@ -36,6 +36,23 @@ export interface ChatbotResponse {
   cleanedText: string;
   reasoningText?: string;
   commands: ParsedCommand[];
+  /** location.href captured at response completion — used by the SW to keep
+   * the session's conversationId/Url up to date. */
+  currentUrl?: string;
+}
+
+/** Error class the Driver throws (from `inject` or `waitForResponse`) when
+ * the chatbot tab disappeared mid-iteration. Orchestrator catches this and
+ * transitions the session into `paused` (preserving `pendingPrompt`) rather
+ * than `error`, so the SidePanel can offer Resume. */
+export class TabUnavailableError extends Error {
+  constructor(
+    public reason: 'tab_closed' | 'tab_navigated_away' | 'conv_mismatch' | 'tab_not_ready',
+    message: string,
+  ) {
+    super(message);
+    this.name = 'TabUnavailableError';
+  }
 }
 
 export interface ToolExecResult {
@@ -66,6 +83,8 @@ export type SessionDoneReason =
   | 'error'
   | 'user_abort';
 
+export type IterationPhase = 'starting' | 'injecting' | 'awaiting' | 'completed';
+
 export type OrchEvent =
   | {
       type: 'assistant_turn';
@@ -76,6 +95,17 @@ export type OrchEvent =
       commands: ParsedCommand[];
     }
   | { type: 'tool_trace'; trace: ToolTrace }
+  | {
+      type: 'iteration_progress';
+      iteration: number;
+      iterationId: string;
+      phase: IterationPhase;
+    }
+  | {
+      type: 'session_paused';
+      reason: 'tab_closed' | 'tab_navigated_away' | 'conv_mismatch' | 'tab_not_ready';
+      pendingPromptPreview: string;
+    }
   | {
       type: 'session_done';
       reason: SessionDoneReason;
@@ -90,6 +120,19 @@ export interface RunOptions {
   maxIterations?: number;
   /** Skip the write-op safety filter when listing tools in the first turn. */
   showAllTools?: boolean;
+  /** When true: treat this as a Resume call.
+   *  - Don't append a new user turn to history (already there from initial run).
+   *  - Don't call startFreshChat.
+   *  - Use session.pendingPrompt as the prompt for the next iteration rather
+   *    than re-building the first-turn prompt around userText. */
+  resume?: boolean;
+  /** When true: this is a follow-up user message inside the same DeepSeek
+   *  conversation (session.history already has prior turns).
+   *  - Don't call startFreshChat — we want to stay in the same conv.
+   *  - Don't re-inject the system prompt — DeepSeek already has it from the
+   *    very first turn of this conversation.
+   *  - Just inject `userText` verbatim. */
+  continuation?: boolean;
 }
 
 const DEFAULT_MAX_ITERATIONS = 8;
@@ -98,32 +141,78 @@ const DEFAULT_RESPONSE_TIMEOUT_MS = 5 * 60 * 1000;
 export async function runSession(opts: RunOptions): Promise<void> {
   const { session, userText, driver } = opts;
   const maxIter = opts.maxIterations ?? DEFAULT_MAX_ITERATIONS;
-  log('loop', `session=${session.id} run() begin`, { userText: userText.slice(0, 80) });
+  log('loop', `session=${session.id} run() begin`, {
+    userText: userText.slice(0, 80),
+    resume: !!opts.resume,
+    continuation: !!opts.continuation,
+  });
 
   session.status = 'running';
-  appendTurn(session, { role: 'user', text: userText, ts: Date.now() });
+  session.pauseReason = null;
+  if (!opts.resume) {
+    appendTurn(session, { role: 'user', text: userText, ts: Date.now() });
+    // Reset the iteration counter so each user-facing turn gets a fresh
+    // budget of inject attempts (otherwise a single multi-tool first turn
+    // would starve all later turns).
+    session.iterations = 0;
+  }
   await saveSession(session);
 
-  // Start fresh chat in the chatbot tab if the driver supports it.
-  try {
-    await driver.startFreshChat?.();
-  } catch (e) {
-    warn('loop', 'startFreshChat failed (continuing in existing conversation)', e);
+  // First-time launch: optionally click "New chat" in the chatbot tab. Skip
+  // on resume (we're already inside the right conversation) and on
+  // continuation (we want to stay in the same conv as prior turns).
+  if (!opts.resume && !opts.continuation) {
+    try {
+      await driver.startFreshChat?.();
+    } catch (e) {
+      warn('loop', 'startFreshChat failed (continuing in existing conversation)', e);
+    }
   }
 
-  let nextPrompt = buildFirstTurnPrompt({ userText, showAllTools: opts.showAllTools });
+  let nextPrompt: string;
+  if (opts.resume && session.pendingPrompt) {
+    // Mid-iteration pause — re-inject the queued prompt verbatim.
+    nextPrompt = session.pendingPrompt;
+    log('loop', `resume with pendingPrompt (${nextPrompt.length} chars)`);
+  } else if (opts.continuation) {
+    // Follow-up turn in the same conv. DeepSeek already has the system
+    // prompt — just send the user's new message as-is.
+    nextPrompt = userText;
+    log('loop', `continuation with bare userText (${nextPrompt.length} chars)`);
+  } else {
+    // Brand-new conversation: inject the full first-turn prompt.
+    nextPrompt = buildFirstTurnPrompt({ userText, showAllTools: opts.showAllTools });
+  }
 
-  for (session.iterations = 0; session.iterations < maxIter; session.iterations++) {
+  for (; session.iterations < maxIter; session.iterations++) {
     if (opts.signal?.aborted) return finish('user_abort');
 
     const iterationId = newIterationId(session);
     log('loop', `iter ${session.iterations} → inject (${nextPrompt.length} chars)`);
+    session.pendingPrompt = nextPrompt;
+    await saveSession(session);
+
+    driver.emit({
+      type: 'iteration_progress',
+      iteration: session.iterations,
+      iterationId,
+      phase: 'injecting',
+    });
+
     try {
       await driver.inject({ iterationId, text: nextPrompt });
     } catch (e) {
+      if (e instanceof TabUnavailableError) return pause(e.reason, e.message);
       logError('loop', 'inject failed', e);
       return finish('error', e instanceof Error ? e.message : String(e));
     }
+
+    driver.emit({
+      type: 'iteration_progress',
+      iteration: session.iterations,
+      iterationId,
+      phase: 'awaiting',
+    });
 
     let response: ChatbotResponse;
     try {
@@ -132,6 +221,7 @@ export async function runSession(opts: RunOptions): Promise<void> {
         timeoutMs: DEFAULT_RESPONSE_TIMEOUT_MS,
       });
     } catch (e) {
+      if (e instanceof TabUnavailableError) return pause(e.reason, e.message);
       logError('loop', 'waitForResponse failed', e);
       return finish('error', e instanceof Error ? e.message : String(e));
     }
@@ -142,6 +232,8 @@ export async function runSession(opts: RunOptions): Promise<void> {
       commandCount: response.commands.length,
     });
 
+    // Successful response — clear pendingPrompt and capture conv URL if any.
+    session.pendingPrompt = null;
     appendTurn(session, {
       role: 'assistant',
       cleanedText: response.cleanedText,
@@ -157,6 +249,12 @@ export async function runSession(opts: RunOptions): Promise<void> {
       rawText: response.rawText,
       reasoningText: response.reasoningText,
       commands: response.commands,
+    });
+    driver.emit({
+      type: 'iteration_progress',
+      iteration: session.iterations,
+      iterationId,
+      phase: 'completed',
     });
     await saveSession(session);
 
@@ -183,9 +281,25 @@ export async function runSession(opts: RunOptions): Promise<void> {
 
   function finish(reason: SessionDoneReason, err?: string): void {
     session.status = reason === 'error' ? 'error' : reason === 'user_abort' ? 'aborted' : 'idle';
+    session.pendingPrompt = null;
     void saveSession(session);
     driver.emit({ type: 'session_done', reason, error: err });
     log('loop', `session=${session.id} done`, { reason, err });
+  }
+
+  function pause(
+    reason: 'tab_closed' | 'tab_navigated_away' | 'conv_mismatch' | 'tab_not_ready',
+    detail: string,
+  ): void {
+    session.status = 'paused';
+    session.pauseReason = reason;
+    void saveSession(session);
+    driver.emit({
+      type: 'session_paused',
+      reason,
+      pendingPromptPreview: (session.pendingPrompt ?? '').slice(0, 120),
+    });
+    warn('loop', `session=${session.id} paused`, { reason, detail });
   }
 }
 

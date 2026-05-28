@@ -282,6 +282,100 @@ header .title {
   font-size: 11px;
 }
 
+/* ───────── progress banner (in-flight iteration) ───────── */
+
+.progress-banner {
+  align-self: stretch;
+  background: var(--bubble-tool);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.progress-banner .dots {
+  display: inline-flex;
+  gap: 3px;
+}
+.progress-banner .dots span {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  display: inline-block;
+  animation: progress-bounce 1.2s infinite ease-in-out;
+}
+.progress-banner .dots .d2 {
+  animation-delay: 0.15s;
+}
+.progress-banner .dots .d3 {
+  animation-delay: 0.3s;
+}
+@keyframes progress-bounce {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.4;
+  }
+  30% {
+    transform: translateY(-3px);
+    opacity: 1;
+  }
+}
+
+/* ───────── paused banner (red, with actions) ───────── */
+
+.paused-banner {
+  align-self: stretch;
+  background: var(--bubble-error);
+  border: 1px solid var(--err);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.paused-banner .title {
+  font-weight: 600;
+  color: var(--err);
+  margin-bottom: 4px;
+}
+.paused-banner .hint {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 2px;
+  word-break: break-all;
+}
+.paused-banner .hint.preview {
+  color: var(--err);
+  opacity: 0.9;
+}
+.paused-banner .hint a {
+  color: var(--accent);
+}
+.paused-banner .actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+.paused-banner .actions button {
+  border: none;
+  border-radius: 6px;
+  padding: 5px 12px;
+  font: inherit;
+  cursor: pointer;
+}
+.paused-banner .actions .primary {
+  background: var(--err);
+  color: white;
+}
+.paused-banner .actions .secondary {
+  background: white;
+  color: var(--fg);
+  border: 1px solid var(--border);
+}
+
 .raw-text {
   margin-top: 6px;
   font-size: 11px;

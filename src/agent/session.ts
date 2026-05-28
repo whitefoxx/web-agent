@@ -44,13 +44,27 @@ export interface ToolTraceTurn {
 
 export type Turn = UserTurn | AssistantTurn | ToolTraceTurn;
 
+export type SessionStatus = 'idle' | 'running' | 'paused' | 'aborted' | 'error';
+
 export interface SessionState {
   id: string;
   createdAt: number;
   updatedAt: number;
   chatbot: 'deepseek';
   chatbotTabId: number | null;
-  status: 'idle' | 'running' | 'aborted' | 'error';
+  /** DeepSeek conversation UUID (from /a/chat/s/<uuid>). Null until first
+   * response is received. */
+  conversationId: string | null;
+  /** Full deepseek URL captured at last successful response — used as the
+   * landing URL when Resume opens a fresh tab. */
+  conversationUrl: string | null;
+  /** Prompt that was queued for the next iteration but hasn't been
+   * successfully delivered + answered yet. Resume re-injects this. Cleared
+   * once a response arrives. */
+  pendingPrompt: string | null;
+  /** Reason last pause happened, if status='paused'. */
+  pauseReason: 'tab_closed' | 'tab_navigated_away' | 'conv_mismatch' | 'tab_not_ready' | null;
+  status: SessionStatus;
   iterations: number;
   history: Turn[];
 }
@@ -65,10 +79,37 @@ export function makeSession(id: string): SessionState {
     updatedAt: Date.now(),
     chatbot: 'deepseek',
     chatbotTabId: null,
+    conversationId: null,
+    conversationUrl: null,
+    pendingPrompt: null,
+    pauseReason: null,
     status: 'idle',
     iterations: 0,
     history: [],
   };
+}
+
+/** Parse the DeepSeek conversation UUID out of a tab URL.
+ * Example: https://chat.deepseek.com/a/chat/s/b939e551-c798-4fc9-baef-29ac5282237b
+ * → "b939e551-c798-4fc9-baef-29ac5282237b". Returns null for the
+ * homepage (`/`) or any other URL. */
+export function parseConversationUrl(
+  url: string | undefined | null,
+): { conversationId: string; conversationUrl: string } | null {
+  if (!url) return null;
+  const m = url.match(/https:\/\/chat\.deepseek\.com\/a\/chat\/s\/([0-9a-fA-F-]{16,})/);
+  if (!m) return null;
+  return { conversationId: m[1], conversationUrl: url };
+}
+
+/** Strip the conversation suffix back to the DeepSeek base URL — handy for
+ * recognising an "idle" tab that can be claimed by a new session. */
+export function isDeepseekIdleUrl(url: string | undefined | null): boolean {
+  if (!url) return false;
+  // Treat the homepage and any not-yet-started chat as idle. We DON'T treat
+  // /a/chat/s/<uuid> as idle (that tab is already running a conversation).
+  if (!url.startsWith('https://chat.deepseek.com')) return false;
+  return !/\/a\/chat\/s\//.test(url);
 }
 
 export function appendTurn(s: SessionState, t: Turn): void {
