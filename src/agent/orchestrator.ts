@@ -22,6 +22,7 @@
  */
 
 import {
+  buildContinuationReminder,
   buildFirstTurnPrompt,
   formatDescribeToolResult,
   formatListToolsResult,
@@ -137,6 +138,10 @@ export interface RunOptions {
 
 const DEFAULT_MAX_ITERATIONS = 8;
 const DEFAULT_RESPONSE_TIMEOUT_MS = 5 * 60 * 1000;
+/** Number of continuation user turns (since the last full prompt injection)
+ * we tolerate before re-injecting the full system prompt. The chatbot tends
+ * to drift away from the protocol after this many turns. */
+const FULL_PROMPT_REFRESH_INTERVAL = 6;
 
 export async function runSession(opts: RunOptions): Promise<void> {
   const { session, userText, driver } = opts;
@@ -171,17 +176,36 @@ export async function runSession(opts: RunOptions): Promise<void> {
 
   let nextPrompt: string;
   if (opts.resume && session.pendingPrompt) {
-    // Mid-iteration pause — re-inject the queued prompt verbatim.
+    // Mid-iteration pause — re-inject the queued prompt verbatim. Don't
+    // touch turnsSinceFullPrompt: whatever the prompt was, it's already
+    // been counted (or not) when first built.
     nextPrompt = session.pendingPrompt;
     log('loop', `resume with pendingPrompt (${nextPrompt.length} chars)`);
   } else if (opts.continuation) {
     // Follow-up turn in the same conv. DeepSeek already has the system
-    // prompt — just send the user's new message as-is.
-    nextPrompt = userText;
-    log('loop', `continuation with bare userText (${nextPrompt.length} chars)`);
+    // prompt, but it tends to drift over many turns — periodically
+    // re-anchor with the full prompt; in between, send a short reminder
+    // tacked onto the user's message. Increment-then-check semantics so
+    // that with INTERVAL=N the Nth follow-up turn is the re-anchor.
+    session.turnsSinceFullPrompt += 1;
+    if (session.turnsSinceFullPrompt >= FULL_PROMPT_REFRESH_INTERVAL) {
+      nextPrompt = buildFirstTurnPrompt({ userText, showAllTools: opts.showAllTools });
+      session.turnsSinceFullPrompt = 0;
+      log(
+        'loop',
+        `continuation re-anchoring with full prompt (every ${FULL_PROMPT_REFRESH_INTERVAL} turns)`,
+      );
+    } else {
+      nextPrompt = buildContinuationReminder(userText);
+      log(
+        'loop',
+        `continuation with reminder (turn ${session.turnsSinceFullPrompt}/${FULL_PROMPT_REFRESH_INTERVAL})`,
+      );
+    }
   } else {
     // Brand-new conversation: inject the full first-turn prompt.
     nextPrompt = buildFirstTurnPrompt({ userText, showAllTools: opts.showAllTools });
+    session.turnsSinceFullPrompt = 0;
   }
 
   for (; session.iterations < maxIter; session.iterations++) {

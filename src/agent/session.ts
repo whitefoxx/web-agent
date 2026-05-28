@@ -64,6 +64,14 @@ export interface SessionState {
   pendingPrompt: string | null;
   /** Reason last pause happened, if status='paused'. */
   pauseReason: 'tab_closed' | 'tab_navigated_away' | 'conv_mismatch' | 'tab_not_ready' | null;
+  /** How many user-initiated turns have happened since we last re-injected
+   * the full system prompt. After ~N follow-up turns the chatbot tends to
+   * drift back to its default behaviour (using its own knowledge / built-in
+   * search instead of agent-command tools), so the orchestrator periodically
+   * refreshes the prompt to anchor it. Reset to 0 on every full-prompt
+   * injection; only incremented on continuation turns that just got a
+   * lightweight reminder. */
+  turnsSinceFullPrompt: number;
   status: SessionStatus;
   iterations: number;
   history: Turn[];
@@ -83,6 +91,7 @@ export function makeSession(id: string): SessionState {
     conversationUrl: null,
     pendingPrompt: null,
     pauseReason: null,
+    turnsSinceFullPrompt: 0,
     status: 'idle',
     iterations: 0,
     history: [],
