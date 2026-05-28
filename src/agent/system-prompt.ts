@@ -12,15 +12,14 @@
 import { getRegistry } from '../runtime/registry.js';
 import type { AdapterDef, AdapterArg } from '../tools/manifest';
 
-/** Adapter names to hide from the first-turn overview. Write-ops live here
- * until per-action user confirmation lands. They still appear via
- * `describe_tool` so a determined chatbot can call them — but we want the
- * default path to favour read-only operations. */
-const HIDDEN_BY_DEFAULT = new Set([
-  'xiaohongshu__publish',
-  'xiaohongshu__comment-create',
-  'xiaohongshu__download',
-]);
+/** Adapter names to hide from the first-turn overview. Writes against the
+ * user's account (publish / comment-create) stay hidden until they're
+ * explicitly described — keeps the chatbot from absent-mindedly listing
+ * them as options. The runtime still gates them behind a per-call user
+ * confirmation dialog (see WRITE_CONFIRM_REQ wiring in service-worker.ts),
+ * so even if the chatbot describes-and-executes one, nothing fires
+ * without a green light from the user. */
+const HIDDEN_BY_DEFAULT = new Set(['xiaohongshu__publish', 'xiaohongshu__comment-create']);
 
 export interface BuildPromptOpts {
   userText: string;
@@ -310,6 +309,6 @@ const FLOW_GUIDE = `
 3. 一次只调用一个工具，等结果出来再决定下一步。
 4. 收集够信息后，**不要**再输出 \`<agent-command>\`——用自然语言直接回答用户。
 5. 工具失败时，看错误信息：可能是参数错了、用户没登录、被限流；不要无脑重试，重试 1 次仍失败就把情况告诉用户、问要不要换个思路。
-6. 涉及写操作（发布、评论、下载等）的工具默认隐藏；如果用户明确要求，先用 \`describe_tool\` 学习它，并在最终调用前**再次和用户确认**。
+6. 涉及账号写操作（发布笔记、评论回复等）的工具默认在概览里隐藏；如果用户明确要求，先用 \`describe_tool\` 学习它再调用。注意：所有 \`access: 'write'\` 工具在 \`execute_tool\` 时会触发用户**二次确认弹窗**，没用户点击同意你的调用就不会真正执行。这是兜底机制；你仍需自己先用自然语言征求用户意见，确认后再发起调用。
 7. 模糊请求要敢于反问，不要硬猜。比如「我想看看那个产品」—— 反问「哪个产品？或者你想我去小红书搜什么关键词？」。
 `;

@@ -26,6 +26,8 @@ import {
   type ToolTrace,
   type ToolTraceEvt,
   type UserMessageReq,
+  type WriteConfirmReq,
+  type WriteConfirmResp,
 } from '../connectors/messages';
 import type { SessionState, Turn } from '../agent/session';
 import type { LogEntry, LogConfig } from '../runtime/log';
@@ -53,6 +55,7 @@ export function App() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [progress, setProgress] = useState<ProgressState | null>(null);
   const [paused, setPaused] = useState<PausedState | null>(null);
+  const [pendingConfirms, setPendingConfirms] = useState<WriteConfirmReq[]>([]);
   const [tabStatus, setTabStatus] = useState<ChatbotTabStatusEvt | null>(null);
   const [showDrawer, setShowDrawer] = useState(false);
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -108,6 +111,9 @@ export function App() {
       case 'CHATBOT_BUSY':
         onChatbotBusy(m as ChatbotBusyEvt);
         break;
+      case 'WRITE_CONFIRM_REQ':
+        onWriteConfirmReq(m as WriteConfirmReq);
+        break;
       case 'LOG_ENTRY':
         setLogs((cur) => append(cur, (m as LogEntryEvt).entry, 500));
         break;
@@ -150,6 +156,24 @@ export function App() {
       reason: m.reason,
       conversationUrl: m.conversationUrl,
       pendingPromptPreview: m.pendingPromptPreview,
+    });
+  }
+
+  function onWriteConfirmReq(m: WriteConfirmReq): void {
+    setPendingConfirms((cur) => [...cur, m]);
+  }
+
+  function onDecideWrite(approved: boolean): void {
+    setPendingConfirms((cur) => {
+      const [first, ...rest] = cur;
+      if (!first) return cur;
+      const resp: WriteConfirmResp = {
+        type: 'WRITE_CONFIRM_RESP',
+        confirmId: first.confirmId,
+        approved,
+      };
+      chrome.runtime.sendMessage(resp).catch(() => {});
+      return rest;
     });
   }
 
@@ -370,6 +394,13 @@ export function App() {
         ))}
         {progress && !paused && <ProgressBanner progress={progress} />}
         {paused && <PausedBanner paused={paused} onResume={onResume} onDiscard={onDiscard} />}
+        {pendingConfirms.length > 0 && (
+          <WriteConfirmCard
+            req={pendingConfirms[0]}
+            queueLen={pendingConfirms.length}
+            onDecide={onDecideWrite}
+          />
+        )}
       </div>
 
       <footer>
@@ -500,6 +531,43 @@ function PausedBanner({
         )}
         <button class="secondary" onClick={onDiscard}>
           丢弃
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function WriteConfirmCard({
+  req,
+  queueLen,
+  onDecide,
+}: {
+  req: WriteConfirmReq;
+  queueLen: number;
+  onDecide: (approved: boolean) => void;
+}) {
+  const argsJson = useMemo(() => {
+    try {
+      return JSON.stringify(req.args ?? {}, null, 2);
+    } catch {
+      return String(req.args);
+    }
+  }, [req.args]);
+  return (
+    <div class="write-confirm">
+      <div class="title">⚠️ 写操作需要确认</div>
+      <div class="tool-name">
+        <code>{req.tool}</code>
+      </div>
+      {req.description && <div class="desc">{req.description}</div>}
+      <pre class="args">{argsJson}</pre>
+      {queueLen > 1 && <div class="queued">还有 {queueLen - 1} 个写操作排队等待</div>}
+      <div class="actions">
+        <button class="primary" onClick={() => onDecide(true)}>
+          确认执行
+        </button>
+        <button class="secondary" onClick={() => onDecide(false)}>
+          取消
         </button>
       </div>
     </div>

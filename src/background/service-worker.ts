@@ -36,6 +36,7 @@ import {
   type SessionState,
 } from '../agent/session';
 import { executeAdapter } from '../tools/dispatcher';
+import { lookupAdapter } from '../tools/manifest';
 import type {
   AbortSessionReq,
   AssistantTurnEvt,
@@ -64,6 +65,8 @@ import type {
   SessionSummary,
   ToolTraceEvt,
   UserMessageReq,
+  WriteConfirmReq,
+  WriteConfirmResp,
 } from '../connectors/messages';
 
 // Side-effect imports: each adapter file's top-level cli({...}) registers it
@@ -100,6 +103,11 @@ const pendingResponses = new Map<
   string,
   { resolve: (r: ChatbotResponse) => void; reject: (e: Error) => void; tabId: number }
 >();
+
+/** SidePanel-bound write-confirm prompts. Resolves true on approval,
+ * false on decline / timeout / panel close. */
+const pendingConfirmations = new Map<string, { resolve: (approved: boolean) => void }>();
+const WRITE_CONFIRM_TIMEOUT_MS = 5 * 60 * 1000;
 
 /* ───────── lifecycle ───────── */
 
@@ -256,6 +264,10 @@ chrome.runtime.onMessage.addListener((msg: unknown, sender, sendResponse): boole
     }
     case 'CHATBOT_ERROR': {
       handleChatbotError(m as ChatbotErrorEvt);
+      return false;
+    }
+    case 'WRITE_CONFIRM_RESP': {
+      handleWriteConfirmResp(m as WriteConfirmResp);
       return false;
     }
     case 'LOG_ENTRY': {
@@ -539,6 +551,52 @@ function handleChatbotResponse(m: ChatbotResponseEvt): void {
     reasoningText: m.reasoningText,
     commands: m.commands,
     currentUrl: m.currentUrl,
+  });
+}
+
+function handleWriteConfirmResp(m: WriteConfirmResp): void {
+  const pending = pendingConfirmations.get(m.confirmId);
+  if (!pending) {
+    warn(SCOPE, `unmatched WRITE_CONFIRM_RESP confirmId=${m.confirmId}`);
+    return;
+  }
+  pendingConfirmations.delete(m.confirmId);
+  log(SCOPE, `write confirm resolved confirmId=${m.confirmId}`, { approved: m.approved });
+  pending.resolve(m.approved);
+}
+
+/** Ask the SidePanel for explicit user approval before running a write
+ * adapter. Returns true on approve, false on decline / timeout. */
+function requestWriteConfirmation(
+  sessionId: string,
+  tool: string,
+  args: Record<string, unknown>,
+  description?: string,
+): Promise<boolean> {
+  const confirmId = `c_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+  log(SCOPE, `requesting write-confirm for ${tool}`, { confirmId, args });
+  return new Promise<boolean>((resolve) => {
+    const timer = setTimeout(() => {
+      if (!pendingConfirmations.has(confirmId)) return;
+      pendingConfirmations.delete(confirmId);
+      warn(SCOPE, `write-confirm timeout confirmId=${confirmId}`);
+      resolve(false);
+    }, WRITE_CONFIRM_TIMEOUT_MS);
+    pendingConfirmations.set(confirmId, {
+      resolve: (approved: boolean) => {
+        clearTimeout(timer);
+        resolve(approved);
+      },
+    });
+    const req: WriteConfirmReq = {
+      type: 'WRITE_CONFIRM_REQ',
+      sessionId,
+      confirmId,
+      tool,
+      args,
+      description,
+    };
+    sendToSidepanel(req);
   });
 }
 
@@ -878,7 +936,31 @@ function makeDriver(sessionId: string, tabId: number): Driver {
         });
       });
     },
-    executeTool: (opts) => executeAdapter(opts) as Promise<ToolExecResult>,
+    executeTool: async (opts) => {
+      // Gate write-ops behind explicit user approval. The chatbot's
+      // system prompt already tells it to confirm in natural language
+      // first; this is a runtime safety net so a runaway chatbot can't
+      // post or reply on the user's account without the user clicking
+      // through.
+      const adapter = lookupAdapter(opts.tool);
+      if (adapter?.access === 'write') {
+        const approved = await requestWriteConfirmation(
+          sessionId,
+          opts.tool,
+          opts.args,
+          adapter.description,
+        );
+        if (!approved) {
+          return {
+            ok: false,
+            error: 'User declined to execute this write operation.',
+            errorKind: 'generic',
+            durationMs: 0,
+          };
+        }
+      }
+      return executeAdapter(opts) as Promise<ToolExecResult>;
+    },
     emit(evt) {
       forwardOrchEvent(sessionId, evt);
     },

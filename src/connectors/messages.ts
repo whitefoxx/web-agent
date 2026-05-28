@@ -120,6 +120,27 @@ export interface DeleteSessionReq {
   sessionId: string;
 }
 
+/** SW asks the SidePanel for explicit user approval before running an
+ * adapter declared `access: 'write'` (xiaohongshu publish / comment-create
+ * today). The dispatcher blocks on the user's decision. */
+export interface WriteConfirmReq {
+  type: 'WRITE_CONFIRM_REQ';
+  sessionId: string;
+  confirmId: string;
+  tool: string;
+  args: Record<string, unknown>;
+  description?: string;
+}
+
+/** SidePanel's reply. `approved: false` (including timeout / panel-close)
+ * causes the dispatcher to short-circuit with a structured tool error so
+ * the chatbot sees the decline. */
+export interface WriteConfirmResp {
+  type: 'WRITE_CONFIRM_RESP';
+  confirmId: string;
+  approved: boolean;
+}
+
 /* ───────── Service Worker → SidePanel ───────── */
 
 export interface AssistantTurnEvt {
@@ -303,6 +324,8 @@ export type Message =
   | GetSessionReq
   | GetSessionResp
   | DeleteSessionReq
+  | WriteConfirmReq
+  | WriteConfirmResp
   | AssistantTurnEvt
   | ToolTraceEvt
   | SessionDoneEvt

@@ -376,6 +376,76 @@ header .title {
   border: 1px solid var(--border);
 }
 
+/* ───────── write confirmation card ───────── */
+
+.write-confirm {
+  align-self: stretch;
+  background: #fffbeb;
+  border: 1px solid var(--warn);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.write-confirm .title {
+  font-weight: 600;
+  color: #92400e;
+  margin-bottom: 6px;
+}
+.write-confirm .tool-name {
+  margin-bottom: 4px;
+}
+.write-confirm .tool-name code {
+  font-family: 'SFMono-Regular', Menlo, Monaco, Consolas, monospace;
+  background: white;
+  border: 1px solid var(--border);
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 12px;
+}
+.write-confirm .desc {
+  color: var(--muted);
+  font-size: 11px;
+  margin-bottom: 4px;
+}
+.write-confirm .args {
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px 8px;
+  margin: 6px 0;
+  overflow-x: auto;
+  font-family: 'SFMono-Regular', Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  max-height: 220px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+}
+.write-confirm .queued {
+  color: var(--muted);
+  font-size: 11px;
+  font-style: italic;
+}
+.write-confirm .actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+.write-confirm .actions button {
+  border: none;
+  border-radius: 6px;
+  padding: 6px 14px;
+  font: inherit;
+  cursor: pointer;
+}
+.write-confirm .actions .primary {
+  background: var(--warn);
+  color: white;
+}
+.write-confirm .actions .secondary {
+  background: white;
+  color: var(--fg);
+  border: 1px solid var(--border);
+}
+
 .raw-text {
   margin-top: 6px;
   font-size: 11px;
