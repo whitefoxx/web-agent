@@ -27,7 +27,10 @@ import {
   findSendButton,
   findNewChatButton,
   findBusyIndicator,
+  findCopyButtonIn,
+  findRegenerateButtonIn,
   findRetryButtonNear,
+  findStoppedIndicatorIn,
   isSendEnabled,
   probeDomReady,
   extractMarkdownFromDom,
@@ -57,7 +60,17 @@ const STREAMING_NOTIFY_MS = 1000; // send CHATBOT_STREAMING at most once per sec
  * CHATBOT_ERROR so the orchestrator surfaces the failure to the user. */
 const BUSY_RETRY_BACKOFFS_MS = [5_000, 15_000, 30_000];
 
-type WatchPhase = 'observing' | 'busy_waiting' | 'finished';
+/** Backoff for clicking the per-message "Regenerate" button when DeepSeek
+ * stops mid-generation (the thinking header shows "Stopped"). Shorter than
+ * busy backoff — this is a local hiccup, not a server-side load problem. */
+const STOPPED_REGEN_BACKOFFS_MS = [2_000, 5_000];
+
+/** After clicking Regenerate, suppress further Stopped detection for this
+ * many ms — gives the previous attempt's "Stopped" span time to be torn
+ * down before we re-check. */
+const STOPPED_COOLDOWN_MS = 5_000;
+
+type WatchPhase = 'observing' | 'busy_waiting' | 'stopped_waiting' | 'finished';
 
 interface ActiveWatch {
   iterationId: string;
@@ -69,6 +82,12 @@ interface ActiveWatch {
   stabilityHandle: ReturnType<typeof setTimeout> | null;
   busyRetryHandle: ReturnType<typeof setTimeout> | null;
   busyRetryCount: number;
+  regenerateHandle: ReturnType<typeof setTimeout> | null;
+  regenerateCount: number;
+  /** Earliest Date.now() at which Stopped detection is allowed to fire
+   * again. Used as a cool-down after clicking Regenerate so we don't
+   * re-trigger on the previous attempt's lingering "Stopped" span. */
+  stoppedSuppressUntil: number;
   phase: WatchPhase;
   lastSnapshot: string;
   lastStreamingNotifyTs: number;
@@ -76,13 +95,59 @@ interface ActiveWatch {
 
 let activeWatch: ActiveWatch | null = null;
 
+/** Captures from our MAIN-world clipboard-tap. We don't keep a long
+ * history; we just need the most-recent one to correlate with the Copy
+ * click we just issued. */
+let lastClipboardCapture: { text: string; ts: number } | null = null;
+
 bootstrap();
 
 async function bootstrap(): Promise<void> {
   log(SCOPE, 'content script loaded', { url: location.href });
   chrome.runtime.onMessage.addListener(handleMessage);
+  window.addEventListener('message', handleWindowMessage);
   await sleep(200); // let the page settle a beat
   void announceReady();
+}
+
+function handleWindowMessage(ev: MessageEvent): void {
+  if (ev.source !== window) return;
+  const data = ev.data as { __webchatAgent?: string; text?: string; ts?: number } | null;
+  if (!data || data.__webchatAgent !== 'clipboard-write') return;
+  if (typeof data.text !== 'string') return;
+  lastClipboardCapture = { text: data.text, ts: data.ts ?? Date.now() };
+}
+
+/** Try to harvest the assistant message's canonical markdown by clicking
+ * DeepSeek's own "Copy" button: its handler hands the markdown to
+ * navigator.clipboard.writeText, which our MAIN-world tap intercepts and
+ * forwards via window.postMessage. Returns null if the button isn't there
+ * or no clipboard event fires within `timeoutMs`. */
+async function captureMarkdownViaCopy(
+  messageItem: HTMLElement,
+  timeoutMs = 1500,
+): Promise<string | null> {
+  const btn = findCopyButtonIn(messageItem);
+  if (!btn) {
+    log(SCOPE, 'captureMarkdownViaCopy: no copy button found');
+    return null;
+  }
+  const before = lastClipboardCapture?.ts ?? 0;
+  try {
+    btn.click();
+  } catch (e) {
+    warn(SCOPE, 'copy button .click() threw', e);
+    return null;
+  }
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (lastClipboardCapture && lastClipboardCapture.ts > before) {
+      return lastClipboardCapture.text;
+    }
+    await sleep(40);
+  }
+  log(SCOPE, 'captureMarkdownViaCopy: timed out waiting for clipboard tap');
+  return null;
 }
 
 async function announceReady(): Promise<void> {
@@ -193,6 +258,9 @@ function startWatch(sessionId: string, iterationId: string, baselineKey: number)
     stabilityHandle: null,
     busyRetryHandle: null,
     busyRetryCount: 0,
+    regenerateHandle: null,
+    regenerateCount: 0,
+    stoppedSuppressUntil: 0,
     phase: 'observing',
     lastSnapshot: '',
     lastStreamingNotifyTs: 0,
@@ -211,6 +279,13 @@ function startWatch(sessionId: string, iterationId: string, baselineKey: number)
     }
     const el = findLatestAssistantMessage(watch.baselineKey);
     if (!el) return;
+    // Check for "Stopped" — DeepSeek's thinking ended without producing a
+    // response. Suppressed for STOPPED_COOLDOWN_MS after a regenerate
+    // click so we don't loop on the prior attempt's residual span.
+    if (Date.now() >= watch.stoppedSuppressUntil && findStoppedIndicatorIn(el)) {
+      onStopped(el);
+      return;
+    }
     const snapshot = (el.querySelector(ASSISTANT_BODY)?.textContent ?? '').trim();
     if (snapshot.length === 0) return;
     if (snapshot === watch.lastSnapshot) {
@@ -274,8 +349,48 @@ function startWatch(sessionId: string, iterationId: string, baselineKey: number)
     return fresh ? findRetryButtonNear(fresh) : null;
   }
 
+  function onStopped(messageEl: HTMLElement): void {
+    if (watch.regenerateCount >= STOPPED_REGEN_BACKOFFS_MS.length) {
+      finishWithError(
+        'stopped_exhausted',
+        `DeepSeek stopped generation ${watch.regenerateCount} times.`,
+      );
+      return;
+    }
+    const wait = STOPPED_REGEN_BACKOFFS_MS[watch.regenerateCount];
+    watch.regenerateCount += 1;
+    watch.phase = 'stopped_waiting';
+    if (watch.stabilityHandle) {
+      clearTimeout(watch.stabilityHandle);
+      watch.stabilityHandle = null;
+    }
+    log(
+      SCOPE,
+      `chatbot stopped detected — regenerate ${watch.regenerateCount}/${STOPPED_REGEN_BACKOFFS_MS.length} in ${wait}ms`,
+    );
+    void sendBusy(watch.sessionId, watch.iterationId, watch.regenerateCount, wait, 'stopped');
+    watch.regenerateHandle = setTimeout(() => {
+      if (watch.phase !== 'stopped_waiting') return;
+      // Re-resolve the message item each time — virtual scrolling may have
+      // re-rendered it. Fall back to the captured element if that fails.
+      const fresh = findLatestAssistantMessage(watch.baselineKey) ?? messageEl;
+      const btn = findRegenerateButtonIn(fresh);
+      if (!btn) {
+        finishWithError('stopped_exhausted', 'Regenerate button not found');
+        return;
+      }
+      log(SCOPE, 'clicking DeepSeek regenerate button');
+      btn.click();
+      // Reset observer state so the next attempt is detected fresh, and
+      // suppress further Stopped checks until the cool-down expires.
+      watch.lastSnapshot = '';
+      watch.stoppedSuppressUntil = Date.now() + STOPPED_COOLDOWN_MS;
+      watch.phase = 'observing';
+    }, wait);
+  }
+
   function finishWithError(
-    reason: 'busy_exhausted' | 'timeout' | 'unknown',
+    reason: 'busy_exhausted' | 'stopped_exhausted' | 'timeout' | 'unknown',
     message?: string,
   ): void {
     if (watch.phase === 'finished') return;
@@ -300,9 +415,13 @@ function startWatch(sessionId: string, iterationId: string, baselineKey: number)
     }
     watch.phase = 'finished';
     cleanup();
+    void completeStable();
+  }
+
+  async function completeStable(): Promise<void> {
     const el = findLatestAssistantMessage(watch.baselineKey);
     if (!el) {
-      logError(SCOPE, 'finish: no assistant element', { reason });
+      logError(SCOPE, 'finish: no assistant element');
       void sendChatbotResponse({
         sessionId: watch.sessionId,
         iterationId: watch.iterationId,
@@ -314,10 +433,25 @@ function startWatch(sessionId: string, iterationId: string, baselineKey: number)
     }
     const assistantBody = el.querySelector(ASSISTANT_BODY) as HTMLElement | null;
     const thinkBody = el.querySelector(THINK_CONTENT) as HTMLElement | null;
-    const rawMd = assistantBody ? extractMarkdownFromDom(assistantBody) : '';
+
+    // PRIMARY: click DeepSeek's own "Copy" button — its handler hands the
+    // canonical markdown to navigator.clipboard.writeText, which our
+    // MAIN-world tap captures via postMessage. This gives a perfect
+    // markdown string (code fences with language tags, proper headings /
+    // lists / etc.) without us having to reverse-engineer the DOM.
+    let rawMd = '';
+    let source: 'copy' | 'dom' | 'empty' = 'empty';
+    const copied = await captureMarkdownViaCopy(el);
+    if (copied && copied.trim().length > 0) {
+      rawMd = copied;
+      source = 'copy';
+    } else if (assistantBody) {
+      rawMd = extractMarkdownFromDom(assistantBody);
+      source = 'dom';
+    }
     const reasoning = thinkBody ? extractMarkdownFromDom(thinkBody) : '';
     const parsed = parseAgentCommands(rawMd);
-    log(SCOPE, `finish reason=${reason}`, {
+    log(SCOPE, `finish via ${source}`, {
       rawLen: rawMd.length,
       cleanedLen: parsed.cleanedText.length,
       reasoningLen: reasoning.length,
@@ -341,6 +475,7 @@ function startWatch(sessionId: string, iterationId: string, baselineKey: number)
     clearTimeout(watch.timeoutHandle);
     if (watch.stabilityHandle) clearTimeout(watch.stabilityHandle);
     if (watch.busyRetryHandle) clearTimeout(watch.busyRetryHandle);
+    if (watch.regenerateHandle) clearTimeout(watch.regenerateHandle);
   }
 }
 
@@ -353,6 +488,7 @@ function cancelActiveWatch(reason: string): void {
   clearTimeout(activeWatch.timeoutHandle);
   if (activeWatch.stabilityHandle) clearTimeout(activeWatch.stabilityHandle);
   if (activeWatch.busyRetryHandle) clearTimeout(activeWatch.busyRetryHandle);
+  if (activeWatch.regenerateHandle) clearTimeout(activeWatch.regenerateHandle);
   activeWatch = null;
 }
 
@@ -398,14 +534,18 @@ async function sendBusy(
   iterationId: string,
   retryCount: number,
   nextRetryInMs: number,
+  reason: 'busy' | 'stopped' = 'busy',
 ): Promise<void> {
+  const maxRetries =
+    reason === 'stopped' ? STOPPED_REGEN_BACKOFFS_MS.length : BUSY_RETRY_BACKOFFS_MS.length;
   const evt: ChatbotBusyEvt = {
     type: 'CHATBOT_BUSY',
     sessionId,
     iterationId,
     retryCount,
-    maxRetries: BUSY_RETRY_BACKOFFS_MS.length,
+    maxRetries,
     nextRetryInMs,
+    reason,
   };
   await sendToSW(evt);
 }

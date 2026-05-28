@@ -477,9 +477,11 @@ function handleChatbotError(m: ChatbotErrorEvt): void {
   const msg =
     m.reason === 'busy_exhausted'
       ? `DeepSeek server busy after multiple retries — ${m.message ?? ''}`.trim()
-      : m.reason === 'timeout'
-        ? `DeepSeek response timeout — ${m.message ?? ''}`.trim()
-        : `Chatbot error — ${m.message ?? '(unknown)'}`;
+      : m.reason === 'stopped_exhausted'
+        ? `DeepSeek stopped generation repeatedly — ${m.message ?? ''}`.trim()
+        : m.reason === 'timeout'
+          ? `DeepSeek response timeout — ${m.message ?? ''}`.trim()
+          : `Chatbot error — ${m.message ?? '(unknown)'}`;
   pending.reject(new Error(msg));
 }
 
@@ -595,12 +597,17 @@ async function openOrFocusTab(url: string): Promise<number | null> {
 }
 
 async function findAnyDeepseekTab(): Promise<number | null> {
-  // First check our known map.
+  // Prefer a logged-in tab from our known map, then any known tab, then
+  // fall back to a fresh chrome.tabs.query.
+  for (const [tabId, info] of knownTabs) {
+    if (!info.loggedIn) continue;
+    if (await tabStillExists(tabId)) return tabId;
+    knownTabs.delete(tabId);
+  }
   for (const tabId of knownTabs.keys()) {
     if (await tabStillExists(tabId)) return tabId;
     knownTabs.delete(tabId);
   }
-  // Fallback to global query.
   const tabs = await chrome.tabs.query({ url: 'https://chat.deepseek.com/*' });
   for (const t of tabs) {
     if (typeof t.id === 'number') {
@@ -656,20 +663,30 @@ function waitForConnectorReady(tabId: number, timeoutMs: number): Promise<void> 
   });
 }
 
-/** Verify the DeepSeek content script is responding; if not, inject it. */
+/** Verify the DeepSeek content script is responding; if not, inject every
+ * `content_scripts` entry from the manifest (isolated AND MAIN world) so a
+ * tab that predates the extension load still gets the same wiring it'd
+ * have with a fresh-page navigation. */
 async function ensureContentScriptInjected(tabId: number): Promise<boolean> {
   if (await pingConnector(tabId)) return true;
-  const cs = chrome.runtime.getManifest().content_scripts?.[0];
-  if (!cs?.js || cs.js.length === 0) {
-    warn(SCOPE, 'no content_scripts entry in manifest — cannot inject');
+  const entries = chrome.runtime.getManifest().content_scripts ?? [];
+  if (entries.length === 0) {
+    warn(SCOPE, 'no content_scripts in manifest — cannot inject');
     return false;
   }
-  log(SCOPE, `injecting content script into tab=${tabId}`);
-  try {
-    await chrome.scripting.executeScript({ target: { tabId }, files: cs.js });
-  } catch (e) {
-    warn(SCOPE, 'chrome.scripting.executeScript failed', e);
-    return false;
+  for (const cs of entries) {
+    if (!cs.js || cs.js.length === 0) continue;
+    const world = (cs as { world?: 'MAIN' | 'ISOLATED' }).world;
+    log(SCOPE, `injecting into tab=${tabId}`, { files: cs.js, world: world ?? 'ISOLATED' });
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        files: cs.js,
+        world: world === 'MAIN' ? 'MAIN' : 'ISOLATED',
+      });
+    } catch (e) {
+      warn(SCOPE, `executeScript failed (world=${world ?? 'ISOLATED'})`, e);
+    }
   }
   for (let i = 0; i < 20; i++) {
     await sleep(100);
@@ -695,12 +712,24 @@ function sleep(ms: number): Promise<void> {
 }
 
 function broadcastChatbotStatusForAnyTab(): void {
+  // Prefer a logged-in tab if one exists. Without this preference, a freshly-
+  // opened deepseek tab (loggedIn=false until its SPA hydrates) would
+  // overshadow a long-lived tab where the user is signed in, leaving the
+  // SidePanel showing "未就绪" indefinitely even though a usable tab is open.
   let tabId: number | null = null;
   let info: TabInfo | undefined;
   for (const [id, i] of knownTabs) {
+    if (!i.loggedIn) continue;
     tabId = id;
     info = i;
     break;
+  }
+  if (tabId === null) {
+    for (const [id, i] of knownTabs) {
+      tabId = id;
+      info = i;
+      break;
+    }
   }
   const evt: ChatbotTabStatusEvt = {
     type: 'CHATBOT_TAB_STATUS',

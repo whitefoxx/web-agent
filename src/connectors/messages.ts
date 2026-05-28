@@ -198,9 +198,15 @@ export interface InjectAckEvt {
   error?: string;
 }
 
-/** Chatbot reported its server is busy. Connector handles auto-retry against
- * DeepSeek's own retry button; this event is purely informational so the
- * SidePanel can surface "retrying X/N" to the user. */
+/** Chatbot needed to be retried mid-response. Connector handles the click
+ * against DeepSeek's own retry/regenerate button; this event is purely
+ * informational so the SidePanel can surface "retrying X/N" to the user.
+ *
+ * `reason='busy'` — DeepSeek showed "Server is busy. Try again later" right
+ *   under the user message. Connector clicks the inline retry button.
+ * `reason='stopped'` — DeepSeek's thinking section finished with "Stopped"
+ *   instead of producing a response (model gave up / was cancelled mid-
+ *   generation). Connector clicks the per-message Regenerate button. */
 export interface ChatbotBusyEvt {
   type: 'CHATBOT_BUSY';
   sessionId: string;
@@ -209,6 +215,7 @@ export interface ChatbotBusyEvt {
   maxRetries: number;
   /** Milliseconds until the next click of the chatbot's retry button. */
   nextRetryInMs: number;
+  reason?: 'busy' | 'stopped';
 }
 
 /** Connector gave up after exhausting retry budget. SW rejects the pending
@@ -217,7 +224,7 @@ export interface ChatbotErrorEvt {
   type: 'CHATBOT_ERROR';
   sessionId: string;
   iterationId: string;
-  reason: 'busy_exhausted' | 'timeout' | 'unknown';
+  reason: 'busy_exhausted' | 'stopped_exhausted' | 'timeout' | 'unknown';
   message?: string;
 }
 

@@ -26,6 +26,12 @@ export const MARKDOWN_ROOT = '.ds-markdown';
 /** d-attribute prefix of the up-arrow "send" SVG. */
 export const SEND_BUTTON_PATH_SIGNATURE = 'M8.3125 0.981587';
 
+/** d-attribute prefix of the document/paste icon — the first button in the
+ * row of action buttons below an assistant message ("Copy"). Clicking it
+ * makes DeepSeek call navigator.clipboard.writeText() with the canonical
+ * markdown for that message; our MAIN-world clipboard-tap captures that. */
+export const COPY_BUTTON_PATH_SIGNATURE = 'M6.14929 4.02032';
+
 /** Visible label on the "New chat" launcher. */
 export const NEW_CHAT_LABEL = 'New chat';
 
@@ -40,6 +46,19 @@ export const BUSY_TEXT_PATTERN = /server is busy/i;
  * scope our query to a specific message item so we don't pick up an old
  * regenerate button. */
 export const RETRY_BUTTON_PATH_SIGNATURE = 'M1.272 6.21348';
+
+/** d-attribute prefix of the bottom-row "Regenerate" button on an assistant
+ * message. Distinct from RETRY_BUTTON: this lives in the action button
+ * row below a completed (or Stopped) message, not next to the user's
+ * just-sent question. Used when DeepSeek's own generation stalls and
+ * shows "Stopped" instead of producing the response. */
+export const REGENERATE_BUTTON_PATH_SIGNATURE = 'M7.92136 0.349152';
+
+/** Visible label DeepSeek shows in the thinking-content header when the
+ * model bailed out before finishing — usually because the generation hit
+ * an internal hiccup, was cancelled, or otherwise didn't reach the
+ * response phase. The normal state shows "Thought for N seconds" here. */
+export const STOPPED_LABEL_TEXT = 'Stopped';
 
 export interface DomReadyState {
   textarea: HTMLTextAreaElement | null;
@@ -112,6 +131,46 @@ export function findRetryButtonNear(busyEl: HTMLElement): HTMLElement | null {
   for (const p of paths) {
     const d = p.getAttribute('d');
     if (d && d.startsWith(RETRY_BUTTON_PATH_SIGNATURE)) {
+      const btn = p.closest('[role="button"]') as HTMLElement | null;
+      if (btn) return btn;
+    }
+  }
+  return null;
+}
+
+/** Find DeepSeek's per-message "Copy" button inside a virtual-list message
+ * item. The action button row only renders once the message is complete,
+ * so callers should only invoke this after stability detection has fired. */
+export function findCopyButtonIn(messageItem: HTMLElement): HTMLElement | null {
+  return findButtonByPathPrefixIn(messageItem, COPY_BUTTON_PATH_SIGNATURE);
+}
+
+/** Find DeepSeek's per-message "Regenerate" button — the second button in
+ * the action-row below an assistant message. Returns null if the row
+ * hasn't rendered yet (i.e., the message is still streaming). */
+export function findRegenerateButtonIn(messageItem: HTMLElement): HTMLElement | null {
+  return findButtonByPathPrefixIn(messageItem, REGENERATE_BUTTON_PATH_SIGNATURE);
+}
+
+/** Detect the "Stopped" indicator inside an assistant message item. If
+ * the message generation aborted before reaching the response phase,
+ * DeepSeek replaces the normal "Thought for N seconds" label with
+ * "Stopped" in the thinking-content header. */
+export function findStoppedIndicatorIn(messageItem: HTMLElement): HTMLElement | null {
+  const spans = messageItem.querySelectorAll('span');
+  for (const el of spans) {
+    if (el.closest('button')) continue;
+    const t = (el.textContent ?? '').trim();
+    if (t === STOPPED_LABEL_TEXT) return el as HTMLElement;
+  }
+  return null;
+}
+
+function findButtonByPathPrefixIn(scope: HTMLElement, pathPrefix: string): HTMLElement | null {
+  const paths = scope.querySelectorAll('svg path');
+  for (const p of paths) {
+    const d = p.getAttribute('d');
+    if (d && d.startsWith(pathPrefix)) {
       const btn = p.closest('[role="button"]') as HTMLElement | null;
       if (btn) return btn;
     }

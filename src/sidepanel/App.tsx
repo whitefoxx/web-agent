@@ -110,11 +110,14 @@ export function App() {
   }
 
   function onChatbotBusy(m: ChatbotBusyEvt): void {
+    const seconds = Math.round(m.nextRetryInMs / 1000);
+    const prefix = m.reason === 'stopped' ? `DeepSeek 生成被中止 (Stopped)` : `DeepSeek 服务繁忙`;
+    const verb = m.reason === 'stopped' ? '点 Regenerate 重试' : '重试';
     setTurns((cur) => [
       ...cur,
       {
         role: 'system',
-        text: `DeepSeek 服务繁忙，第 ${m.retryCount}/${m.maxRetries} 次重试将在 ${Math.round(m.nextRetryInMs / 1000)} 秒后发起…`,
+        text: `${prefix}，第 ${m.retryCount}/${m.maxRetries} 次${verb}将在 ${seconds} 秒后发起…`,
         level: 'info',
         ts: Date.now(),
       },
@@ -291,6 +294,11 @@ export function App() {
     setTurns([]);
     setProgress(null);
     setPaused(null);
+    // Re-query tab status — after an error / abort the badge may be holding
+    // a stale "未就绪" from a transient state. Force the SW to re-broadcast
+    // the current best known tab (prefers any logged-in one over the
+    // freshly-opened-but-not-ready one).
+    void requestEnsureTab();
   }
 
   function onOpenDeepseek(): void {
