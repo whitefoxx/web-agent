@@ -43,3 +43,114 @@ export function assertHttpUrl(url: unknown, paramName = 'url'): string {
   }
   return s;
 }
+
+export interface PageReadyOpts {
+  /** Hard cap on total wait time (ms). Default 15000. */
+  maxWaitMs?: number;
+  /** Wait until document.body.innerText length stays unchanged for this
+   * many ms; signals the page has stopped streaming content. Default 800. */
+  quietMs?: number;
+  /** If set, treat the page as "ready" the moment this CSS selector
+   * matches (short-circuits the stability check). Useful for SPAs that
+   * never quite stop mutating but DO render a known element when ready. */
+  waitForSelector?: string;
+  /** Poll interval (ms). Default 200. */
+  pollMs?: number;
+}
+
+/** Smarter page-load wait than "navigate then setTimeout".
+ *
+ * Strategy:
+ *   1. Tab status `complete` is already guaranteed by `waitForTabComplete`
+ *      before we get here — but `complete` only means the `load` event
+ *      fired, not that the SPA has hydrated. So we poll in-page.
+ *   2. If `waitForSelector` is given and matches → ready.
+ *   3. Otherwise, watch `document.body.innerText.length`. Once it stops
+ *      changing for `quietMs`, ready.
+ *   4. Cap at `maxWaitMs`; resolve anyway on timeout (best-effort —
+ *      caller still gets to use the tab).
+ *
+ * Returns the final probe so callers can include timing diagnostics. */
+export interface PageReadyResult {
+  reason: 'selector' | 'stable' | 'timeout';
+  elapsedMs: number;
+  textLen: number;
+  readyState: DocumentReadyState | 'unknown';
+}
+
+export async function waitForPageReady(
+  tabId: number,
+  opts: PageReadyOpts = {},
+): Promise<PageReadyResult> {
+  const maxWaitMs = Math.max(1000, opts.maxWaitMs ?? 15_000);
+  const quietMs = Math.max(100, opts.quietMs ?? 800);
+  const pollMs = Math.max(50, opts.pollMs ?? 200);
+  const t0 = Date.now();
+  const selector = opts.waitForSelector || null;
+
+  let lastLen = -1;
+  let lastChangeAt = Date.now();
+  let lastReadyState: DocumentReadyState | 'unknown' = 'unknown';
+
+  while (Date.now() - t0 < maxWaitMs) {
+    let probe:
+      | { readyState: DocumentReadyState; textLen: number; selectorMatched: boolean }
+      | undefined;
+    try {
+      const res = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: (sel: string | null) => ({
+          readyState: document.readyState,
+          textLen: (document.body?.innerText ?? '').length,
+          selectorMatched: !!(sel && document.querySelector(sel)),
+        }),
+        args: [selector],
+      });
+      probe = res[0]?.result;
+    } catch {
+      // The page may not be reachable yet (e.g., DNS still resolving),
+      // or the host is on a restricted scheme (chrome://, file://, etc.).
+      // Keep polling — `maxWaitMs` will cap us either way.
+      await sleep(pollMs);
+      continue;
+    }
+
+    if (!probe) {
+      await sleep(pollMs);
+      continue;
+    }
+    lastReadyState = probe.readyState;
+
+    if (selector && probe.selectorMatched) {
+      return {
+        reason: 'selector',
+        elapsedMs: Date.now() - t0,
+        textLen: probe.textLen,
+        readyState: probe.readyState,
+      };
+    }
+
+    if (probe.readyState === 'complete') {
+      if (probe.textLen !== lastLen) {
+        lastLen = probe.textLen;
+        lastChangeAt = Date.now();
+      } else if (probe.textLen > 0 && Date.now() - lastChangeAt >= quietMs) {
+        return {
+          reason: 'stable',
+          elapsedMs: Date.now() - t0,
+          textLen: probe.textLen,
+          readyState: probe.readyState,
+        };
+      }
+    }
+
+    await sleep(pollMs);
+  }
+
+  return {
+    reason: 'timeout',
+    elapsedMs: Date.now() - t0,
+    textLen: lastLen >= 0 ? lastLen : 0,
+    readyState: lastReadyState,
+  };
+}

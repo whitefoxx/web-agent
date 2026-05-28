@@ -4,11 +4,7 @@
   "version": "0.0.1",
   "description": "Turn any chat AI webpage (DeepSeek, ChatGPT, Gemini…) into a browser agent — zero API key, zero config.",
   "permissions": ["sidePanel", "debugger", "tabs", "scripting", "storage", "cookies", "downloads"],
-  "host_permissions": [
-    "https://chat.deepseek.com/*",
-    "https://*.xiaohongshu.com/*",
-    "https://xiaohongshu.com/*"
-  ],
+  "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "src/background/service-worker.ts",
     "type": "module"
