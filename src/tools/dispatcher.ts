@@ -86,6 +86,20 @@ export async function executeAdapter(opts: {
   // when several adapters fire back-to-back in the same iteration.
   await humanPaceForSite(adapter.site);
 
+  // Site-independent ("generic") adapters manage their own tabs (open_url,
+  // get_page_text, screenshot, …). Skip the pre-bound site-tab + PageShim
+  // dance and just hand them a null page; their `func` ignores it.
+  if (adapter.site === 'generic') {
+    log('dispatcher', `executing ${opts.tool} (tab-less)`, { args: opts.args });
+    try {
+      const result = await adapter.func(null, opts.args ?? {});
+      log('dispatcher', `success ${opts.tool}`, { durationMs: Date.now() - t0 });
+      return { ok: true, result, durationMs: Date.now() - t0 };
+    } catch (e) {
+      return classifyError(t0, e);
+    }
+  }
+
   let tabId: number;
   try {
     tabId = await ensureSiteTab(adapter.site);

@@ -72,6 +72,7 @@ import type {
 // Side-effect imports: each adapter file's top-level cli({...}) registers it
 // with the global registry that openAiToolsFromRegistry / lookupAdapter read.
 import '../tools/xiaohongshu/_all';
+import '../tools/generic/_all';
 
 const SCOPE = 'sw';
 
