@@ -44,6 +44,20 @@ export function assertHttpUrl(url: unknown, paramName = 'url'): string {
   return s;
 }
 
+/** Validate that `tab_id` references a tab that still exists, returning the
+ * chrome.tabs.Tab. Throws with a chatbot-readable error otherwise. */
+export async function assertTabId(tabId: unknown, paramName = 'tab_id'): Promise<chrome.tabs.Tab> {
+  const n = Number(tabId);
+  if (!Number.isFinite(n) || Math.trunc(n) !== n || n < 0) {
+    throw new Error(`${paramName} must be a positive integer (the tabId returned by open_url)`);
+  }
+  try {
+    return await chrome.tabs.get(n);
+  } catch {
+    throw new Error(`tab ${n} no longer exists (closed?)`);
+  }
+}
+
 export interface PageReadyOpts {
   /** Hard cap on total wait time (ms). Default 15000. */
   maxWaitMs?: number;
