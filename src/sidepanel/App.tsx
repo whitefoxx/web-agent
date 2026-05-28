@@ -63,16 +63,31 @@ export function App() {
 
   const messagesRef = useRef<HTMLDivElement>(null);
 
-  /* mount: ensure tab status, attach listeners */
+  /* mount: ensure tab status, attach listeners, open keep-alive port */
   useEffect(() => {
     void requestEnsureTab();
     void requestLogs();
     const handler = (m: unknown) => onIncomingMessage(m as Message);
     chrome.runtime.onMessage.addListener(handler);
     const unsubLog = subscribeLog((e) => setLogs((cur) => append(cur, e, 500)));
+    // Pin the SW alive while the SidePanel is open. MV3 SWs are killed
+    // after ~30s of no chrome.* activity, which would otherwise orphan a
+    // long-running orchestrator iteration (e.g., DeepSeek thinking for
+    // 90s) — pendingResponses / activeSessions would vanish and the next
+    // CHATBOT_RESPONSE arriving after wake-up would be dropped as
+    // "unmatched". An open chrome.runtime.Port keeps the SW pinned per
+    // MV3 spec. SW dies on disconnect (panel close) — that's fine, the
+    // user isn't watching anyway.
+    let port: chrome.runtime.Port | null = null;
+    try {
+      port = chrome.runtime.connect({ name: 'webchat-keepalive' });
+    } catch {}
     return () => {
       chrome.runtime.onMessage.removeListener(handler);
       unsubLog();
+      try {
+        port?.disconnect();
+      } catch {}
     };
   }, []);
 
@@ -280,9 +295,15 @@ export function App() {
   }
 
   function onAbort(): void {
+    // Clear progress + running immediately for instant visual feedback —
+    // don't depend on a SW round-trip. If the SW is alive it'll also fire
+    // SESSION_DONE which idempotently re-clears these.
+    setProgress(null);
+    setRunning(false);
     if (!sessionId) return;
     const req: AbortSessionReq = { type: 'ABORT_SESSION', sessionId };
     void chrome.runtime.sendMessage(req).catch(() => {});
+    setTurns((cur) => [...cur, { role: 'system', text: '已停止', level: 'info', ts: Date.now() }]);
   }
 
   function onResume(): void {
@@ -455,6 +476,34 @@ export function App() {
             setShowDrawer(false);
             const req: ResumeSessionReq = { type: 'RESUME_SESSION', sessionId: id };
             chrome.runtime.sendMessage(req).catch(() => {});
+          }}
+          onOpenSession={async (id) => {
+            // Load the saved session into the main chat pane so the user
+            // can read past turns + send follow-ups in the same DeepSeek
+            // conversation. SW's tryReuseSessionTab / reattach logic will
+            // pick the right tab when the next USER_MESSAGE fires.
+            try {
+              const r = (await chrome.runtime.sendMessage({
+                type: 'GET_SESSION',
+                sessionId: id,
+              } satisfies GetSessionReq)) as GetSessionResp | undefined;
+              const s = (r?.session as SessionState | null) ?? null;
+              if (!s) return;
+              setSessionId(s.id);
+              setTurns(historyToUiTurns(s.history));
+              setProgress(null);
+              setRunning(false);
+              setPaused(
+                s.status === 'paused' && s.pauseReason
+                  ? {
+                      reason: s.pauseReason,
+                      conversationUrl: s.conversationUrl,
+                      pendingPromptPreview: s.pendingPrompt?.slice(0, 120),
+                    }
+                  : null,
+              );
+              setShowDrawer(false);
+            } catch {}
           }}
           onDeleteHistoricalSession={(id) => {
             const req: DeleteSessionReq = { type: 'DELETE_SESSION', sessionId: id };
@@ -730,6 +779,7 @@ function SettingsDrawer(props: {
   onOpenDeepseek: () => void;
   currentSessionId: string | null;
   onResumeFromHistory: (sessionId: string) => void;
+  onOpenSession: (sessionId: string) => void;
   onDeleteHistoricalSession: (sessionId: string) => void;
 }) {
   return (
@@ -748,6 +798,7 @@ function SettingsDrawer(props: {
       <HistorySection
         currentSessionId={props.currentSessionId}
         onResume={props.onResumeFromHistory}
+        onOpen={props.onOpenSession}
         onDelete={props.onDeleteHistoricalSession}
       />
       <div class="section">
@@ -785,10 +836,12 @@ function SettingsDrawer(props: {
 function HistorySection({
   currentSessionId,
   onResume,
+  onOpen,
   onDelete,
 }: {
   currentSessionId: string | null;
   onResume: (sessionId: string) => void;
+  onOpen: (sessionId: string) => void;
   onDelete: (sessionId: string) => void;
 }) {
   const [list, setList] = useState<SessionSummary[]>([]);
@@ -885,6 +938,18 @@ function HistorySection({
                       <SessionDetailView session={detail} />
                     )}
                     <div class="hist-actions">
+                      {!isCurrent && (
+                        <button
+                          class="primary"
+                          title="把这条会话加载到主聊天面板，可以继续追问（保留 DeepSeek conversation 上下文）"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onOpen(s.id);
+                          }}
+                        >
+                          打开
+                        </button>
+                      )}
                       {s.status === 'paused' && s.conversationUrl && (
                         <button
                           class="primary"
@@ -1014,4 +1079,27 @@ function relativeTime(ts: number): string {
 function append<T>(arr: T[], item: T, max: number): T[] {
   const next = [...arr, item];
   return next.length > max ? next.slice(-max) : next;
+}
+
+/** Translate the persisted session.history (Turn[]) into the SidePanel's
+ * rendering shape (UiTurn[]). The only fiddly bit is the role name:
+ * SessionState uses `'tool_trace'` while UiTurn uses `'tool'`. */
+function historyToUiTurns(history: Turn[]): UiTurn[] {
+  return history.map((t): UiTurn => {
+    if (t.role === 'user') {
+      return { role: 'user', text: t.text, ts: t.ts };
+    }
+    if (t.role === 'assistant') {
+      return {
+        role: 'assistant',
+        text: t.cleanedText,
+        reasoningText: t.reasoningText,
+        commands: t.commands,
+        iteration: t.iteration,
+        ts: t.ts,
+      };
+    }
+    // tool_trace → 'tool'
+    return { role: 'tool', trace: t.trace, ts: t.ts };
+  });
 }

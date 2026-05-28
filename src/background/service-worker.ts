@@ -110,9 +110,20 @@ const pendingResponses = new Map<
 const pendingConfirmations = new Map<string, { resolve: (approved: boolean) => void }>();
 const WRITE_CONFIRM_TIMEOUT_MS = 5 * 60 * 1000;
 
+/** Open keep-alive ports from extension pages (SidePanel). As long as one
+ * is connected, Chrome MV3 won't recycle this service worker, which is
+ * what was orphaning long-running orchestrator iterations: DeepSeek
+ * thinking phases routinely run >30s with no chrome.* activity, the SW
+ * would be killed, `pendingResponses` / `activeSessions` would vanish,
+ * and the next CHATBOT_RESPONSE arriving after wake-up would be
+ * silently dropped as "unmatched" — leaving the SidePanel stuck on the
+ * "正在生成" banner and unable to abort. */
+const keepaliveConnections = new Set<chrome.runtime.Port>();
+
 /* ───────── lifecycle ───────── */
 
 log(SCOPE, 'service worker booting');
+void recoverInterruptedSessionsOnBoot();
 
 chrome.runtime.onInstalled.addListener(() => {
   log(SCOPE, 'onInstalled');
@@ -122,6 +133,44 @@ chrome.runtime.onInstalled.addListener(() => {
 });
 
 chrome.runtime.onStartup.addListener(() => log(SCOPE, 'onStartup'));
+
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== 'webchat-keepalive') return;
+  keepaliveConnections.add(port);
+  log(SCOPE, `keepalive port connected (total=${keepaliveConnections.size})`);
+  port.onDisconnect.addListener(() => {
+    keepaliveConnections.delete(port);
+    log(SCOPE, `keepalive port disconnected (remaining=${keepaliveConnections.size})`);
+  });
+});
+
+/** On boot, find any persisted session whose status was 'running' at the
+ * moment the prior SW instance died and mark it as 'error'. Its in-
+ * memory pendingResponses / activeSessions entries are gone with the
+ * worker, so the orchestrator can't continue from where it left off —
+ * the user has to retry the last message. We push SESSION_DONE so the
+ * SidePanel clears any stale "正在生成" / "DeepSeek 思考中" banner. */
+async function recoverInterruptedSessionsOnBoot(): Promise<void> {
+  try {
+    const sessions = await listSessions({ status: 'running' });
+    for (const s of sessions) {
+      log(SCOPE, `recovering interrupted session ${s.id}`);
+      s.status = 'error';
+      s.pendingPrompt = null;
+      s.pauseReason = null;
+      await saveSession(s);
+      sendToSidepanel({
+        type: 'SESSION_DONE',
+        sessionId: s.id,
+        reason: 'error',
+        error:
+          '会话因扩展后台被回收而中断了。再发一句话可以接着聊（基于之前的 DeepSeek conversation），或在历史抽屉里点"打开"重新拉起这条会话。',
+      } satisfies SessionDoneEvt);
+    }
+  } catch (e) {
+    warn(SCOPE, 'recoverInterruptedSessionsOnBoot failed', e);
+  }
+}
 
 chrome.action.onClicked.addListener((tab) => {
   log(SCOPE, 'action clicked', { tabId: tab.id });
