@@ -165,9 +165,14 @@ function renderToolCatalog(opts: { showAllTools?: boolean }): string {
       const tn = toolName(it);
       if (!opts.showAllTools && HIDDEN_BY_DEFAULT.has(tn)) continue;
       const writeFlag = it.access === 'write' ? ' [write]' : '';
-      lines.push(`- \`${tn}\`${writeFlag} — ${it.description ?? '(no description)'}`);
+      const sig = renderArgSignature(it.args ?? []);
+      lines.push(`- \`${tn}${sig}\`${writeFlag} — ${it.description ?? '(no description)'}`);
     }
   }
+  lines.push(
+    '',
+    '> 调用工具时 `args` 字段里的键名必须**严格**匹配上面括号里的参数名（区分大小写）。不确定时先 `describe_tool` 查 schema —— 别凭语义猜参数名（例如别把 `query` 写成 `keyword` 或 `q`）。',
+  );
   if (
     !opts.showAllTools &&
     [...HIDDEN_BY_DEFAULT].some((t) => all.some((a) => toolName(a) === t))
@@ -182,6 +187,23 @@ function renderToolCatalog(opts: { showAllTools?: boolean }): string {
 
 function toolName(a: AdapterDef): string {
   return `${a.site}__${a.name}`;
+}
+
+/** "(query, limit?)" style one-line arg signature for the first-turn
+ *  catalog. Required args have no trailing `?`; optional do. Non-string
+ *  types get a `:int` / `:bool` annotation. */
+function renderArgSignature(args: AdapterArg[]): string {
+  if (args.length === 0) return '()';
+  return (
+    '(' +
+    args
+      .map((a) => {
+        const typ = a.type && a.type !== 'string' ? `:${a.type}` : '';
+        return a.required ? `${a.name}${typ}` : `${a.name}${typ}?`;
+      })
+      .join(', ') +
+    ')'
+  );
 }
 
 function typeOf(a: AdapterArg): string {

@@ -7,7 +7,7 @@
  * `Driver.executeTool` interface.
  */
 
-import { lookupAdapter } from './manifest';
+import { lookupAdapter, type AdapterDef } from './manifest';
 import { createPageShim } from '../runtime/page';
 import { log, warn, error as logError } from '../runtime/log';
 import { RateLimitedError, AuthRequiredError, EmptyResultError } from '../runtime/errors.js';
@@ -30,6 +30,38 @@ const SITE_QUERY_URL: Record<string, string[]> = {
   xiaohongshu: ['https://www.xiaohongshu.com/*', 'https://xiaohongshu.com/*'],
 };
 
+/** Inter-call pacing per-site (anti-bot defence). When the agent fires
+ * several adapters back-to-back (e.g. `xiaohongshu__search` followed by
+ * many `xiaohongshu__note` calls), we want each subsequent call to wait
+ * a human-ish amount of time before kicking off.
+ *
+ * The PageShim itself already adds 0.8-1.8s before each navigation and
+ * 1.2-2.4s after, but that only kicks in if the adapter actually calls
+ * `page.goto`. The dispatcher-level pacing here closes that loophole and
+ * also enforces a hard minimum gap between consecutive calls to the same
+ * site — even if the adapter is purely read-from-current-page. */
+const MIN_INTERVAL_PER_SITE_MS = 2500;
+const HUMAN_PAUSE_MIN_MS = 600;
+const HUMAN_PAUSE_MAX_MS = 1800;
+
+const lastCallTsPerSite = new Map<string, number>();
+
+async function humanPaceForSite(site: string): Promise<void> {
+  const now = Date.now();
+  const last = lastCallTsPerSite.get(site) ?? 0;
+  const elapsed = now - last;
+  const jitter =
+    HUMAN_PAUSE_MIN_MS + Math.floor(Math.random() * (HUMAN_PAUSE_MAX_MS - HUMAN_PAUSE_MIN_MS));
+  let totalWait = jitter;
+  if (elapsed < MIN_INTERVAL_PER_SITE_MS) totalWait += MIN_INTERVAL_PER_SITE_MS - elapsed;
+  log(
+    'dispatcher',
+    `humanPace site=${site} sleep=${totalWait}ms (elapsed=${elapsed}ms since last)`,
+  );
+  await new Promise((r) => setTimeout(r, totalWait));
+  lastCallTsPerSite.set(site, Date.now());
+}
+
 export async function executeAdapter(opts: {
   tool: string;
   args: Record<string, unknown>;
@@ -39,6 +71,20 @@ export async function executeAdapter(opts: {
   if (!adapter) {
     return failed(t0, `tool not found: ${opts.tool}`, 'tool_not_found');
   }
+
+  // Validate args BEFORE we burn a tab/CDP attach on a guaranteed-broken
+  // call. Chatbots periodically guess arg names from URL patterns or help
+  // text (e.g. sending `keyword` when the schema wants `query`); when that
+  // happens we want a fast, structured "wrong arg names" error so the
+  // chatbot self-corrects on its next iteration.
+  const argError = validateArgs(adapter, opts.args ?? {});
+  if (argError) {
+    return failed(t0, argError, 'generic');
+  }
+
+  // Pause before doing anything to make the call rhythm human-ish even
+  // when several adapters fire back-to-back in the same iteration.
+  await humanPaceForSite(adapter.site);
 
   let tabId: number;
   try {
@@ -150,4 +196,61 @@ function failed(t0: number, error: string, kind: ToolExecResult['errorKind']): T
 
 function msgOf(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
+}
+
+/** Check the chatbot's `args` against the adapter's declared schema.
+ *
+ * Strict on missing required args (the call would fail anyway — fail fast
+ * with a clear message). Lenient on unknown extras: we keep them out of
+ * the way (adapters ignore properties they don't read) but call them out
+ * in the error message so the chatbot notices it likely misnamed a
+ * required field.
+ *
+ * Returns null if validation passes, otherwise a multi-line error string
+ * suitable to feed back as the tool result. */
+function validateArgs(adapter: AdapterDef, args: Record<string, unknown>): string | null {
+  const argDefs = adapter.args ?? [];
+  const expectedNames = new Set(argDefs.map((a) => a.name));
+  const provided = Object.keys(args);
+  const unknown = provided.filter((p) => !expectedNames.has(p));
+  const missing = argDefs.filter((a) => a.required && !(a.name in args)).map((a) => a.name);
+
+  if (missing.length === 0 && unknown.length === 0) return null;
+  // Unknown-only (no missing required) is tolerable — just warn in logs
+  // and let the adapter handle it. The user-visible bug in question is
+  // "missing required because chatbot used wrong name", so we focus on
+  // that case.
+  if (missing.length === 0) {
+    warn('dispatcher', `${adapter.site}__${adapter.name} got unknown args (ignored)`, {
+      unknown,
+    });
+    return null;
+  }
+
+  const toolName = `${adapter.site}__${adapter.name}`;
+  const expectedDoc = argDefs
+    .map((a) => {
+      const type = a.type ?? 'string';
+      const flag = a.required ? 'required' : 'optional';
+      const def = a.default !== undefined ? ` default=${JSON.stringify(a.default)}` : '';
+      const help = a.help ? ` — ${a.help}` : '';
+      return `  - ${a.name} (${type}, ${flag})${def}${help}`;
+    })
+    .join('\n');
+
+  const lines: string[] = [
+    `参数错误 — ${toolName} 未能执行。`,
+    `缺少必需参数: ${missing.map((n) => `"${n}"`).join(', ')}`,
+  ];
+  if (unknown.length > 0) {
+    lines.push(
+      `你传了未识别的参数 ${unknown.map((n) => `"${n}"`).join(', ')} —— 很可能写错名字了，请对照 schema 修正：`,
+    );
+  } else {
+    lines.push('Schema:');
+  }
+  lines.push(expectedDoc);
+  lines.push('');
+  lines.push('请用正确的参数名重新调用。如果不确定参数语义，先 `describe_tool` 拿完整说明。');
+  return lines.join('\n');
 }
