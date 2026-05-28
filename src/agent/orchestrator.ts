@@ -227,6 +227,7 @@ export async function runSession(opts: RunOptions): Promise<void> {
       await driver.inject({ iterationId, text: nextPrompt });
     } catch (e) {
       if (e instanceof TabUnavailableError) return pause(e.reason, e.message);
+      if (opts.signal?.aborted) return finish('user_abort');
       logError('loop', 'inject failed', e);
       return finish('error', e instanceof Error ? e.message : String(e));
     }
@@ -246,6 +247,7 @@ export async function runSession(opts: RunOptions): Promise<void> {
       });
     } catch (e) {
       if (e instanceof TabUnavailableError) return pause(e.reason, e.message);
+      if (opts.signal?.aborted) return finish('user_abort');
       logError('loop', 'waitForResponse failed', e);
       return finish('error', e instanceof Error ? e.message : String(e));
     }

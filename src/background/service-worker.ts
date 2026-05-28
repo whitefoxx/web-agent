@@ -61,6 +61,7 @@ import type {
   RequestLogsReq,
   ResumeSessionReq,
   SessionDoneEvt,
+  SessionNoticeEvt,
   SessionPausedEvt,
   SessionSummary,
   ToolTraceEvt,
@@ -361,10 +362,15 @@ async function handleUserMessage(m: UserMessageReq): Promise<void> {
   }
 
   // 2) Reattach case: the bound tab is gone / moved, BUT we still remember
-  //    the DeepSeek conversation URL. Open it in a fresh tab — DeepSeek
-  //    serves the conv history from the server side per URL, so the chatbot
-  //    still has all of the prior turns in context. Drive in continuation
-  //    mode so we just send the new userText (no system-prompt reinject).
+  //    the DeepSeek conversation URL. Open it in a fresh tab. DeepSeek
+  //    usually serves the conv history from the server side per URL,
+  //    letting us pick up exactly where we left off in continuation mode.
+  //
+  //    Edge case: if the user (or DeepSeek's GC) DELETED that conv server-
+  //    side, hitting `/a/chat/s/<deletedId>` redirects to the homepage
+  //    `/`. The new DeepSeek conv knows nothing about our protocol — so
+  //    in that case we must downgrade to a full system-prompt injection
+  //    instead of the bare-userText+reminder of continuation mode.
   if (session.conversationUrl) {
     log(SCOPE, `session=${session.id} bound tab dead — re-opening conv URL`, {
       conversationUrl: session.conversationUrl,
@@ -372,7 +378,30 @@ async function handleUserMessage(m: UserMessageReq): Promise<void> {
     const reopened = await openOrFocusTab(session.conversationUrl);
     if (reopened !== null) {
       session.chatbotTabId = reopened;
-      await driveSession(session, m.text, /* resume */ false, /* continuation */ true);
+      const landed = await landedConvIdFor(reopened);
+      if (landed && landed === session.conversationId) {
+        log(SCOPE, `re-attached to surviving conv ${session.conversationId}`);
+        await driveSession(session, m.text, /* resume */ false, /* continuation */ true);
+      } else {
+        log(
+          SCOPE,
+          `conv ${session.conversationId} no longer exists; downgrading to fresh first-turn prompt in same SidePanel session`,
+          { landedConv: landed },
+        );
+        sendToSidepanel({
+          type: 'SESSION_NOTICE',
+          sessionId: session.id,
+          level: 'warning',
+          text: '原 DeepSeek 会话已不可用（可能被你在 deepseek 站点上删除了），系统已自动开启一个新 DeepSeek 会话并附带完整工具协议。后续追问会沿用这个新会话。',
+        } satisfies SessionNoticeEvt);
+        // Clear stale binding. handleChatbotResponse will capture the new
+        // conversationId/Url from the first CHATBOT_RESPONSE's currentUrl,
+        // re-binding this session to the freshly-created DeepSeek conv.
+        session.conversationId = null;
+        session.conversationUrl = null;
+        session.turnsSinceFullPrompt = 0;
+        await driveSession(session, m.text, /* resume */ false, /* continuation */ false);
+      }
       return;
     }
     warn(SCOPE, `failed to re-open conv URL for session=${session.id}`);
@@ -402,6 +431,19 @@ async function handleUserMessage(m: UserMessageReq): Promise<void> {
   }
 
   await driveSession(session, m.text, /* resume */ false, /* continuation */ false);
+}
+
+/** Returns the conversationId currently visible at the given tab's URL,
+ * or null if the tab is gone / on a non-conv URL (homepage, login, etc.).
+ * Used after openOrFocusTab to detect when DeepSeek redirected away from
+ * a deleted conversation. */
+async function landedConvIdFor(tabId: number): Promise<string | null> {
+  try {
+    const t = await chrome.tabs.get(tabId);
+    return parseConversationUrl(t.url)?.conversationId ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /** Returns the session's existing chatbot tab id if all of these hold:
@@ -452,12 +494,45 @@ async function handleResume(m: ResumeSessionReq): Promise<void> {
     return;
   }
   session.chatbotTabId = tabId;
-  await driveSession(
-    session,
-    session.pendingPrompt ?? '',
-    /* resume */ true,
-    /* continuation */ false,
-  );
+  // If the user manually deleted the conv between Pause and Resume,
+  // pendingPrompt was constructed for the old DeepSeek context (e.g. a
+  // tool-result follow-up) and re-injecting it into a fresh chat would
+  // confuse DeepSeek. Replay the original user message with the full
+  // system prompt instead.
+  const landed = await landedConvIdFor(tabId);
+  if (landed && landed === session.conversationId) {
+    await driveSession(
+      session,
+      session.pendingPrompt ?? '',
+      /* resume */ true,
+      /* continuation */ false,
+    );
+  } else {
+    log(SCOPE, `Resume: conv ${session.conversationId} lost; replaying first user turn`, {
+      landedConv: landed,
+    });
+    sendToSidepanel({
+      type: 'SESSION_NOTICE',
+      sessionId: session.id,
+      level: 'warning',
+      text: '原 DeepSeek 会话已不可用（可能在 deepseek 站点上被删除了），无法接着 pendingPrompt 继续。已自动重新发起原始问题并带完整协议，等同于在新会话里从头开始。',
+    } satisfies SessionNoticeEvt);
+    const firstUser = session.history.find((t) => t.role === 'user');
+    session.conversationId = null;
+    session.conversationUrl = null;
+    session.pendingPrompt = null;
+    session.turnsSinceFullPrompt = 0;
+    if (firstUser) {
+      // Clear stale transcript so the replay starts clean in the same
+      // SidePanel slot; old turns aren't displayed but stay logged in
+      // earlier IDB snapshots / log entries for forensics.
+      session.history = [];
+      session.iterations = 0;
+      await driveSession(session, firstUser.text, /* resume */ false, /* continuation */ false);
+    } else {
+      sendErrorDone(m.sessionId, '原 DeepSeek 会话已被删除，且找不到首条用户消息可重放。');
+    }
+  }
 }
 
 async function handleDiscard(m: DiscardSessionReq): Promise<void> {

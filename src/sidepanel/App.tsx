@@ -21,6 +21,7 @@ import {
   type RequestLogsReq,
   type ResumeSessionReq,
   type SessionDoneEvt,
+  type SessionNoticeEvt,
   type SessionPausedEvt,
   type SessionSummary,
   type ToolTrace,
@@ -62,6 +63,18 @@ export function App() {
   const [logCfg, setLogCfgState] = useState<LogConfig>(() => getLogConfig());
 
   const messagesRef = useRef<HTMLDivElement>(null);
+  // Mirror of `sessionId` for the chrome.runtime.onMessage listener (which
+  // is registered once in useEffect and would otherwise capture a stale
+  // closure). Updated by the effect just below.
+  const sessionIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    sessionIdRef.current = sessionId;
+  }, [sessionId]);
+
+  function eventBelongsToCurrentSession(eventSessionId: string | undefined): boolean {
+    if (!eventSessionId) return true; // global event (no session scope)
+    return sessionIdRef.current === eventSessionId;
+  }
 
   /* mount: ensure tab status, attach listeners, open keep-alive port */
   useEffect(() => {
@@ -101,6 +114,25 @@ export function App() {
 
   function onIncomingMessage(m: Message): void {
     if (!m || typeof m !== 'object') return;
+    // Drop events that belong to a session we've already moved on from
+    // (e.g. user clicked Stop then quickly "+ 新对话" — the old session's
+    // delayed SESSION_DONE would otherwise pollute the fresh chat).
+    const sid = (m as { sessionId?: string }).sessionId;
+    switch (m.type) {
+      case 'ASSISTANT_TURN':
+      case 'TOOL_TRACE':
+      case 'SESSION_DONE':
+      case 'SESSION_PAUSED':
+      case 'SESSION_NOTICE':
+      case 'ITERATION_PROGRESS':
+      case 'CHATBOT_STREAMING':
+      case 'CHATBOT_BUSY':
+      case 'WRITE_CONFIRM_REQ':
+        if (!eventBelongsToCurrentSession(sid)) return;
+        break;
+      default:
+        break;
+    }
     switch (m.type) {
       case 'ASSISTANT_TURN':
         onAssistantTurn(m as AssistantTurnEvt);
@@ -113,6 +145,9 @@ export function App() {
         break;
       case 'SESSION_PAUSED':
         onSessionPaused(m as SessionPausedEvt);
+        break;
+      case 'SESSION_NOTICE':
+        onSessionNotice(m as SessionNoticeEvt);
         break;
       case 'ITERATION_PROGRESS':
         onIterationProgress(m as IterationProgressEvt);
@@ -135,6 +170,18 @@ export function App() {
       default:
         break;
     }
+  }
+
+  function onSessionNotice(m: SessionNoticeEvt): void {
+    setTurns((cur) => [
+      ...cur,
+      {
+        role: 'system',
+        text: m.text,
+        level: m.level === 'error' ? 'error' : 'info',
+        ts: Date.now(),
+      },
+    ]);
   }
 
   function onChatbotBusy(m: ChatbotBusyEvt): void {
@@ -224,24 +271,29 @@ export function App() {
     setRunning(false);
     setProgress(null);
     setPaused(null);
-    // NOTE: deliberately NOT clearing sessionId — follow-up messages stay
-    // in the same DeepSeek conversation so the chatbot keeps context. The
-    // user explicitly starts a new conversation via the header "+ 新对话"
-    // button (which calls onNewChat). On 'user_abort' / 'error' we also
-    // drop the binding since the session ended unhealthy.
-    if (m.reason === 'error' || m.reason === 'user_abort') {
-      setSessionId(null);
-    }
+    // NOTE: deliberately NOT clearing sessionId on 'no_more_commands' —
+    // follow-up messages stay in the same DeepSeek conversation so the
+    // chatbot keeps context. On 'error' / 'user_abort' we drop the
+    // binding since the session ended unhealthy and the user should
+    // start fresh.
+    if (m.reason === 'error') setSessionId(null);
+    // user_abort: keep sessionId so a follow-up still continues in the
+    // same DeepSeek conv (user just wanted to stop this turn, not the
+    // whole session).
+    const text =
+      m.reason === 'user_abort'
+        ? '已停止'
+        : m.error
+          ? `会话结束：${m.error}`
+          : m.reason === 'no_more_commands'
+            ? '回答完成'
+            : `会话结束（${m.reason}）`;
     setTurns((cur) => [
       ...cur,
       {
         role: 'system',
-        text: m.error
-          ? `会话结束：${m.error}`
-          : m.reason === 'no_more_commands'
-            ? '回答完成'
-            : `会话结束（${m.reason}）`,
-        level: m.error ? 'error' : 'info',
+        text,
+        level: m.reason === 'error' ? 'error' : 'info',
         ts: Date.now(),
       },
     ]);
@@ -296,14 +348,14 @@ export function App() {
 
   function onAbort(): void {
     // Clear progress + running immediately for instant visual feedback —
-    // don't depend on a SW round-trip. If the SW is alive it'll also fire
-    // SESSION_DONE which idempotently re-clears these.
+    // don't depend on a SW round-trip. SW will also fire SESSION_DONE
+    // (reason: user_abort) which renders the "已停止" system message; we
+    // don't append it here to avoid duplication.
     setProgress(null);
     setRunning(false);
     if (!sessionId) return;
     const req: AbortSessionReq = { type: 'ABORT_SESSION', sessionId };
     void chrome.runtime.sendMessage(req).catch(() => {});
-    setTurns((cur) => [...cur, { role: 'system', text: '已停止', level: 'info', ts: Date.now() }]);
   }
 
   function onResume(): void {

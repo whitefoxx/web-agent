@@ -202,6 +202,18 @@ export interface SessionPausedEvt {
   pendingPromptPreview?: string;
 }
 
+/** Free-form inline notice the SW pushes into the chat flow when something
+ * the user should know about happens, but it's not a fatal error. Today
+ * the main consumer is the conv-lost auto-recovery in handleUserMessage /
+ * handleResume — we want the user to see "your DeepSeek conv was deleted,
+ * we're starting fresh" instead of silently doing it. */
+export interface SessionNoticeEvt {
+  type: 'SESSION_NOTICE';
+  sessionId: string;
+  level: 'info' | 'warning' | 'error';
+  text: string;
+}
+
 export interface ChatbotTabStatusEvt {
   type: 'CHATBOT_TAB_STATUS';
   chatbot: 'deepseek';
@@ -330,6 +342,7 @@ export type Message =
   | ToolTraceEvt
   | SessionDoneEvt
   | SessionPausedEvt
+  | SessionNoticeEvt
   | IterationProgressEvt
   | ChatbotTabStatusEvt
   | LogsResponse
