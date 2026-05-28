@@ -1,0 +1,12 @@
+node_modules
+dist
+.DS_Store
+*.log
+.env
+.vite
+.claude/settings.local.json
+
+# Captured DeepSeek HTML samples used as connector-selector references during
+# development. Large (~6 MB total) and contain account-scoped DOM (sidebar
+# avatars, recent-conversation titles, etc.) — keep out of source control.
+deepseek-*.html

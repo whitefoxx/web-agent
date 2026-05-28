@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "WebChat Agent",
+  "version": "0.0.1",
+  "description": "Turn any chat AI webpage (DeepSeek, ChatGPT, Gemini…) into a browser agent — zero API key, zero config.",
+  "permissions": ["sidePanel", "debugger", "tabs", "scripting", "storage", "cookies", "downloads"],
+  "host_permissions": [
+    "https://chat.deepseek.com/*",
+    "https://*.xiaohongshu.com/*",
+    "https://xiaohongshu.com/*"
+  ],
+  "background": {
+    "service_worker": "src/background/service-worker.ts",
+    "type": "module"
+  },
+  "side_panel": {
+    "default_path": "src/sidepanel/index.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://chat.deepseek.com/*"],
+      "js": ["src/connectors/deepseek/content.ts"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "action": {
+    "default_title": "WebChat Agent"
+  },
+  "minimum_chrome_version": "116"
+}
