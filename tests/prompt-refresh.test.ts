@@ -52,11 +52,11 @@ describe('buildContinuationReminder', () => {
 });
 
 describe('orchestrator continuation prompt refresh', () => {
-  // The full first-turn prompt has the judgment-guide section AND the
-  // tool-call protocol section. The continuation reminder has neither —
-  // it just appends a one-line anchor after userText. Use those as the
-  // fingerprint for distinguishing.
-  const FULL_PROMPT_FINGERPRINT = '判断指南';
+  // The full first-turn prompt has the tool-first core-principles section
+  // and the tool-call protocol section. The continuation reminder has
+  // neither — it just appends a one-line anchor after userText. Use the
+  // "核心原则" heading as the fingerprint for distinguishing.
+  const FULL_PROMPT_FINGERPRINT = '核心原则';
 
   it('first turn always sends the full first-turn prompt', async () => {
     const stub = stubDriver();
