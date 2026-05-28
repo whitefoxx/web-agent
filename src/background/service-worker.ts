@@ -258,10 +258,9 @@ async function handleUserMessage(m: UserMessageReq): Promise<void> {
     return;
   }
 
-  // 1) Continuation case: this is a follow-up message in an already-running
-  //    DeepSeek conversation. Re-use the bound tab + conv so the chatbot
-  //    keeps full context. This is what makes "看下第 3 条" work after the
-  //    first answer instead of opening a brand-new chat.
+  // 1) Continuation case: this is a follow-up message and the original
+  //    DeepSeek tab is still alive on the right conversation. Reuse it so
+  //    the chatbot keeps full context.
   const reusedTabId = await tryReuseSessionTab(session);
   if (reusedTabId !== null) {
     log(SCOPE, `continuation on session=${session.id} reusing tab=${reusedTabId}`);
@@ -270,9 +269,26 @@ async function handleUserMessage(m: UserMessageReq): Promise<void> {
     return;
   }
 
-  // 2) Fresh-session case: pick an idle tab (or open one) and start over.
-  //    Also clear any stale conv binding (could exist if the prior bound
-  //    tab was closed while session was idle).
+  // 2) Reattach case: the bound tab is gone / moved, BUT we still remember
+  //    the DeepSeek conversation URL. Open it in a fresh tab — DeepSeek
+  //    serves the conv history from the server side per URL, so the chatbot
+  //    still has all of the prior turns in context. Drive in continuation
+  //    mode so we just send the new userText (no system-prompt reinject).
+  if (session.conversationUrl) {
+    log(SCOPE, `session=${session.id} bound tab dead — re-opening conv URL`, {
+      conversationUrl: session.conversationUrl,
+    });
+    const reopened = await openOrFocusTab(session.conversationUrl);
+    if (reopened !== null) {
+      session.chatbotTabId = reopened;
+      await driveSession(session, m.text, /* resume */ false, /* continuation */ true);
+      return;
+    }
+    warn(SCOPE, `failed to re-open conv URL for session=${session.id}`);
+  }
+
+  // 3) Fresh-session case: no usable binding, no recoverable conv URL.
+  //    Pick an idle tab (or open one) and start over.
   if (!isFreshSession && (session.conversationId || session.chatbotTabId)) {
     log(SCOPE, `session=${session.id} bound tab/conv stale, starting fresh`, {
       tabId: session.chatbotTabId,
