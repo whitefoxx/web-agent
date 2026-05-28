@@ -7,9 +7,14 @@ import {
   type ChatbotBusyEvt,
   type ChatbotStreamingEvt,
   type ChatbotTabStatusEvt,
+  type DeleteSessionReq,
   type DiscardSessionReq,
   type EnsureChatbotTabReq,
+  type GetSessionReq,
+  type GetSessionResp,
   type IterationProgressEvt,
+  type ListSessionsReq,
+  type ListSessionsResp,
   type LogEntryEvt,
   type LogsResponse,
   type Message,
@@ -17,10 +22,12 @@ import {
   type ResumeSessionReq,
   type SessionDoneEvt,
   type SessionPausedEvt,
+  type SessionSummary,
   type ToolTrace,
   type ToolTraceEvt,
   type UserMessageReq,
 } from '../connectors/messages';
+import type { SessionState, Turn } from '../agent/session';
 import type { LogEntry, LogConfig } from '../runtime/log';
 import { getLogConfig, setLogConfig, subscribeLog } from '../runtime/log';
 import { makeSessionId } from '../agent/session';
@@ -409,6 +416,26 @@ export function App() {
           onClearLogs={() => setLogs([])}
           tabStatus={tabStatus}
           onOpenDeepseek={onOpenDeepseek}
+          currentSessionId={sessionId}
+          onResumeFromHistory={(id) => {
+            // Adopt the historical session as our active session, then ask
+            // SW to resume it.
+            setSessionId(id);
+            setShowDrawer(false);
+            const req: ResumeSessionReq = { type: 'RESUME_SESSION', sessionId: id };
+            chrome.runtime.sendMessage(req).catch(() => {});
+          }}
+          onDeleteHistoricalSession={(id) => {
+            const req: DeleteSessionReq = { type: 'DELETE_SESSION', sessionId: id };
+            chrome.runtime.sendMessage(req).catch(() => {});
+            // If we just deleted the current session, clear local refs.
+            if (id === sessionId) {
+              setSessionId(null);
+              setTurns([]);
+              setProgress(null);
+              setPaused(null);
+            }
+          }}
         />
       )}
     </>
@@ -633,6 +660,9 @@ function SettingsDrawer(props: {
   onClearLogs: () => void;
   tabStatus: ChatbotTabStatusEvt | null;
   onOpenDeepseek: () => void;
+  currentSessionId: string | null;
+  onResumeFromHistory: (sessionId: string) => void;
+  onDeleteHistoricalSession: (sessionId: string) => void;
 }) {
   return (
     <div class="drawer">
@@ -647,6 +677,11 @@ function SettingsDrawer(props: {
           打开 / 切换至 chat.deepseek.com
         </button>
       </div>
+      <HistorySection
+        currentSessionId={props.currentSessionId}
+        onResume={props.onResumeFromHistory}
+        onDelete={props.onDeleteHistoricalSession}
+      />
       <div class="section">
         <h4>日志</h4>
         <label class="row">
@@ -677,6 +712,235 @@ function SettingsDrawer(props: {
       </div>
     </div>
   );
+}
+
+function HistorySection({
+  currentSessionId,
+  onResume,
+  onDelete,
+}: {
+  currentSessionId: string | null;
+  onResume: (sessionId: string) => void;
+  onDelete: (sessionId: string) => void;
+}) {
+  const [list, setList] = useState<SessionSummary[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [detail, setDetail] = useState<SessionState | null>(null);
+
+  async function refresh(): Promise<void> {
+    setLoading(true);
+    try {
+      const req: ListSessionsReq = { type: 'LIST_SESSIONS' };
+      const r = (await chrome.runtime.sendMessage(req)) as ListSessionsResp | undefined;
+      setList(r?.sessions ?? []);
+    } catch {
+      setList([]);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void refresh();
+    // Auto-refresh when SESSION_DONE / SESSION_PAUSED happens — those are
+    // exactly the moments the list contents change.
+    const handler = (m: unknown) => {
+      const t = (m as { type?: string })?.type;
+      if (t === 'SESSION_DONE' || t === 'SESSION_PAUSED' || t === 'ASSISTANT_TURN') {
+        void refresh();
+      }
+    };
+    chrome.runtime.onMessage.addListener(handler);
+    return () => chrome.runtime.onMessage.removeListener(handler);
+  }, []);
+
+  async function loadDetail(id: string): Promise<void> {
+    if (expanded === id) {
+      setExpanded(null);
+      setDetail(null);
+      return;
+    }
+    setExpanded(id);
+    setDetail(null);
+    try {
+      const req: GetSessionReq = { type: 'GET_SESSION', sessionId: id };
+      const r = (await chrome.runtime.sendMessage(req)) as GetSessionResp | undefined;
+      setDetail((r?.session as SessionState | null) ?? null);
+    } catch {
+      setDetail(null);
+    }
+  }
+
+  return (
+    <div class="section">
+      <h4>
+        历史会话 <span class="muted">({list.length})</span>
+        <button
+          class="icon-btn refresh-btn"
+          title="刷新"
+          onClick={(e) => {
+            e.stopPropagation();
+            void refresh();
+          }}
+        >
+          ⟳
+        </button>
+      </h4>
+      {loading ? (
+        <div class="hist-empty">加载中…</div>
+      ) : list.length === 0 ? (
+        <div class="hist-empty">（还没有历史会话）</div>
+      ) : (
+        <ul class="hist-list">
+          {list.map((s) => {
+            const isCurrent = s.id === currentSessionId;
+            const isExpanded = expanded === s.id;
+            return (
+              <li key={s.id} class={`hist-item ${isCurrent ? 'current' : ''}`}>
+                <div class="hist-head" onClick={() => void loadDetail(s.id)}>
+                  <span class={`hist-badge ${badgeClass(s.status)}`}>{badgeText(s.status)}</span>
+                  <span class="hist-preview">
+                    {s.preview || <span class="muted">（无内容）</span>}
+                  </span>
+                  <span class="hist-ts">{relativeTime(s.updatedAt)}</span>
+                </div>
+                <div class="hist-meta">
+                  iter {s.iterations} · {s.turnCount} 轮消息 · {s.toolCallCount} 次工具调用
+                  {isCurrent && <span class="hist-current-tag"> · 当前会话</span>}
+                </div>
+                {isExpanded && (
+                  <div class="hist-detail">
+                    {detail === null ? (
+                      <div class="muted">加载详情中…</div>
+                    ) : (
+                      <SessionDetailView session={detail} />
+                    )}
+                    <div class="hist-actions">
+                      {s.status === 'paused' && s.conversationUrl && (
+                        <button
+                          class="primary"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onResume(s.id);
+                          }}
+                        >
+                          恢复会话
+                        </button>
+                      )}
+                      <button
+                        class="danger"
+                        disabled={isCurrent}
+                        title={
+                          isCurrent
+                            ? '不能删除正在进行的会话，先点 "+ 新对话"'
+                            : '从存储中永久删除这个会话'
+                        }
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (confirm('确认删除这条历史会话？')) onDelete(s.id);
+                        }}
+                      >
+                        删除
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function SessionDetailView({ session }: { session: SessionState }) {
+  return (
+    <div class="hist-turns">
+      {session.history.length === 0 ? (
+        <div class="muted">（没有消息）</div>
+      ) : (
+        session.history.map((t, i) => <DetailTurn key={i} turn={t} />)
+      )}
+    </div>
+  );
+}
+
+function DetailTurn({ turn }: { turn: Turn }) {
+  if (turn.role === 'user') {
+    return <div class="hist-turn user">{turn.text}</div>;
+  }
+  if (turn.role === 'assistant') {
+    return (
+      <div class="hist-turn assistant">
+        <Markdown text={turn.cleanedText || '（无内容）'} />
+        {turn.commands.length > 0 && (
+          <div class="hist-cmd-list">
+            {turn.commands.map((c, i) => (
+              <span key={i} class="hist-cmd-badge">
+                {c.action === 'execute_tool' ? c.tool : c.action}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+  // tool_trace
+  const t = turn.trace;
+  return (
+    <div class="hist-turn tool">
+      <span
+        class={`hist-badge ${t.status === 'completed' ? 'ok' : t.status === 'failed' ? 'err' : 'pending'}`}
+      >
+        {t.action}
+        {t.tool ? ` ${t.tool}` : ''}
+      </span>
+      {t.error && <pre class="hist-err">{t.error}</pre>}
+    </div>
+  );
+}
+
+function badgeClass(status: SessionSummary['status']): string {
+  switch (status) {
+    case 'running':
+      return 'pending';
+    case 'paused':
+      return 'warn';
+    case 'error':
+      return 'err';
+    case 'aborted':
+      return 'muted';
+    default:
+      return 'ok';
+  }
+}
+
+function badgeText(status: SessionSummary['status']): string {
+  switch (status) {
+    case 'running':
+      return '进行中';
+    case 'paused':
+      return '已暂停';
+    case 'error':
+      return '出错';
+    case 'aborted':
+      return '已终止';
+    case 'idle':
+      return '已完成';
+    default:
+      return status;
+  }
+}
+
+function relativeTime(ts: number): string {
+  const diff = Date.now() - ts;
+  if (diff < 60_000) return '刚刚';
+  if (diff < 3600_000) return `${Math.floor(diff / 60_000)} 分钟前`;
+  if (diff < 86400_000) return `${Math.floor(diff / 3600_000)} 小时前`;
+  if (diff < 7 * 86400_000) return `${Math.floor(diff / 86400_000)} 天前`;
+  return new Date(ts).toLocaleDateString();
 }
 
 function append<T>(arr: T[], item: T, max: number): T[] {

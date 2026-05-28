@@ -71,6 +71,55 @@ export interface GetSessionStateReq {
   type: 'GET_SESSION_STATE';
 }
 
+/** Sidepanel asks SW to enumerate persisted sessions (for the history
+ * drawer). SW reads from session-store (IndexedDB). */
+export interface ListSessionsReq {
+  type: 'LIST_SESSIONS';
+  limit?: number;
+}
+
+export interface ListSessionsResp {
+  type: 'LIST_SESSIONS_RESP';
+  sessions: SessionSummary[];
+}
+
+export interface SessionSummary {
+  id: string;
+  createdAt: number;
+  updatedAt: number;
+  status: 'idle' | 'running' | 'paused' | 'aborted' | 'error';
+  conversationId: string | null;
+  conversationUrl: string | null;
+  pauseReason: string | null;
+  iterations: number;
+  /** First user turn text (truncated). */
+  preview: string;
+  /** Total turn counts for the row badge. */
+  turnCount: number;
+  toolCallCount: number;
+}
+
+/** Sidepanel asks SW to load a single session's full state (for the
+ * history detail view). */
+export interface GetSessionReq {
+  type: 'GET_SESSION';
+  sessionId: string;
+}
+
+export interface GetSessionResp {
+  type: 'GET_SESSION_RESP';
+  /** Whole SessionState (or null if not in storage). */
+  session: unknown;
+}
+
+/** Hard-delete a historical session from storage. Distinct from
+ * DiscardSessionReq, which aborts an in-flight session and only flips
+ * its status to 'aborted'. */
+export interface DeleteSessionReq {
+  type: 'DELETE_SESSION';
+  sessionId: string;
+}
+
 /* ───────── Service Worker → SidePanel ───────── */
 
 export interface AssistantTurnEvt {
@@ -249,6 +298,11 @@ export type Message =
   | EnsureChatbotTabReq
   | RequestLogsReq
   | GetSessionStateReq
+  | ListSessionsReq
+  | ListSessionsResp
+  | GetSessionReq
+  | GetSessionResp
+  | DeleteSessionReq
   | AssistantTurnEvt
   | ToolTraceEvt
   | SessionDoneEvt

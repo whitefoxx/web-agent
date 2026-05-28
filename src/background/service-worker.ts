@@ -26,7 +26,9 @@ import {
   type ToolExecResult,
 } from '../agent/orchestrator';
 import {
+  deleteSession,
   isDeepseekIdleUrl,
+  listSessions,
   loadSession,
   makeSession,
   parseConversationUrl,
@@ -43,10 +45,15 @@ import type {
   ChatbotStreamingEvt,
   ChatbotTabStatusEvt,
   ConnectorReadyEvt,
+  DeleteSessionReq,
   DiscardSessionReq,
   EnsureChatbotTabReq,
+  GetSessionReq,
+  GetSessionResp,
   InjectPromptReq,
   IterationProgressEvt,
+  ListSessionsReq,
+  ListSessionsResp,
   LogEntryEvt,
   LogsResponse,
   Message,
@@ -54,6 +61,7 @@ import type {
   ResumeSessionReq,
   SessionDoneEvt,
   SessionPausedEvt,
+  SessionSummary,
   ToolTraceEvt,
   UserMessageReq,
 } from '../connectors/messages';
@@ -204,6 +212,27 @@ chrome.runtime.onMessage.addListener((msg: unknown, sender, sendResponse): boole
     case 'GET_SESSION_STATE': {
       sendResponse({ activeSessionIds: [...activeSessions.keys()] });
       return false;
+    }
+    case 'LIST_SESSIONS': {
+      void handleListSessions(m as ListSessionsReq).then(
+        (resp) => sendResponse(resp),
+        (e) => sendResponse({ ok: false, error: String(e?.message ?? e) }),
+      );
+      return true;
+    }
+    case 'GET_SESSION': {
+      void handleGetSession(m as GetSessionReq).then(
+        (resp) => sendResponse(resp),
+        (e) => sendResponse({ ok: false, error: String(e?.message ?? e) }),
+      );
+      return true;
+    }
+    case 'DELETE_SESSION': {
+      void handleDeleteSession(m as DeleteSessionReq).then(
+        () => sendResponse({ ok: true }),
+        (e) => sendResponse({ ok: false, error: String(e?.message ?? e) }),
+      );
+      return true;
     }
     case 'CONNECTOR_READY': {
       handleConnectorReady(m as ConnectorReadyEvt, sender);
@@ -427,6 +456,52 @@ async function handleEnsureTab(_m: EnsureChatbotTabReq): Promise<ChatbotTabStatu
 
 function handleRequestLogs(_m: RequestLogsReq): LogsResponse {
   return { type: 'LOGS_RESPONSE', entries: getLocalBuffer() };
+}
+
+async function handleListSessions(m: ListSessionsReq): Promise<ListSessionsResp> {
+  const sessions = await listSessions({ limit: m.limit ?? 100 });
+  return {
+    type: 'LIST_SESSIONS_RESP',
+    sessions: sessions.map(summarise),
+  };
+}
+
+function summarise(s: SessionState): SessionSummary {
+  let preview = '';
+  let toolCallCount = 0;
+  for (const t of s.history) {
+    if (!preview && t.role === 'user') preview = t.text;
+    if (t.role === 'tool_trace') toolCallCount += 1;
+  }
+  return {
+    id: s.id,
+    createdAt: s.createdAt,
+    updatedAt: s.updatedAt,
+    status: s.status,
+    conversationId: s.conversationId,
+    conversationUrl: s.conversationUrl,
+    pauseReason: s.pauseReason ?? null,
+    iterations: s.iterations,
+    preview: preview.slice(0, 200),
+    turnCount: s.history.filter((t) => t.role === 'user' || t.role === 'assistant').length,
+    toolCallCount,
+  };
+}
+
+async function handleGetSession(m: GetSessionReq): Promise<GetSessionResp> {
+  const s = await loadSession(m.sessionId);
+  return { type: 'GET_SESSION_RESP', session: s };
+}
+
+async function handleDeleteSession(m: DeleteSessionReq): Promise<void> {
+  log(SCOPE, `DELETE_SESSION ${m.sessionId}`);
+  const entry = activeSessions.get(m.sessionId);
+  if (entry) {
+    // Stop any in-flight work before we delete the persisted row.
+    entry.abort.abort();
+    activeSessions.delete(m.sessionId);
+  }
+  await deleteSession(m.sessionId);
 }
 
 function handleConnectorReady(m: ConnectorReadyEvt, sender: chrome.runtime.MessageSender): void {

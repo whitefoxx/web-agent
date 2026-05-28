@@ -618,3 +618,176 @@ footer .hint {
 .drawer .log .ts {
   color: var(--muted);
 }
+
+/* ───────── history list ───────── */
+
+.drawer .section h4 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.drawer .section h4 .muted {
+  color: var(--muted);
+  font-weight: 400;
+  font-size: 11px;
+}
+.drawer .section h4 .refresh-btn {
+  margin-left: auto;
+  padding: 0 6px;
+  font-size: 12px;
+}
+
+.hist-empty {
+  color: var(--muted);
+  font-size: 11px;
+  padding: 8px 0;
+}
+.hist-list {
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.hist-item {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  background: white;
+  margin-bottom: 6px;
+  font-size: 11px;
+}
+.hist-item.current {
+  border-color: var(--accent);
+  background: var(--bubble-user);
+}
+.hist-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.hist-preview {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.hist-ts {
+  color: var(--muted);
+  font-size: 10px;
+  flex-shrink: 0;
+}
+.hist-meta {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 10px;
+}
+.hist-current-tag {
+  color: var(--accent);
+  font-weight: 600;
+}
+.hist-badge {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  flex-shrink: 0;
+}
+.hist-badge.ok {
+  color: var(--ok);
+  border-color: var(--ok);
+}
+.hist-badge.warn {
+  color: var(--warn);
+  border-color: var(--warn);
+}
+.hist-badge.err {
+  color: var(--err);
+  border-color: var(--err);
+}
+.hist-badge.pending {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.hist-badge.muted {
+  color: var(--muted);
+}
+.hist-detail {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+.hist-turns {
+  max-height: 240px;
+  overflow-y: auto;
+  margin-bottom: 6px;
+}
+.hist-turn {
+  font-size: 11px;
+  padding: 4px 6px;
+  margin: 4px 0;
+  border-radius: 4px;
+}
+.hist-turn.user {
+  background: var(--bubble-user);
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+.hist-turn.assistant {
+  background: var(--bg);
+  border: 1px solid var(--border);
+}
+.hist-turn.tool {
+  font-family: 'SFMono-Regular', Menlo, Monaco, Consolas, monospace;
+  font-size: 10px;
+  color: var(--muted);
+}
+.hist-cmd-list {
+  margin-top: 4px;
+  display: flex;
+  gap: 3px;
+  flex-wrap: wrap;
+}
+.hist-cmd-badge {
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--bubble-tool);
+  color: var(--accent);
+  font-family: 'SFMono-Regular', Menlo, Monaco, Consolas, monospace;
+}
+.hist-err {
+  margin: 4px 0 0;
+  color: var(--err);
+  font-size: 10px;
+  white-space: pre-wrap;
+}
+.hist-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  margin-top: 6px;
+}
+.hist-actions button {
+  border: none;
+  border-radius: 4px;
+  padding: 3px 10px;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.hist-actions button.primary {
+  background: var(--accent);
+  color: white;
+}
+.hist-actions button.danger {
+  background: white;
+  color: var(--err);
+  border: 1px solid var(--err);
+}
+.hist-actions button.danger:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
