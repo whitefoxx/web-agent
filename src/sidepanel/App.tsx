@@ -897,17 +897,20 @@ function LlmBackendSection({
     }
   }
 
+  function buildNext(): LlmConfig {
+    return mode === 'connector'
+      ? { mode: 'connector', chatbot }
+      : {
+          mode: 'api',
+          provider,
+          baseUrl: baseUrl.trim(),
+          apiKey: apiKey.trim(),
+          model: model.trim(),
+        };
+  }
+
   function save(): void {
-    const next: LlmConfig =
-      mode === 'connector'
-        ? { mode: 'connector', chatbot }
-        : {
-            mode: 'api',
-            provider,
-            baseUrl: baseUrl.trim(),
-            apiKey: apiKey.trim(),
-            model: model.trim(),
-          };
+    const next = buildNext();
     void saveLlmConfig(next);
     onSave(next);
     setSaved(true);
@@ -919,6 +922,16 @@ function LlmBackendSection({
       ? CHATBOTS.find((c) => c.id === chatbot)?.implemented !== false
       : !!apiKey.trim() && !!baseUrl.trim() && !!model.trim();
 
+  // What's CURRENTLY in effect (from the saved config, not the draft being
+  // edited) — shown up top so the active backend is never ambiguous.
+  const activeLabel =
+    config.mode === 'api'
+      ? `API · ${config.model || config.provider}`
+      : `聊天网页 · ${CHATBOTS.find((c) => c.id === config.chatbot)?.label ?? config.chatbot}`;
+  // Does the draft differ from what's saved? If so the user must hit Save for
+  // it to take effect — surfaced as an explicit warning so it can't be missed.
+  const dirty = JSON.stringify(buildNext()) !== JSON.stringify(config);
+
   const segStyle = (active: boolean): string =>
     `flex:1;padding:5px 8px;border-radius:6px;cursor:pointer;font-size:12px;border:1px solid ${active ? 'var(--accent,#4f7cff)' : 'var(--border,#ddd)'};background:${active ? 'var(--accent,#4f7cff)' : 'transparent'};color:${active ? '#fff' : 'inherit'}`;
   const chipStyle = (active: boolean): string =>
@@ -928,12 +941,19 @@ function LlmBackendSection({
   return (
     <div class="section">
       <h4>LLM 后端</h4>
+      <div style="font-size:11px;color:var(--muted);margin:-2px 0 6px">
+        当前生效：<strong style="color:var(--fg)">{activeLabel}</strong>
+      </div>
+
+      <div style="font-size:11px;color:var(--muted);margin-bottom:4px">
+        选择推理来源（二选一，改完点最下方保存才生效）：
+      </div>
       <div style="display:flex;gap:6px;margin-bottom:8px">
         <button style={segStyle(mode === 'connector')} onClick={() => setMode('connector')}>
-          劫持聊天网页
+          {mode === 'connector' ? '● ' : '○ '}聊天网页（零 Key）
         </button>
         <button style={segStyle(mode === 'api')} onClick={() => setMode('api')}>
-          API Key
+          {mode === 'api' ? '● ' : '○ '}自带 API Key
         </button>
       </div>
 
@@ -994,8 +1014,18 @@ function LlmBackendSection({
         </div>
       )}
 
-      <button class="icon-btn" style="margin-top:8px" disabled={!canSave} onClick={save}>
-        {saved ? '已保存 ✓' : '保存后端设置'}
+      {dirty && !saved && (
+        <div style="font-size:11px;color:var(--error);margin-top:8px">
+          ⚠ 有未保存的改动 —— 点下方按钮后才会切换 / 生效
+        </div>
+      )}
+      <button
+        class="icon-btn"
+        style={`margin-top:8px${dirty && !saved ? ';border-color:var(--accent);color:var(--accent);font-weight:600' : ''}`}
+        disabled={!canSave}
+        onClick={save}
+      >
+        {saved ? '已保存 ✓' : dirty ? '保存并启用' : '保存后端设置'}
       </button>
     </div>
   );
