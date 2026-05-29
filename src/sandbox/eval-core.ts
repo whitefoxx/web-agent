@@ -174,7 +174,8 @@ export function evalAdapterSource(src: string): EvalResult {
   const values = names.map((n) => scope[n]);
   const body = stripModuleSyntax(src);
   try {
-    // eslint-disable-next-line @typescript-eslint/no-implied-eval, no-new-func
+    // `new Function` is the eval mechanism; permitted here because this file
+    // only ever runs inside the MV3 sandboxed iframe (unsafe-eval CSP).
     const fn = new Function(...names, `"use strict";\n${body}`);
     fn(...values);
   } catch (e) {

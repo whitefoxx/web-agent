@@ -3,6 +3,7 @@ import { crx } from '@crxjs/vite-plugin';
 import preact from '@preact/preset-vite';
 import manifest from './manifest.json';
 import { resolve } from 'node:path';
+import { existsSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
 import { build as esbuild } from 'esbuild';
 
@@ -32,6 +33,8 @@ const opencliAliases = {
  * no chrome.* loader), and register the page in the built manifest. Inlining
  * sidesteps every path/loader pitfall.
  */
+const MARKET_INDEX = 'marketplace-index.json';
+
 function sandboxPagePlugin(): Plugin {
   const SANDBOX_HTML = 'sandbox.html';
   let outDir = resolve(__dirname, 'dist');
@@ -70,12 +73,25 @@ function sandboxPagePlugin(): Plugin {
 `;
       await writeFile(resolve(outDir, SANDBOX_HTML), html, 'utf8');
 
-      // 3. Register the page in the built manifest.
+      // 3. Bundle the marketplace index (if generated) as a web-accessible
+      //    resource so the SidePanel can browse a default catalog out of the
+      //    box (chrome.runtime.getURL). A remote index URL set in settings
+      //    overrides this — that's how the catalog updates without a rebuild.
+      const indexSrc = resolve(__dirname, 'marketplace/index.json');
+      let bundledIndex = false;
+      if (existsSync(indexSrc)) {
+        await writeFile(resolve(outDir, MARKET_INDEX), await readFile(indexSrc, 'utf8'), 'utf8');
+        bundledIndex = true;
+      }
+
+      // 4. Register the page + resources in the built manifest.
       const manifestPath = resolve(outDir, 'manifest.json');
       const builtManifest = JSON.parse(await readFile(manifestPath, 'utf8'));
       builtManifest.sandbox = { pages: [SANDBOX_HTML] };
+      const resources = [SANDBOX_HTML];
+      if (bundledIndex) resources.push(MARKET_INDEX);
       const war = builtManifest.web_accessible_resources ?? [];
-      war.push({ resources: [SANDBOX_HTML], matches: ['<all_urls>'] });
+      war.push({ resources, matches: ['<all_urls>'] });
       builtManifest.web_accessible_resources = war;
       await writeFile(manifestPath, JSON.stringify(builtManifest, null, 2), 'utf8');
     },
