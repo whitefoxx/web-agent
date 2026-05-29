@@ -121,9 +121,20 @@
 - `scripts/build-marketplace-index.mjs` — 从 opencli `clis/` 生成 index.json。
 - `src/sidepanel/Adapters.tsx` — 市场 tab + 已装 tab + 贴码安装 + 启用/删除 + 安全提示。
 
-**待建(Phase B func 型)**
-- 优先:`chrome.userScripts` 路线(world 跑 func + `page` Proxy:evaluate 本地、其余 RPC 回 SW)。
-- 兜底:`chrome.offscreen` + sandbox iframe + 全量 `page.*` RPC 桥。
+**Phase B func 型(进行中)**
+- 优先:`chrome.userScripts` 路线(func 在目标 tab 的 USER_SCRIPT world 里跑:`evaluate`/`wait`/`scroll` **本地**执行,`goto`/`getCookies`/`cdp`/`screenshot`/… RPC 回 SW)。
+- 兜底:`chrome.offscreen` + sandbox iframe + 全量 `page.*` RPC 桥(仅当 userScripts 驱动模型不成立时启用)。
+- 已建(可测核心,无需 Chrome,`f8e54e0`):`src/userscript/run-in-page.ts` + `tests/run-in-page.test.ts`。
+- 待建(需真实 Chrome 验证):SW 侧 `chrome.userScripts.configureWorld + execute + onUserScriptMessage`、RPC 服务端(用 CDP 兑现 page.*)、reinject 循环、`"userScripts"` 权限 + 每扩展开关、dispatcher 把已装 func adapter 路由到这里。
+
+### Phase B 可行性结论(实测,回答"opencli func adapter 能否转换后用 userScripts 跑")
+
+**能,且几乎零改造。** 扫描整个 opencli func 语料(~700 个):
+- **~526(75%)func 体内不调 `page.goto`** —— 靠 host 导航(`domain`/`navigateBefore`),只在已加载页面上 `evaluate`/`scroll` 抓取。**原样**就能在页内 world 跑。
+- **~170(24%)只调一次 `page.goto`**(goto-at-top → 抓取,如 youtube/zhihu/github search)。用 **navigate-then-reinject 蹦床**通用处理,无需逐个改:`goto(url)` 若不在目标 url 则 RPC SW 导航 + 抛 `NAVIGATE_RESTART`;SW 导航后**重新注入**;func 从头再跑,goto 此时 no-op,继续抓取。
+- **~4 个调两次 goto**(交错有状态)+ CDP 重度的 → 回落现有 CDP `PageShim`。
+
+`userScripts.execute()` 是否返回值不影响:注入脚本用 `chrome.runtime` 消息(`onUserScriptMessage`,已证支持)把结果传回 SW。代价:Chrome 138+ 需用户手动开每扩展「允许用户脚本」开关(用户已接受,零配置已降级)。
 
 ## 7. 安全(贯穿)
 
@@ -137,5 +148,7 @@
 1. **A1**(✅):sandbox eval 宿主 + capture + 构建产物。
 2. **A2**:安装管线 + IndexedDB + registry 卸载 + SW 路由 + boot 恢复。贴码安装端到端。
 3. **A3**:市场客户端 + index 生成 + Adapters UI。
-4. (暂停,等用户验收 A)
-5. **B**:func 型热插拔。**先 spike userScripts.execute 驱动模型**;成立则走 userScripts,否则回落 sandbox+offscreen。
+4. (Phase A 已落地,等用户在真实 Chrome 验收)
+5. **B**:func 型热插拔(userScripts 主选)。
+   - **B1**(✅ `f8e54e0`):可行性实测 + in-page func runner 可测核心(`run-in-page.ts`)。
+   - **B2**(待做):SW 侧 userScripts 接线 + page.* RPC 服务端 + reinject 循环 + dispatcher 路由 + 权限/开关。需真实 Chrome 验证。
