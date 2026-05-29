@@ -1,8 +1,15 @@
 # Adapter 运行时热插拔 + 市场 — 架构与决策记录
 
 > 决策记录(ADR)。记录"不重 build 即可安装/卸载 adapter,并做成市场"这一功能的架构与关键取舍。
-> 状态:进行中。A1(sandbox eval 宿主)已落地;A2/A3/B 待做。
-> 最后更新:2026-05。
+> 状态:**Phase A 全部落地**(A1 sandbox eval 宿主、A2 安装管线+UI、A3 市场)。Phase B(func 型)待做。
+> 分支:`feat/adapter-hot-plug-marketplace`。最后更新:2026-05。
+>
+> **进度**:A1 `c7c8014` · A2-backend `3658b08` · A2-frontend `37a4904` · A3 `fed214a`。
+> 现状:用户在 SidePanel ⚙ → Adapters 里「市场」一键装 / 「贴码安装」,装完即用、可禁用/卸载、跨重启持久,**全程不重 build**。默认市场目录内置 122 个 opencli pipeline adapter(`marketplace/index.json`,`scripts/build-marketplace-index.mjs` 生成);市场页 ⚙ 可配远程 index URL → **目录也不用重 build 即可更新**。pipeline 型装完能跑;func 型可安装+列出但标「待 Phase B」、暂不执行。
+>
+> **Phase B 方向(已定)**:用户偏好 `chrome.userScripts`(func 里 evaluate 在网页 world 本地跑、其余 page.* RPC 回 SW),sandbox+offscreen 兜底。开工前先 spike `userScripts.execute` 的"驱动模型"(goto 跨导航后注入上下文是否还在)。
+>
+> ⚠️ Phase A 尚未在真实 Chrome 加载里端到端验证(sandbox iframe postMessage 往返、市场 fetch、IndexedDB 持久化)。
 
 ## 0. 动机(用户原话)
 
