@@ -15,6 +15,7 @@ const opencliAliases = {
   '@jackwener/opencli/utils': resolve(__dirname, 'src/runtime/opencli/utils.ts'),
   '@jackwener/opencli/logger': resolve(__dirname, 'src/runtime/opencli/logger.ts'),
   '@jackwener/opencli/types': resolve(__dirname, 'src/runtime/opencli/types.ts'),
+  '@jackwener/opencli/pipeline': resolve(__dirname, 'src/runtime/opencli/pipeline.ts'),
 };
 
 // @ts-expect-error -- crxjs manifest typing is looser than our JSON

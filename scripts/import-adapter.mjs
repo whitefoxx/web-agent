@@ -39,7 +39,7 @@ const REWRITES = [];
 // opencli subpaths we provide a browser shim for. Anything OUTSIDE this set
 // (download/*, browser/*, pipeline, …) has no shim and the adapter will fail
 // to resolve — flag it so the importer knows manual work is required.
-const SHIMMED_SUBPATHS = new Set(['registry', 'errors', 'utils', 'logger', 'types']);
+const SHIMMED_SUBPATHS = new Set(['registry', 'errors', 'utils', 'logger', 'types', 'pipeline']);
 
 // Imports that signal the adapter needs manual surgery before it can run in an
 // extension (node-only APIs, or opencli subpaths without a browser shim yet).

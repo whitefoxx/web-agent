@@ -23,7 +23,8 @@
       "@jackwener/opencli/errors": ["src/runtime/errors.js"],
       "@jackwener/opencli/utils": ["src/runtime/opencli/utils.ts"],
       "@jackwener/opencli/logger": ["src/runtime/opencli/logger.ts"],
-      "@jackwener/opencli/types": ["src/runtime/opencli/types.ts"]
+      "@jackwener/opencli/types": ["src/runtime/opencli/types.ts"],
+      "@jackwener/opencli/pipeline": ["src/runtime/opencli/pipeline.ts"]
     }
   },
   "include": ["src"]

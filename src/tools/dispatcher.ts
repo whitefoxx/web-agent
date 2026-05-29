@@ -8,6 +8,7 @@
  */
 
 import { lookupAdapter, type AdapterDef } from './manifest';
+import { runPipeline, type Pipeline } from '../runtime/opencli/pipeline';
 import { createPageShim } from '../runtime/page';
 import { log, warn, error as logError } from '../runtime/log';
 import { RateLimitedError, AuthRequiredError, EmptyResultError } from '../runtime/errors.js';
@@ -72,17 +73,6 @@ export async function executeAdapter(opts: {
     return failed(t0, `tool not found: ${opts.tool}`, 'tool_not_found');
   }
 
-  // opencli permits func-less commands whose logic lives in a declarative
-  // `pipeline` (e.g. hackernews/top). We register them (so schema + discovery
-  // work, proving source-level compat) but can't run them without a pipeline
-  // engine yet. Fail clearly rather than crashing on adapter.func(...).
-  if (typeof adapter.func !== 'function') {
-    const why = (adapter as { pipeline?: unknown }).pipeline
-      ? 'it is a pipeline-only opencli adapter; the pipeline engine is not implemented in this extension yet'
-      : 'it has no executable func';
-    return failed(t0, `${opts.tool} cannot run: ${why}.`, 'generic');
-  }
-
   // Validate args BEFORE we burn a tab/CDP attach on a guaranteed-broken
   // call. Chatbots periodically guess arg names from URL patterns or help
   // text (e.g. sending `keyword` when the schema wants `query`); when that
@@ -91,6 +81,26 @@ export async function executeAdapter(opts: {
   const argError = validateArgs(adapter, opts.args ?? {});
   if (argError) {
     return failed(t0, argError, 'generic');
+  }
+
+  // opencli pipeline-only adapters (no func, declarative `pipeline`): run the
+  // pipeline engine. These are pure HTTP+transform (hackernews/coingecko/
+  // weather/wikipedia/…) — no tab, no CDP, no anti-bot pacing needed. The SW's
+  // own fetch bypasses CORS via host_permissions.
+  const pipeline = (adapter as { pipeline?: unknown }).pipeline;
+  if (typeof adapter.func !== 'function') {
+    if (!Array.isArray(pipeline) || pipeline.length === 0) {
+      return failed(t0, `${opts.tool} cannot run: no func and no pipeline.`, 'generic');
+    }
+    const args = withArgDefaults(adapter, opts.args ?? {});
+    log('dispatcher', `executing ${opts.tool} (pipeline, ${pipeline.length} steps)`, { args });
+    try {
+      const { rows } = await runPipeline(pipeline as Pipeline, { args });
+      log('dispatcher', `success ${opts.tool}`, { rows: rows.length, durationMs: Date.now() - t0 });
+      return { ok: true, result: rows, durationMs: Date.now() - t0 };
+    } catch (e) {
+      return classifyError(t0, e);
+    }
   }
 
   // Pause before doing anything to make the call rhythm human-ish even
@@ -226,6 +236,21 @@ function failed(t0: number, error: string, kind: ToolExecResult['errorKind']): T
 
 function msgOf(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
+}
+
+/** Merge an adapter's declared arg defaults under the caller-supplied args.
+ * Pipeline expressions like `${{ args.limit }}` rely on defaults being present
+ * (opencli applies them during CLI arg coercion; our func path lets adapters
+ * read `kwargs` directly, but pipelines need the defaults pre-filled). */
+function withArgDefaults(
+  adapter: AdapterDef,
+  args: Record<string, unknown>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const a of adapter.args ?? []) {
+    if (a.default !== undefined) out[a.name] = a.default;
+  }
+  return { ...out, ...args };
 }
 
 /** Check the chatbot's `args` against the adapter's declared schema.
