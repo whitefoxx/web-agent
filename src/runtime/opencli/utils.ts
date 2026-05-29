@@ -61,7 +61,7 @@ export function createMarkdownConverter(configure?: (td: TurndownService) => voi
 export function htmlToMarkdown(value: string, configure?: (td: TurndownService) => void): string {
   return createMarkdownConverter(configure)
     .turndown(value || '')
-    .replace(/ /g, ' ')
+    .replace(/\u00a0/g, ' ')
     .replace(/\n{4,}/g, '\n\n\n')
     .replace(/[ \t]+$/gm, '')
     .trim();

@@ -28,11 +28,17 @@ describe('cli() registration', () => {
     expect(found?.site).toBe('testsite');
   });
 
-  it('throws on missing required fields', () => {
+  it('throws on missing site/name but tolerates a missing func', () => {
     expect(() => cli(null as any)).toThrow();
     expect(() => cli({ name: 'x', func: async () => {} } as any)).toThrow(/site/);
     expect(() => cli({ site: 'x', func: async () => {} } as any)).toThrow(/name/);
-    expect(() => cli({ site: 'x', name: 'y' } as any)).toThrow(/func/);
+    // opencli permits func-less commands whose logic is a declarative
+    // `pipeline` (e.g. hackernews/top.js). Requiring func would reject those
+    // and break source-level drop-in compat, so cli() registers with a warning
+    // instead of throwing. The dispatcher returns a clear error if such a
+    // command is actually executed without a pipeline engine.
+    expect(() => cli({ site: 'funcless', name: 'y' } as any)).not.toThrow();
+    expect(findAdapter('funcless', 'y')?.name).toBe('y');
   });
 });
 
