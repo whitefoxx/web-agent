@@ -37,6 +37,9 @@ import {
 } from '../agent/session';
 import { executeAdapter } from '../tools/dispatcher';
 import { lookupAdapter } from '../tools/manifest';
+import { loadLlmConfig } from '../config/llm-config';
+import { apiEngine } from '../agent/api-engine';
+import type { EngineContext } from '../agent/engine';
 import type {
   AbortSessionReq,
   AssistantTurnEvt,
@@ -347,6 +350,15 @@ async function handleUserMessage(m: UserMessageReq): Promise<void> {
       m.sessionId,
       'session is paused. Resume it or discard before sending a new message.',
     );
+    return;
+  }
+
+  // LLM backend selection. In `api` mode we don't need a chatbot tab at all —
+  // tool calls are native and resolve their own per-site tabs via the
+  // dispatcher. Branch here, before any DeepSeek-tab plumbing.
+  const llmConfig = await loadLlmConfig();
+  if (llmConfig.mode === 'api') {
+    await driveApiSession(session, m.text);
     return;
   }
 
@@ -814,6 +826,36 @@ async function driveSession(
   }
 }
 
+/** API-mode session runner. No chatbot tab: the api engine talks to an
+ * OpenAI-compatible endpoint and runs tools through the shared dispatcher
+ * (which resolves its own per-site tabs). Emits the same OrchEvent UI stream
+ * as the connector path via forwardOrchEvent. */
+async function driveApiSession(session: SessionState, userText: string): Promise<void> {
+  const abortCtl = new AbortController();
+  activeSessions.set(session.id, { session, abort: abortCtl });
+  const ctx: EngineContext = {
+    session,
+    userText,
+    signal: abortCtl.signal,
+    emit: (evt) => forwardOrchEvent(session.id, evt),
+    executeTool: makeExecuteTool(session.id),
+  };
+  try {
+    await apiEngine.run(ctx);
+  } catch (e) {
+    logError(SCOPE, 'apiEngine.run threw', e);
+    sendToSidepanel({
+      type: 'SESSION_DONE',
+      sessionId: session.id,
+      reason: 'error',
+      error: String(e instanceof Error ? e.message : e),
+    } satisfies SessionDoneEvt);
+  } finally {
+    activeSessions.delete(session.id);
+    await saveSession(session);
+  }
+}
+
 function sendErrorDone(sessionId: string, error: string): void {
   sendToSidepanel({
     type: 'SESSION_DONE',
@@ -1048,6 +1090,33 @@ function rejectPendingForTab(
 
 /* ───────── driver wiring ───────── */
 
+/** Build the shared tool executor for a session: gates `write` adapters behind
+ * explicit user approval, then runs via the dispatcher. Shared by the
+ * connector driver and the api engine so both modes enforce write-confirm. */
+function makeExecuteTool(
+  sessionId: string,
+): (opts: { tool: string; args: Record<string, unknown> }) => Promise<ToolExecResult> {
+  return async (opts) => {
+    const adapter = lookupAdapter(opts.tool);
+    if (adapter?.access === 'write') {
+      const approved = await requestWriteConfirmation(
+        sessionId,
+        opts.tool,
+        opts.args,
+        adapter.description,
+      );
+      if (!approved) {
+        return {
+          ok: false,
+          error: 'User declined to execute this write operation.',
+          durationMs: 0,
+        };
+      }
+    }
+    return executeAdapter(opts) as Promise<ToolExecResult>;
+  };
+}
+
 function makeDriver(sessionId: string, tabId: number): Driver {
   return {
     async inject({ iterationId, text }) {
@@ -1092,31 +1161,7 @@ function makeDriver(sessionId: string, tabId: number): Driver {
         });
       });
     },
-    executeTool: async (opts) => {
-      // Gate write-ops behind explicit user approval. The chatbot's
-      // system prompt already tells it to confirm in natural language
-      // first; this is a runtime safety net so a runaway chatbot can't
-      // post or reply on the user's account without the user clicking
-      // through.
-      const adapter = lookupAdapter(opts.tool);
-      if (adapter?.access === 'write') {
-        const approved = await requestWriteConfirmation(
-          sessionId,
-          opts.tool,
-          opts.args,
-          adapter.description,
-        );
-        if (!approved) {
-          return {
-            ok: false,
-            error: 'User declined to execute this write operation.',
-            errorKind: 'generic',
-            durationMs: 0,
-          };
-        }
-      }
-      return executeAdapter(opts) as Promise<ToolExecResult>;
-    },
+    executeTool: makeExecuteTool(sessionId),
     emit(evt) {
       forwardOrchEvent(sessionId, evt);
     },

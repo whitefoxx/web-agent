@@ -10,6 +10,7 @@
  */
 
 import type { ParsedCommand } from '../connectors/messages';
+import type { ApiMessage } from './api-types';
 import { log } from '../runtime/log';
 import {
   deleteSessionFromDb,
@@ -82,6 +83,10 @@ export interface SessionState {
   status: SessionStatus;
   iterations: number;
   history: Turn[];
+  /** API-mode (api-engine) running OpenAI message array, persisted across
+   * follow-up turns so native tool_calls / tool results stay paired 1:1.
+   * Unused in connector mode. */
+  apiMessages?: ApiMessage[];
 }
 
 /* Persistent storage is delegated to session-store.ts (IndexedDB). The

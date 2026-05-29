@@ -34,6 +34,16 @@ import type { SessionState, Turn } from '../agent/session';
 import type { LogEntry, LogConfig } from '../runtime/log';
 import { getLogConfig, setLogConfig, subscribeLog } from '../runtime/log';
 import { makeSessionId } from '../agent/session';
+import {
+  CHATBOTS,
+  DEFAULT_CONFIG,
+  PROVIDERS,
+  loadLlmConfig,
+  providerById,
+  saveLlmConfig,
+  type ChatbotId,
+  type LlmConfig,
+} from '../config/llm-config';
 
 const DEEPSEEK_URL = 'https://chat.deepseek.com';
 
@@ -61,6 +71,7 @@ export function App() {
   const [showDrawer, setShowDrawer] = useState(false);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [logCfg, setLogCfgState] = useState<LogConfig>(() => getLogConfig());
+  const [llmConfig, setLlmConfig] = useState<LlmConfig>(DEFAULT_CONFIG);
 
   const messagesRef = useRef<HTMLDivElement>(null);
   // Mirror of `sessionId` for the chrome.runtime.onMessage listener (which
@@ -102,6 +113,11 @@ export function App() {
         port?.disconnect();
       } catch {}
     };
+  }, []);
+
+  /* load LLM backend config (mode / provider / chatbot) */
+  useEffect(() => {
+    void loadLlmConfig().then(setLlmConfig);
   }, []);
 
   /* autoscroll on new turn */
@@ -434,18 +450,36 @@ export function App() {
     return 'DeepSeek 已就绪';
   }, [tabStatus]);
 
+  // Backend-readiness derivations. In api mode there's no DeepSeek tab — the
+  // input gates on whether an API key is configured instead.
+  const isApiMode = llmConfig.mode === 'api';
+  const apiReady = llmConfig.mode === 'api' && !!llmConfig.apiKey;
+  const apiLabel = llmConfig.mode === 'api' ? llmConfig.model || llmConfig.provider : '';
+  const inputBlocked = !!paused || (isApiMode ? !apiReady : statusKind === 'err');
+
   return (
     <>
       <header>
         <span class="title">WebChat Agent</span>
-        <span
-          class={`status-pill ${statusKind}`}
-          onClick={statusKind === 'err' ? onOpenDeepseek : () => void requestEnsureTab()}
-          title={statusKind === 'err' ? '点击打开 chat.deepseek.com' : '点击刷新状态'}
-        >
-          <span class="dot" />
-          {statusText}
-        </span>
+        {isApiMode ? (
+          <span
+            class={`status-pill ${apiReady ? 'ok' : 'warn'}`}
+            onClick={() => setShowDrawer(true)}
+            title="API 模式 · 点击打开设置"
+          >
+            <span class="dot" />
+            {apiReady ? `API · ${apiLabel}` : 'API 未配置'}
+          </span>
+        ) : (
+          <span
+            class={`status-pill ${statusKind}`}
+            onClick={statusKind === 'err' ? onOpenDeepseek : () => void requestEnsureTab()}
+            title={statusKind === 'err' ? '点击打开 chat.deepseek.com' : '点击刷新状态'}
+          >
+            <span class="dot" />
+            {statusText}
+          </span>
+        )}
         <span class="header-actions">
           <button
             class="icon-btn"
@@ -465,7 +499,7 @@ export function App() {
         {turns.map((t, i) => (
           <TurnView key={i} turn={t} />
         ))}
-        {progress && !paused && <ProgressBanner progress={progress} />}
+        {progress && !paused && <ProgressBanner progress={progress} isApi={isApiMode} />}
         {paused && <PausedBanner paused={paused} onResume={onResume} onDiscard={onDiscard} />}
         {pendingConfirms.length > 0 && (
           <WriteConfirmCard
@@ -482,14 +516,18 @@ export function App() {
             placeholder={
               paused
                 ? '会话已暂停，先点上方"恢复"或"丢弃"…'
-                : statusKind === 'err'
-                  ? '先点击右上角连接 DeepSeek…'
-                  : '问我点什么，比如：帮我看看小红书首页最近有什么内容'
+                : isApiMode
+                  ? apiReady
+                    ? '问我点什么，比如：帮我看看小红书首页最近有什么内容'
+                    : '先在右上角设置里填入 API Key…'
+                  : statusKind === 'err'
+                    ? '先点击右上角连接 DeepSeek…'
+                    : '问我点什么，比如：帮我看看小红书首页最近有什么内容'
             }
             value={input}
             onInput={(e) => setInput((e.target as HTMLTextAreaElement).value)}
             onKeyDown={onKeyDown}
-            disabled={statusKind === 'err' || !!paused}
+            disabled={inputBlocked}
             rows={2}
           />
           {running ? (
@@ -500,17 +538,22 @@ export function App() {
             <button
               class="primary"
               onClick={onSend}
-              disabled={!input.trim() || statusKind === 'err' || !!paused}
+              disabled={!input.trim() || inputBlocked}
             >
               发送
             </button>
           )}
         </div>
-        <div class="hint">Enter 发送 · Shift+Enter 换行 · 由 chat.deepseek.com 提供推理算力</div>
+        <div class="hint">
+          Enter 发送 · Shift+Enter 换行 ·{' '}
+          {isApiMode ? `由 ${apiLabel || 'API'} 提供推理` : '由 chat.deepseek.com 提供推理算力'}
+        </div>
       </footer>
 
       {showDrawer && (
         <SettingsDrawer
+          llmConfig={llmConfig}
+          onSaveLlmConfig={(c) => setLlmConfig(c)}
           logs={logs}
           logCfg={logCfg}
           onChangeLogCfg={async (next) => {
@@ -574,13 +617,15 @@ export function App() {
   );
 }
 
-function ProgressBanner({ progress }: { progress: ProgressState }) {
+function ProgressBanner({ progress, isApi }: { progress: ProgressState; isApi?: boolean }) {
   const label =
     progress.phase === 'injecting'
-      ? `正在把消息注入到 DeepSeek tab…`
+      ? isApi
+        ? `正在请求模型…`
+        : `正在把消息注入到 DeepSeek tab…`
       : progress.phase === 'streaming'
-        ? `DeepSeek 正在生成 (~${progress.textLen ?? 0} 字)…`
-        : `DeepSeek 思考中… (iter ${progress.iteration})`;
+        ? `${isApi ? '模型' : 'DeepSeek'} 正在生成 (~${progress.textLen ?? 0} 字)…`
+        : `${isApi ? '模型' : 'DeepSeek'} 思考中… (iter ${progress.iteration})`;
   return (
     <div class="progress-banner">
       <span class="dots">
@@ -822,6 +867,140 @@ function previewResult(r: unknown): string {
   }
 }
 
+function LlmBackendSection({
+  config,
+  onSave,
+}: {
+  config: LlmConfig;
+  onSave: (c: LlmConfig) => void;
+}) {
+  const [mode, setMode] = useState<'connector' | 'api'>(config.mode);
+  const [chatbot, setChatbot] = useState<ChatbotId>(
+    config.mode === 'connector' ? config.chatbot : 'deepseek',
+  );
+  const [provider, setProvider] = useState(config.mode === 'api' ? config.provider : 'deepseek');
+  const [baseUrl, setBaseUrl] = useState(
+    config.mode === 'api' ? config.baseUrl : (providerById('deepseek')?.baseUrl ?? ''),
+  );
+  const [apiKey, setApiKey] = useState(config.mode === 'api' ? config.apiKey : '');
+  const [model, setModel] = useState(
+    config.mode === 'api' ? config.model : (providerById('deepseek')?.defaultModel ?? ''),
+  );
+  const [saved, setSaved] = useState(false);
+
+  function pickProvider(id: string): void {
+    setProvider(id);
+    const p = providerById(id);
+    if (p && id !== 'custom') {
+      setBaseUrl(p.baseUrl);
+      setModel(p.defaultModel);
+    }
+  }
+
+  function save(): void {
+    const next: LlmConfig =
+      mode === 'connector'
+        ? { mode: 'connector', chatbot }
+        : {
+            mode: 'api',
+            provider,
+            baseUrl: baseUrl.trim(),
+            apiKey: apiKey.trim(),
+            model: model.trim(),
+          };
+    void saveLlmConfig(next);
+    onSave(next);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 1500);
+  }
+
+  const canSave =
+    mode === 'connector'
+      ? CHATBOTS.find((c) => c.id === chatbot)?.implemented !== false
+      : !!apiKey.trim() && !!baseUrl.trim() && !!model.trim();
+
+  const segStyle = (active: boolean): string =>
+    `flex:1;padding:5px 8px;border-radius:6px;cursor:pointer;font-size:12px;border:1px solid ${active ? 'var(--accent,#4f7cff)' : 'var(--border,#ddd)'};background:${active ? 'var(--accent,#4f7cff)' : 'transparent'};color:${active ? '#fff' : 'inherit'}`;
+  const chipStyle = (active: boolean): string =>
+    `padding:2px 8px;border-radius:4px;font-size:11px;cursor:pointer;border:1px solid ${active ? 'var(--accent,#4f7cff)' : 'var(--border,#ddd)'};background:${active ? 'var(--accent,#4f7cff)' : 'transparent'};color:${active ? '#fff' : 'inherit'}`;
+  const fieldStyle = 'display:flex;flex-direction:column;gap:2px;font-size:12px';
+
+  return (
+    <div class="section">
+      <h4>LLM 后端</h4>
+      <div style="display:flex;gap:6px;margin-bottom:8px">
+        <button style={segStyle(mode === 'connector')} onClick={() => setMode('connector')}>
+          劫持聊天网页
+        </button>
+        <button style={segStyle(mode === 'api')} onClick={() => setMode('api')}>
+          API Key
+        </button>
+      </div>
+
+      {mode === 'connector' ? (
+        <label style={fieldStyle}>
+          <span>聊天网页</span>
+          <select
+            value={chatbot}
+            onChange={(e) => setChatbot((e.target as HTMLSelectElement).value as ChatbotId)}
+          >
+            {CHATBOTS.map((c) => (
+              <option value={c.id} disabled={!c.implemented}>
+                {c.label}
+              </option>
+            ))}
+          </select>
+          <span style="font-size:11px;color:var(--muted)">
+            用你已登录的聊天网页推理，零 API Key。目前仅 DeepSeek 可用。
+          </span>
+        </label>
+      ) : (
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <div style="display:flex;gap:4px;flex-wrap:wrap">
+            {PROVIDERS.map((p) => (
+              <button style={chipStyle(provider === p.id)} onClick={() => pickProvider(p.id)}>
+                {p.label}
+              </button>
+            ))}
+          </div>
+          <label style={fieldStyle}>
+            <span>Base URL</span>
+            <input
+              value={baseUrl}
+              placeholder="https://api.deepseek.com"
+              onInput={(e) => setBaseUrl((e.target as HTMLInputElement).value)}
+            />
+          </label>
+          <label style={fieldStyle}>
+            <span>API Key</span>
+            <input
+              type="password"
+              value={apiKey}
+              placeholder="sk-…"
+              onInput={(e) => setApiKey((e.target as HTMLInputElement).value)}
+            />
+          </label>
+          <label style={fieldStyle}>
+            <span>Model</span>
+            <input
+              value={model}
+              placeholder="deepseek-chat"
+              onInput={(e) => setModel((e.target as HTMLInputElement).value)}
+            />
+          </label>
+          <span style="font-size:11px;color:var(--muted)">
+            任何兼容 OpenAI /chat/completions 的服务都可用。Key 仅存于本机 chrome.storage。
+          </span>
+        </div>
+      )}
+
+      <button class="icon-btn" style="margin-top:8px" disabled={!canSave} onClick={save}>
+        {saved ? '已保存 ✓' : '保存后端设置'}
+      </button>
+    </div>
+  );
+}
+
 function SettingsDrawer(props: {
   logs: LogEntry[];
   logCfg: LogConfig;
@@ -833,11 +1012,15 @@ function SettingsDrawer(props: {
   onResumeFromHistory: (sessionId: string) => void;
   onOpenSession: (sessionId: string) => void;
   onDeleteHistoricalSession: (sessionId: string) => void;
+  llmConfig: LlmConfig;
+  onSaveLlmConfig: (c: LlmConfig) => void;
 }) {
   return (
     <div class="drawer">
-      <div class="section">
-        <h4>DeepSeek 标签页</h4>
+      <LlmBackendSection config={props.llmConfig} onSave={props.onSaveLlmConfig} />
+      {props.llmConfig.mode === 'connector' && (
+        <div class="section">
+          <h4>DeepSeek 标签页</h4>
         <div style="font-size:11px;color:var(--muted)">
           {props.tabStatus?.tabId === null || !props.tabStatus
             ? '未打开'
@@ -846,7 +1029,8 @@ function SettingsDrawer(props: {
         <button class="icon-btn" style="margin-top:4px" onClick={props.onOpenDeepseek}>
           打开 / 切换至 chat.deepseek.com
         </button>
-      </div>
+        </div>
+      )}
       <HistorySection
         currentSessionId={props.currentSessionId}
         onResume={props.onResumeFromHistory}
