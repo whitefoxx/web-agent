@@ -28,8 +28,13 @@ import type { SessionState, SessionStatus } from './session';
 import { warn } from '../runtime/log';
 
 const DB_NAME = 'webchat-agent';
-const DB_VERSION = 1;
+// v2 adds the `installed_adapters` store (see adapters/installed-store.ts).
+// BOTH openers of this shared DB must use the SAME version and create ALL
+// stores on upgrade, or a v1 connection from one module blocks the other's v2
+// open. They also register onversionchange (below) to step aside on a bump.
+const DB_VERSION = 2;
 const STORE_SESSIONS = 'sessions';
+const STORE_INSTALLED = 'installed_adapters';
 
 function hasIndexedDb(): boolean {
   try {
@@ -51,13 +56,30 @@ function openDb(): Promise<IDBDatabase> {
       const req = indexedDB.open(DB_NAME, DB_VERSION);
       req.onupgradeneeded = () => {
         const db = req.result;
+        // Create whichever stores are missing — handles a fresh DB and the
+        // v1→v2 bump, and stays consistent with installed-store's upgrade so
+        // whichever module opens first creates the full schema.
         if (!db.objectStoreNames.contains(STORE_SESSIONS)) {
           const store = db.createObjectStore(STORE_SESSIONS, { keyPath: 'id' });
           store.createIndex('by_updated', 'updatedAt');
           store.createIndex('by_status', 'status');
         }
+        if (!db.objectStoreNames.contains(STORE_INSTALLED)) {
+          const store = db.createObjectStore(STORE_INSTALLED, { keyPath: 'id' });
+          store.createIndex('by_updated', 'updatedAt');
+          store.createIndex('by_enabled', 'enabled');
+        }
       };
-      req.onsuccess = () => resolve(req.result);
+      req.onsuccess = () => {
+        const db = req.result;
+        // If another context requests a version bump, close this connection so
+        // its upgrade isn't blocked (the cause of "IDB open blocked").
+        db.onversionchange = () => {
+          db.close();
+          dbPromise = null;
+        };
+        resolve(db);
+      };
       req.onerror = () => reject(req.error ?? new Error('IDB open failed'));
       req.onblocked = () => reject(new Error('IDB open blocked'));
     }).catch((e) => {

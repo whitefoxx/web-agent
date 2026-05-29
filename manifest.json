@@ -30,5 +30,11 @@
   "action": {
     "default_title": "WebChat Agent"
   },
+  "web_accessible_resources": [
+    {
+      "resources": ["sandbox.html", "marketplace-index.json"],
+      "matches": ["<all_urls>"]
+    }
+  ],
   "minimum_chrome_version": "116"
 }

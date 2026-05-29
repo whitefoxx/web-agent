@@ -37,17 +37,12 @@ const MARKET_INDEX = 'marketplace-index.json';
 
 function sandboxPagePlugin(): Plugin {
   const SANDBOX_HTML = 'sandbox.html';
-  let outDir = resolve(__dirname, 'dist');
   return {
     name: 'webchat-sandbox-page',
     apply: 'build',
-    configResolved(cfg) {
-      outDir = resolve(cfg.root, cfg.build.outDir);
-    },
-    // closeBundle runs AFTER every plugin's writeBundle (including @crxjs's
-    // manifest emit), so our manifest patch survives.
-    async closeBundle() {
-      // 1. Bundle the eval host (pure, dependency-free) to one IIFE string.
+    async writeBundle(_opts, bundle) {
+      // 1. Write the REAL self-contained sandbox page, overwriting whatever
+      //    @crxjs emitted for the "sandbox.html" placeholder.
       const result = await esbuild({
         entryPoints: [resolve(__dirname, 'src/sandbox/eval-host.ts')],
         bundle: true,
@@ -57,9 +52,6 @@ function sandboxPagePlugin(): Plugin {
         legalComments: 'none',
       });
       const code = result.outputFiles[0].text;
-
-      // 2. Write a self-contained sandbox page (classic inline script — no
-      //    module, no chrome.*, no external fetch).
       const html = `<!doctype html>
 <html lang="en">
   <head>
@@ -71,29 +63,26 @@ function sandboxPagePlugin(): Plugin {
   </body>
 </html>
 `;
-      await writeFile(resolve(outDir, SANDBOX_HTML), html, 'utf8');
+      await writeFile(resolve(__dirname, 'dist', SANDBOX_HTML), html, 'utf8');
 
-      // 3. Bundle the marketplace index (if generated) as a web-accessible
-      //    resource so the SidePanel can browse a default catalog out of the
-      //    box (chrome.runtime.getURL). A remote index URL set in settings
-      //    overrides this — that's how the catalog updates without a rebuild.
+      // 2. Copy the real marketplace index to dist (overwriting the placeholder).
       const indexSrc = resolve(__dirname, 'marketplace/index.json');
-      let bundledIndex = false;
       if (existsSync(indexSrc)) {
-        await writeFile(resolve(outDir, MARKET_INDEX), await readFile(indexSrc, 'utf8'), 'utf8');
-        bundledIndex = true;
+        await writeFile(
+          resolve(__dirname, 'dist', MARKET_INDEX),
+          await readFile(indexSrc, 'utf8'),
+          'utf8',
+        );
       }
 
-      // 4. Register the page + resources in the built manifest.
-      const manifestPath = resolve(outDir, 'manifest.json');
-      const builtManifest = JSON.parse(await readFile(manifestPath, 'utf8'));
-      builtManifest.sandbox = { pages: [SANDBOX_HTML] };
-      const resources = [SANDBOX_HTML];
-      if (bundledIndex) resources.push(MARKET_INDEX);
-      const war = builtManifest.web_accessible_resources ?? [];
-      war.push({ resources, matches: ['<all_urls>'] });
-      builtManifest.web_accessible_resources = war;
-      await writeFile(manifestPath, JSON.stringify(builtManifest, null, 2), 'utf8');
+      // 3. Patch sandbox.pages into the built manifest.
+      const manifestPath = resolve(__dirname, 'dist', 'manifest.json');
+      if (existsSync(manifestPath)) {
+        const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+        manifest.sandbox = { pages: [SANDBOX_HTML] };
+        await writeFile(manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
+      }
+      void bundle;
     },
   };
 }

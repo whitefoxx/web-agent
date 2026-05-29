@@ -95,7 +95,17 @@ function openDb(): Promise<IDBDatabase> {
           s.createIndex('by_enabled', 'enabled');
         }
       };
-      req.onsuccess = () => resolve(req.result);
+      req.onsuccess = () => {
+        const db = req.result;
+        // Step aside if another context bumps the version, so its upgrade isn't
+        // blocked. (Both this and session-store open the shared DB at v2; the
+        // missing handler here + the version skew was the "IDB open blocked".)
+        db.onversionchange = () => {
+          db.close();
+          dbPromise = null;
+        };
+        resolve(db);
+      };
       req.onerror = () => reject(req.error ?? new Error('IDB open failed'));
       req.onblocked = () => reject(new Error('IDB open blocked'));
     }).catch((e) => {
