@@ -77,6 +77,10 @@ import type {
 // with the global registry that openAiToolsFromRegistry / lookupAdapter read.
 import '../tools/xiaohongshu/_all';
 import '../tools/generic/_all';
+// Unmodified opencli adapter, byte-imported via scripts/import-adapter.mjs.
+// Its `@jackwener/opencli/*` imports resolve through the Vite alias to our
+// shims — proof of source-level opencli compatibility.
+import '../tools/hackernews/_all';
 
 const SCOPE = 'sw';
 

@@ -75,7 +75,9 @@ export interface PageShim {
    * `page.wait(1)` expecting "1 second" and the destructuring form would
    * silently no-op (`{time}` from a number → undefined → setTimeout(NaN)).
    */
-  wait(opts: { time: number } | number): Promise<void>;
+  wait(
+    opts: { time?: number; selector?: string; text?: string; timeout?: number } | number,
+  ): Promise<void>;
   autoScroll(opts: { times: number; delayMs?: number }): Promise<void>;
   getCookies(): Promise<chrome.cookies.Cookie[]>;
   screenshot(): Promise<string>;
@@ -149,6 +151,41 @@ export interface PageShim {
    * since the last call (or since installInterceptor was first invoked).
    */
   getInterceptedRequests(): Promise<unknown[]>;
+
+  /* ───────── opencli IPage compat surface ─────────
+   * Rounds out the parts of opencli's IPage that its adapters actually call
+   * (verified against the full clis/ corpus). High-frequency ones (pressKey,
+   * getCurrentUrl, nativeType/Click, setFileInput) are real CDP impls; a few
+   * long-tail ones degrade with a clear throw rather than silently no-op. */
+
+  /** Dispatch a single key (Enter, Escape, ArrowDown, …) to the focused
+   * element via CDP Input. */
+  pressKey(key: string): Promise<void>;
+  /** opencli alias: type into the focused element. */
+  type(text: string): Promise<void>;
+  /** Current tab URL (adapters use this to detect redirects). */
+  getCurrentUrl(): Promise<string | null>;
+  /** Native (trusted) typing via CDP Input.insertText. */
+  nativeType(text: string): Promise<void>;
+  /** Native mouse click at viewport coords via CDP Input.dispatchMouseEvent. */
+  nativeClick(x: number, y: number): Promise<void>;
+  /** Native key press with optional modifiers via CDP. */
+  nativeKeyPress(key: string, modifiers?: string[]): Promise<void>;
+  /** Set files on an <input type=file>. Throws in the extension sandbox (no
+   * host filesystem paths) — use the attachments flow instead. */
+  setFileInput(files: string[], selector?: string): Promise<void>;
+  /** Raw CDP escape hatch — send any CDP command on this tab. */
+  cdp(method: string, params?: Record<string, unknown>): Promise<unknown>;
+  /** opencli alias of wait, in milliseconds. */
+  waitForTimeout(ms: number): Promise<void>;
+  /** opencli network-capture trio, mapped onto captureNetwork. Arms a capture
+   * for the next response matching `pattern`. */
+  startNetworkCapture(pattern?: string): Promise<boolean>;
+  /** Drain bodies armed by startNetworkCapture. */
+  readNetworkCapture(): Promise<unknown[]>;
+  /** Block until the armed startNetworkCapture body arrives (or timeout). */
+  waitForCapture(timeout?: number): Promise<void>;
+
   detach(): Promise<void>;
 }
 
@@ -159,6 +196,11 @@ export async function createPageShim(
   const target: DebugTarget = { tabId };
   let attached = false;
   const attachments = opts.attachments ?? [];
+
+  // State for the opencli network-capture trio (startNetworkCapture /
+  // waitForCapture / readNetworkCapture), layered on top of captureNetwork.
+  let pendingCapture: Promise<unknown> | null = null;
+  const capturedBodies: unknown[] = [];
 
   async function ensureAttached() {
     if (attached) return;
@@ -229,7 +271,7 @@ export async function createPageShim(
     return result.result?.value as T;
   }
 
-  return {
+  const page: PageShim = {
     tabId,
 
     async goto(url) {
@@ -266,7 +308,37 @@ export async function createPageShim(
     },
 
     async wait(opts) {
-      const time = typeof opts === 'number' ? opts : opts?.time;
+      // opencli's wait() is overloaded: a bare number / {time} sleeps N
+      // seconds; {selector} or {text} polls the page until the condition holds
+      // (or {timeout} ms elapse). Adapters rely on the polling form to avoid
+      // blind fixed sleeps after navigation.
+      const o = typeof opts === 'number' ? { time: opts } : (opts ?? {});
+      if (o.selector || o.text) {
+        const timeoutMs = typeof o.timeout === 'number' ? o.timeout : 10_000;
+        const sel = o.selector ? JSON.stringify(o.selector) : 'null';
+        const txt = o.text ? JSON.stringify(o.text) : 'null';
+        log(
+          'page',
+          `wait for ${o.selector ? `selector ${o.selector}` : `text ${o.text}`} (≤${timeoutMs}ms)`,
+        );
+        const js = `
+          new Promise((resolve) => {
+            const sel = ${sel}, txt = ${txt};
+            const hit = () => {
+              if (sel && document.querySelector(sel)) return true;
+              if (txt && (document.body?.innerText || '').includes(txt)) return true;
+              return false;
+            };
+            if (hit()) return resolve(true);
+            const obs = new MutationObserver(() => { if (hit()) { obs.disconnect(); resolve(true); } });
+            obs.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+            setTimeout(() => { obs.disconnect(); resolve(false); }, ${timeoutMs});
+          })
+        `;
+        await evalJs(js);
+        return;
+      }
+      const time = o.time;
       const secs = typeof time === 'number' && Number.isFinite(time) ? Math.max(0, time) : 0;
       log('page', `wait ${secs}s`);
       await new Promise((r) => setTimeout(r, secs * 1000));
@@ -540,6 +612,155 @@ export async function createPageShim(
       return Array.isArray(result) ? result : [];
     },
 
+    /* ───────── opencli IPage compat surface ───────── */
+
+    async pressKey(key: string) {
+      await ensureAttached();
+      log('page', `pressKey ${key}`);
+      // CDP needs windowsVirtualKeyCode for non-printable keys to fire
+      // correctly. Cover the keys opencli adapters actually press; fall back to
+      // a bare key event for anything else.
+      const SPECIAL: Record<string, { code: string; vk: number; text?: string }> = {
+        Enter: { code: 'Enter', vk: 13, text: '\r' },
+        Tab: { code: 'Tab', vk: 9 },
+        Escape: { code: 'Escape', vk: 27 },
+        Backspace: { code: 'Backspace', vk: 8 },
+        Delete: { code: 'Delete', vk: 46 },
+        ArrowUp: { code: 'ArrowUp', vk: 38 },
+        ArrowDown: { code: 'ArrowDown', vk: 40 },
+        ArrowLeft: { code: 'ArrowLeft', vk: 37 },
+        ArrowRight: { code: 'ArrowRight', vk: 39 },
+        Home: { code: 'Home', vk: 36 },
+        End: { code: 'End', vk: 35 },
+        PageUp: { code: 'PageUp', vk: 33 },
+        PageDown: { code: 'PageDown', vk: 34 },
+      };
+      const s = SPECIAL[key];
+      const down: Record<string, unknown> = s
+        ? { type: 'keyDown', key, code: s.code, windowsVirtualKeyCode: s.vk, nativeVirtualKeyCode: s.vk }
+        : { type: 'keyDown', key };
+      if (s?.text) down.text = s.text;
+      await chrome.debugger.sendCommand(target, 'Input.dispatchKeyEvent', down);
+      const up: Record<string, unknown> = s
+        ? { type: 'keyUp', key, code: s.code, windowsVirtualKeyCode: s.vk, nativeVirtualKeyCode: s.vk }
+        : { type: 'keyUp', key };
+      await chrome.debugger.sendCommand(target, 'Input.dispatchKeyEvent', up);
+    },
+
+    async type(text: string) {
+      await page.insertText(text);
+    },
+
+    async getCurrentUrl() {
+      try {
+        const tab = await chrome.tabs.get(tabId);
+        return tab.url ?? null;
+      } catch {
+        return null;
+      }
+    },
+
+    async nativeType(text: string) {
+      await ensureAttached();
+      log('page', `nativeType (${text.length} chars)`);
+      await chrome.debugger.sendCommand(target, 'Input.insertText', { text });
+    },
+
+    async nativeClick(x: number, y: number) {
+      await ensureAttached();
+      log('page', `nativeClick (${x},${y})`);
+      await chrome.debugger.sendCommand(target, 'Input.dispatchMouseEvent', {
+        type: 'mousePressed',
+        x,
+        y,
+        button: 'left',
+        clickCount: 1,
+      });
+      await chrome.debugger.sendCommand(target, 'Input.dispatchMouseEvent', {
+        type: 'mouseReleased',
+        x,
+        y,
+        button: 'left',
+        clickCount: 1,
+      });
+    },
+
+    async nativeKeyPress(key: string, modifiers: string[] = []) {
+      await ensureAttached();
+      // CDP modifier bitmask: Alt=1, Ctrl=2, Meta/Cmd=4, Shift=8.
+      const BITS: Record<string, number> = { Alt: 1, Control: 2, Ctrl: 2, Meta: 4, Cmd: 4, Shift: 8 };
+      const mod = modifiers.reduce((acc, m) => acc | (BITS[m] ?? 0), 0);
+      log('page', `nativeKeyPress ${key} mods=${modifiers.join('+') || 'none'}`);
+      await chrome.debugger.sendCommand(target, 'Input.dispatchKeyEvent', { type: 'keyDown', key, modifiers: mod });
+      await chrome.debugger.sendCommand(target, 'Input.dispatchKeyEvent', { type: 'keyUp', key, modifiers: mod });
+    },
+
+    async setFileInput(files: string[], selector?: string) {
+      // CDP DOM.setFileInputFiles needs absolute host-FS paths, which the
+      // extension sandbox doesn't have. Be honest rather than silently no-op;
+      // adapters that publish images should use getAttachments instead.
+      void files;
+      void selector;
+      throw new Error(
+        'setFileInput is not supported in the extension sandbox (no host filesystem paths). ' +
+          'Use the side-panel attachments flow (page.getAttachments) for file uploads.',
+      );
+    },
+
+    async cdp(method: string, params: Record<string, unknown> = {}) {
+      await ensureAttached();
+      log('page', `cdp ${method}`);
+      return chrome.debugger.sendCommand(target, method, params);
+    },
+
+    async waitForTimeout(ms: number) {
+      const millis = typeof ms === 'number' && Number.isFinite(ms) ? Math.max(0, ms) : 0;
+      log('page', `waitForTimeout ${millis}ms`);
+      await new Promise((r) => setTimeout(r, millis));
+    },
+
+    async startNetworkCapture(pattern?: string) {
+      // Map opencli's stateful capture onto our two-phase captureNetwork. Arm
+      // now; the body is awaited by waitForCapture / readNetworkCapture.
+      const pat = pattern ?? '.';
+      log('page', `startNetworkCapture pattern=${pat}`);
+      const cap = await page.captureNetwork(pat);
+      pendingCapture = cap.body
+        .then((body) => {
+          capturedBodies.push(body);
+          return body;
+        })
+        .catch((e) => {
+          warn('page', 'startNetworkCapture body failed', e);
+          return null;
+        });
+      return true;
+    },
+
+    async waitForCapture(timeout?: number) {
+      if (!pendingCapture) {
+        log('page', 'waitForCapture: nothing armed');
+        return;
+      }
+      log('page', `waitForCapture (≤${timeout ?? 'default'}ms)`);
+      if (typeof timeout === 'number') {
+        await Promise.race([pendingCapture, new Promise((r) => setTimeout(r, timeout))]);
+      } else {
+        await pendingCapture;
+      }
+    },
+
+    async readNetworkCapture() {
+      if (pendingCapture) {
+        await Promise.race([pendingCapture, new Promise((r) => setTimeout(r, 0))]);
+      }
+      const out = capturedBodies.slice();
+      capturedBodies.length = 0;
+      pendingCapture = null;
+      log('page', `readNetworkCapture (${out.length} bodies)`);
+      return out;
+    },
+
     async detach() {
       if (!attached) return;
       log('page', 'debugger.detach');
@@ -551,4 +772,6 @@ export async function createPageShim(
       attached = false;
     },
   };
+
+  return page;
 }

@@ -28,15 +28,22 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
-const REWRITES = [
-  [/(['"])@jackwener\/opencli\/registry\1/g, '$1../../runtime/registry.js$1'],
-  [/(['"])@jackwener\/opencli\/errors\1/g, '$1../../runtime/errors.js$1'],
-];
+// As of the opencli-compat work, adapter files are copied VERBATIM — their
+// `@jackwener/opencli/<subpath>` imports resolve at build time through the
+// Vite `resolve.alias` (and tsconfig `paths`) entries pointing at our local
+// browser-safe shims (src/runtime/registry.js, errors.js, opencli/utils.ts,
+// opencli/logger.ts, opencli/types.ts). No import rewriting needed — keep the
+// copy byte-identical so re-imports diff cleanly against upstream.
+const REWRITES = [];
 
-// Imports that signal the adapter needs manual surgery before it can run
-// in an extension (Node-only APIs / opencli internals without shims yet).
+// opencli subpaths we provide a browser shim for. Anything OUTSIDE this set
+// (download/*, browser/*, pipeline, …) has no shim and the adapter will fail
+// to resolve — flag it so the importer knows manual work is required.
+const SHIMMED_SUBPATHS = new Set(['registry', 'errors', 'utils', 'logger', 'types']);
+
+// Imports that signal the adapter needs manual surgery before it can run in an
+// extension (node-only APIs, or opencli subpaths without a browser shim yet).
 const HARD_BLOCKS = [
-  /@jackwener\/opencli\/download/,
   /\bnode:fs\b/,
   /\bnode:os\b/,
   /\bnode:path\b/,
@@ -64,9 +71,14 @@ async function importOne(srcPath) {
   for (const block of HARD_BLOCKS) {
     if (block.test(text)) warnings.push(block.source);
   }
+  // Flag any @jackwener/opencli/<subpath> we don't have a browser shim for.
+  for (const m of text.matchAll(/@jackwener\/opencli\/([a-zA-Z][a-zA-Z/-]*)/g)) {
+    const sub = m[1].split('/')[0];
+    if (!SHIMMED_SUBPATHS.has(sub)) warnings.push(`@jackwener/opencli/${m[1]} (no shim)`);
+  }
   if (warnings.length) {
     console.warn(
-      `⚠️  ${file}: hard-block matches [${warnings.join(', ')}] — copying anyway, manual fix required`,
+      `⚠️  ${file}: needs attention [${[...new Set(warnings)].join(', ')}] — copying anyway, manual fix may be required`,
     );
   }
 

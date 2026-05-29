@@ -72,6 +72,17 @@ export async function executeAdapter(opts: {
     return failed(t0, `tool not found: ${opts.tool}`, 'tool_not_found');
   }
 
+  // opencli permits func-less commands whose logic lives in a declarative
+  // `pipeline` (e.g. hackernews/top). We register them (so schema + discovery
+  // work, proving source-level compat) but can't run them without a pipeline
+  // engine yet. Fail clearly rather than crashing on adapter.func(...).
+  if (typeof adapter.func !== 'function') {
+    const why = (adapter as { pipeline?: unknown }).pipeline
+      ? 'it is a pipeline-only opencli adapter; the pipeline engine is not implemented in this extension yet'
+      : 'it has no executable func';
+    return failed(t0, `${opts.tool} cannot run: ${why}.`, 'generic');
+  }
+
   // Validate args BEFORE we burn a tab/CDP attach on a guaranteed-broken
   // call. Chatbots periodically guess arg names from URL patterns or help
   // text (e.g. sending `keyword` when the schema wants `query`); when that
@@ -102,7 +113,10 @@ export async function executeAdapter(opts: {
 
   let tabId: number;
   try {
-    tabId = await ensureSiteTab(adapter.site);
+    // Pass the adapter's declared `domain` (opencli field) so adapters from
+    // sites we have no hardcoded mapping for still open at the right host
+    // instead of the `https://<site>.com` guess.
+    tabId = await ensureSiteTab(adapter.site, adapter.domain);
   } catch (e) {
     return failed(t0, `failed to open ${adapter.site} tab: ${msgOf(e)}`, 'tab');
   }
@@ -124,9 +138,11 @@ export async function executeAdapter(opts: {
   }
 }
 
-async function ensureSiteTab(site: string): Promise<number> {
-  const patterns = SITE_QUERY_URL[site];
-  const landing = SITE_LANDING_URL[site] ?? `https://${site}.com`;
+async function ensureSiteTab(site: string, domain?: string): Promise<number> {
+  // Landing URL priority: hardcoded map → adapter's opencli `domain` → guess.
+  // Reuse priority: hardcoded query patterns → `*://<domain>/*`.
+  const patterns = SITE_QUERY_URL[site] ?? (domain ? [`*://${domain}/*`] : undefined);
+  const landing = SITE_LANDING_URL[site] ?? (domain ? `https://${domain}/` : `https://${site}.com`);
 
   if (patterns) {
     const tabs = await chrome.tabs.query({ url: patterns });

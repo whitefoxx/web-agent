@@ -2,18 +2,29 @@
   "compilerOptions": {
     "target": "ES2022",
     "module": "ESNext",
-    "moduleResolution": "Bundler",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["chrome", "node"],
+    "jsx": "react-jsx",
+    "jsxImportSource": "preact",
     "strict": true,
-    "noImplicitAny": false,
-    "esModuleInterop": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
     "skipLibCheck": true,
-    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "verbatimModuleSyntax": false,
     "isolatedModules": true,
     "allowJs": true,
-    "jsx": "preserve",
-    "jsxImportSource": "preact",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "types": ["chrome", "node"]
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      "@jackwener/opencli/registry": ["src/runtime/registry.js"],
+      "@jackwener/opencli/errors": ["src/runtime/errors.js"],
+      "@jackwener/opencli/utils": ["src/runtime/opencli/utils.ts"],
+      "@jackwener/opencli/logger": ["src/runtime/opencli/logger.ts"],
+      "@jackwener/opencli/types": ["src/runtime/opencli/types.ts"]
+    }
   },
-  "include": ["src", "scripts", "tests"]
+  "include": ["src"]
 }
