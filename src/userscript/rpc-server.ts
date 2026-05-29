@@ -4,8 +4,9 @@
  *
  * When an installed func adapter runs in a tab's USER_SCRIPT world, its
  * DOM-local calls (evaluate/wait/scroll) run in-page, but the chrome.* / CDP
- * ones (goto/getCookies/screenshot/cdp/native*/interceptors/downloadFile) are
- * RPC'd back to the SW. The SW holds the real PageShim (CDP via chrome.debugger
+ * ones (goto, getCookies, screenshot, cdp, native input, interceptors,
+ * downloadFile) are RPC'd back to the SW, which holds the real PageShim (CDP
+ * via chrome.debugger
  * + chrome.cookies/tabs), so it fulfills each RPC by calling the matching shim
  * method. This module is that dispatch table.
  *

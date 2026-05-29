@@ -48,7 +48,6 @@ export const RPC_METHODS = new Set([
   'getCookies',
   'screenshot',
   'cdp',
-  'captureNetwork',
   'installInterceptor',
   'getInterceptedRequests',
   'downloadFile',
@@ -57,6 +56,13 @@ export const RPC_METHODS = new Set([
   'nativeKeyPress',
   'setFileInput',
 ]);
+// NOTE: `captureNetwork` is deliberately NOT RPC-able — it returns
+// `{ body: Promise<T> }` (a two-phase armed capture), which doesn't serialize
+// across the message boundary. The ~5 corpus adapters that use it fall back to
+// the CDP PageShim path. A func calling page.captureNetwork in-page will get a
+// clear "not a function" rather than a silently broken capture. The
+// rpc-server's SERVER_METHODS must stay in lockstep with this set (a test
+// asserts they're equal).
 
 export type Rpc = (method: string, args: Record<string, unknown>) => Promise<unknown>;
 
