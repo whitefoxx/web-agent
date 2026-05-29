@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { Markdown } from './Markdown';
+import { AdaptersSection } from './Adapters';
 import type { UiTurn } from './types';
 import {
   type AbortSessionReq,
@@ -1061,6 +1062,7 @@ function SettingsDrawer(props: {
         </button>
         </div>
       )}
+      <AdaptersSection />
       <HistorySection
         currentSessionId={props.currentSessionId}
         onResume={props.onResumeFromHistory}
