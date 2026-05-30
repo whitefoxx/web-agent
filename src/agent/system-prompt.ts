@@ -12,14 +12,20 @@
 import { getRegistry } from '../runtime/registry.js';
 import type { AdapterDef, AdapterArg } from '../tools/manifest';
 
-/** Adapter names to hide from the first-turn overview. Writes against the
- * user's account (publish / comment-create) stay hidden until they're
- * explicitly described — keeps the chatbot from absent-mindedly listing
- * them as options. The runtime still gates them behind a per-call user
- * confirmation dialog (see WRITE_CONFIRM_REQ wiring in service-worker.ts),
- * so even if the chatbot describes-and-executes one, nothing fires
- * without a green light from the user. */
-const HIDDEN_BY_DEFAULT = new Set(['xiaohongshu__publish', 'xiaohongshu__comment-create']);
+/** Any adapter declared `access: 'write'` is hidden from the first-turn
+ * overview — writes against the user's account / data (publish, comment,
+ * post, like, follow, …) shouldn't be listed casually. The chatbot can
+ * still describe-and-execute one, but the runtime gates the actual call
+ * behind a per-invocation user confirmation dialog (WRITE_CONFIRM_REQ
+ * wiring in service-worker.ts), so nothing fires without a green light.
+ *
+ * Previously a hardcoded allowlist of two xiaohongshu names — that didn't
+ * scale to market-installed adapters (twitter/post, weibo/post,
+ * reddit/comment, linkedin/connect, etc.). The `access` field is the
+ * authoritative signal; use it. */
+function isHiddenByDefault(a: AdapterDef): boolean {
+  return a.access === 'write';
+}
 
 export interface BuildPromptOpts {
   userText: string;
@@ -170,7 +176,7 @@ function renderToolCatalog(opts: { showAllTools?: boolean }): string {
     lines.push('', `### ${site} (${items.length})`);
     for (const it of items) {
       const tn = toolName(it);
-      if (!opts.showAllTools && HIDDEN_BY_DEFAULT.has(tn)) continue;
+      if (!opts.showAllTools && isHiddenByDefault(it)) continue;
       const writeFlag = it.access === 'write' ? ' [write]' : '';
       const sig = renderArgSignature(it.args ?? []);
       lines.push(`- \`${tn}${sig}\`${writeFlag} — ${it.description ?? '(no description)'}`);
@@ -180,10 +186,7 @@ function renderToolCatalog(opts: { showAllTools?: boolean }): string {
     '',
     '> 调用工具时 `args` 字段里的键名必须**严格**匹配上面括号里的参数名（区分大小写）。不确定时先 `describe_tool` 查 schema —— 别凭语义猜参数名（例如别把 `query` 写成 `keyword` 或 `q`）。',
   );
-  if (
-    !opts.showAllTools &&
-    [...HIDDEN_BY_DEFAULT].some((t) => all.some((a) => toolName(a) === t))
-  ) {
+  if (!opts.showAllTools && all.some(isHiddenByDefault)) {
     lines.push(
       '',
       '> 注：涉及写操作（发布/评论/下载等）的工具默认隐藏，必须经 describe_tool 主动获取后才能调用，且仅在用户明确同意时执行。',

@@ -73,14 +73,12 @@ import type {
   WriteConfirmResp,
 } from '../connectors/messages';
 
-// Side-effect imports: each adapter file's top-level cli({...}) registers it
-// with the global registry that openAiToolsFromRegistry / lookupAdapter read.
-import '../tools/xiaohongshu/_all';
+// Side-effect import: registers site-independent web-operation adapters
+// (open_url, get_page_text, screenshot, scroll, click, type, …) which the
+// agent uses to navigate / scrape arbitrary pages without a site adapter.
+// Per-site adapters (xiaohongshu, twitter, …) are now installed from the
+// marketplace at runtime — no built-in site directories.
 import '../tools/generic/_all';
-// Unmodified opencli adapter, byte-imported via scripts/import-adapter.mjs.
-// Its `@jackwener/opencli/*` imports resolve through the Vite alias to our
-// shims — proof of source-level opencli compatibility.
-import '../tools/hackernews/_all';
 
 // Runtime-installed adapters (hot-plug): registered from IndexedDB on boot,
 // and installed/uninstalled at runtime via the message router below.

@@ -11,8 +11,10 @@ import { runSession, type Driver } from '../src/agent/orchestrator';
 import { makeSession } from '../src/agent/session';
 import { buildContinuationReminder } from '../src/agent/system-prompt';
 
-// Side-effect: register adapters so the system prompt has tools to list.
-import '../src/tools/xiaohongshu/_all';
+// Side-effect: register generic web-op adapters so the system prompt has
+// tools to list. (Site-specific built-ins were removed in favor of the
+// marketplace; these generic ones are the only true bundled tools.)
+import '../src/tools/generic/_all';
 
 function stubDriver(): { driver: Driver; prompts: string[] } {
   const prompts: string[] = [];

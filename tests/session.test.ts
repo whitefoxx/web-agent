@@ -103,7 +103,7 @@ describe('orchestrator paused transition', () => {
   it('transitions to paused (not error) when the driver throws TabUnavailableError mid-iteration', async () => {
     // Side-effect import to register adapters (not used here but
     // buildFirstTurnPrompt iterates registry).
-    await import('../src/tools/xiaohongshu/_all');
+    await import('../src/tools/generic/_all');
 
     const events: Array<{ type: string; reason?: string }> = [];
     const driver: Driver = {
@@ -144,7 +144,7 @@ describe('orchestrator paused transition', () => {
   });
 
   it('Resume re-injects the pending prompt without re-appending the user turn', async () => {
-    await import('../src/tools/xiaohongshu/_all');
+    await import('../src/tools/generic/_all');
     const prompts: string[] = [];
     const driver: Driver = {
       async inject({ text }) {

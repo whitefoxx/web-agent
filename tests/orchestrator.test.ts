@@ -11,7 +11,7 @@ import type { ParsedCommand } from '../src/connectors/messages';
 
 // Side-effect import: register adapters so list_tools / describe_tool have
 // something real to talk about.
-import '../src/tools/xiaohongshu/_all';
+import '../src/tools/generic/_all';
 
 // chrome.storage isn't available in node tests; the session module just
 // silently noops the saveSession call, which is what we want here.
@@ -97,7 +97,7 @@ describe('orchestrator', () => {
       responses: [
         {
           cleanedText: '让我先看看有哪些工具：',
-          commands: [cmd('list_tools', { args: { category: 'xiaohongshu' } })],
+          commands: [cmd('list_tools', { args: { category: 'generic' } })],
         },
         { cleanedText: '好了，现在我能回答了。', commands: [] },
       ],
@@ -105,9 +105,9 @@ describe('orchestrator', () => {
     const s = makeSession('test2');
     await runSession({ session: s, userText: 'q', driver: stub.driver });
     expect(stub.prompts).toHaveLength(2);
-    // Second prompt should contain the list_tools result, including at least one xiaohongshu tool name.
+    // Second prompt should contain the list_tools result, including at least one generic tool name.
     expect(stub.prompts[1]).toContain('list_tools');
-    expect(stub.prompts[1]).toMatch(/xiaohongshu__/);
+    expect(stub.prompts[1]).toMatch(/generic__/);
   });
 
   it('routes describe_tool through the meta handler', async () => {
@@ -115,7 +115,7 @@ describe('orchestrator', () => {
       responses: [
         {
           cleanedText: '需要参数：',
-          commands: [cmd('describe_tool', { args: { name: 'xiaohongshu__feed' } })],
+          commands: [cmd('describe_tool', { args: { name: 'generic__open_url' } })],
         },
         { cleanedText: '好。', commands: [] },
       ],
@@ -123,7 +123,7 @@ describe('orchestrator', () => {
     const s = makeSession('test3');
     await runSession({ session: s, userText: 'q', driver: stub.driver });
     expect(stub.prompts[1]).toMatch(/describe_tool/);
-    expect(stub.prompts[1]).toMatch(/xiaohongshu__feed/);
+    expect(stub.prompts[1]).toMatch(/generic__open_url/);
   });
 
   it('routes execute_tool through the driver and forwards result', async () => {
@@ -134,7 +134,7 @@ describe('orchestrator', () => {
           cleanedText: '执行：',
           commands: [
             cmd('execute_tool', {
-              tool: 'xiaohongshu__feed',
+              tool: 'generic__open_url',
               args: { limit: 5 },
             }),
           ],
@@ -148,8 +148,8 @@ describe('orchestrator', () => {
     });
     const s = makeSession('test4');
     await runSession({ session: s, userText: 'q', driver: stub.driver });
-    expect(captured).toEqual({ tool: 'xiaohongshu__feed', args: { limit: 5 } });
-    expect(stub.prompts[1]).toContain('xiaohongshu__feed');
+    expect(captured).toEqual({ tool: 'generic__open_url', args: { limit: 5 } });
+    expect(stub.prompts[1]).toContain('generic__open_url');
     expect(stub.prompts[1]).toContain('hello');
   });
 
@@ -169,7 +169,7 @@ describe('orchestrator', () => {
     const stub = makeStub({
       responses: Array.from({ length: 10 }, () => ({
         cleanedText: '再来一次',
-        commands: [cmd('list_tools', { args: { category: 'xiaohongshu' } })],
+        commands: [cmd('list_tools', { args: { category: 'generic' } })],
       })),
     });
     const s = makeSession('test6');
