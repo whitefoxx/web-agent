@@ -31,6 +31,8 @@
 > - `781956b` USER_SCRIPT 端口走 onUserScriptConnect
 > - `9ea8280` goto trampoline lenient URL 匹配
 > - `cf1cc6b` 删内置 xiaohongshu/hackernews(让市场唯一供应)
+> - `4ed3527` docs: Phase B done + 4 pitfalls + clean up stale tree references
+> - `e20daa0` page.evaluate→MAIN world(§10.7)+ marketplace bundle relative imports(§10.8)
 
 ## 0. 动机(用户原话)
 
