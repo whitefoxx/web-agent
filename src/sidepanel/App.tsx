@@ -859,10 +859,17 @@ function ToolTraceCard({ trace }: { trace: ToolTrace }) {
   );
 }
 
+// Mirror the LLM-input cap in src/agent/{api-engine,system-prompt}.ts so the
+// SidePanel shows ≥ what the model actually received. Keep in sync if either
+// engine bumps its `MAX_TOOL_RESULT_CHARS`.
+const PREVIEW_MAX_CHARS = 64_000;
+
 function previewResult(r: unknown): string {
   try {
     const s = typeof r === 'string' ? r : JSON.stringify(r, null, 2);
-    return s.length > 4000 ? s.slice(0, 4000) + `\n…[truncated ${s.length - 4000}]` : s;
+    return s.length > PREVIEW_MAX_CHARS
+      ? s.slice(0, PREVIEW_MAX_CHARS) + `\n…[truncated ${s.length - PREVIEW_MAX_CHARS}]`
+      : s;
   } catch {
     return String(r);
   }
