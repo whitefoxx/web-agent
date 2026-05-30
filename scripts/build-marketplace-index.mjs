@@ -26,6 +26,7 @@ import { readFile, writeFile, mkdir, readdir, stat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { build as esbuild } from 'esbuild';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -109,6 +110,41 @@ function isInstallable(src) {
   return true;
 }
 
+/**
+ * Self-contain an adapter source for marketplace shipping.
+ *
+ * The adapter loader (src/sandbox/eval-core.ts → stripModuleSyntax) drops every
+ * `import ... ;` line and resolves remaining names against an injected scope.
+ * That scope only knows `@jackwener/opencli/*` (cli/Strategy/errors). A naked
+ * relative `import { parseVideoId } from './utils.js';` becomes a runtime
+ * `ReferenceError: parseVideoId is not defined` once the import line is
+ * stripped — youtube/transcript, video, like, subscribe (and ~123 others)
+ * all hit this.
+ *
+ * Fix: esbuild-bundle the entry with bundle:true so relative siblings get
+ * inlined into a single self-contained source. Mark `@jackwener/opencli/*`
+ * external so its imports remain as top-level `import {...} from '@jackwener/opencli/...';`
+ * lines — the stripper handles those at runtime via the injected scope.
+ *
+ * Falls back to the raw source on bundle failure (sibling missing, transitive
+ * node:* import, etc.) so the index still builds; the affected adapter will
+ * surface the same error at runtime as before.
+ */
+async function bundleAdapterSource(entryPath) {
+  const result = await esbuild({
+    entryPoints: [entryPath],
+    bundle: true,
+    format: 'esm',
+    platform: 'browser',
+    target: 'esnext',
+    write: false,
+    legalComments: 'none',
+    external: ['@jackwener/opencli/*'],
+    logLevel: 'silent',
+  });
+  return result.outputFiles[0].text;
+}
+
 const SKIP = (f) => f.startsWith('_') || /\.(test|spec)\.[cm]?js$/.test(f) || f.endsWith('.d.ts');
 
 async function main() {
@@ -149,6 +185,22 @@ async function main() {
         continue;
       }
 
+      // Bundle adapters that import from sibling files; raw src would lose
+      // those symbols at runtime (stripModuleSyntax drops the import line and
+      // the names go undefined). Adapters without relative imports ship raw
+      // so the embedded source diffs cleanly against the opencli original.
+      let source = src;
+      const hasRelativeImports = /from\s+['"]\.\.?\//.test(src);
+      if (hasRelativeImports) {
+        try {
+          source = await bundleAdapterSource(full);
+        } catch (e) {
+          console.warn(
+            `  ⚠ ${site}/${file} bundle failed, shipping raw (will error at runtime): ${e.message}`,
+          );
+        }
+      }
+
       entries.push({
         site: field(src, 'site') ?? site,
         name: field(src, 'name') ?? basename(file, '.js'),
@@ -156,7 +208,7 @@ async function main() {
         access: field(src, 'access') ?? 'read',
         domain: field(src, 'domain'),
         type,
-        source: src,
+        source,
       });
     }
   }

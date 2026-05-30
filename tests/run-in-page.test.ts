@@ -97,13 +97,18 @@ describe('runAdapterInPage — goto trampoline', () => {
   });
 
   it('second run (already at target url): goto is a no-op → func scrapes → ok', async () => {
-    const rpc = vi.fn(async () => undefined);
+    // evaluate is now RPC'd (MAIN world via SW), so the scrape result comes
+    // back through rpc(), not the local evalFn.
+    const rpc = vi.fn(async (method: string, args: { args?: unknown[] }) => {
+      if (method === 'evaluate') {
+        const js = String((args.args ?? [])[0] ?? '');
+        return js.includes('scraped') ? 'scraped' : undefined;
+      }
+      return undefined;
+    });
     const page = makeLocalPage({
       rpc,
-      env: {
-        location: { href: 'https://demo.com/s?q=cats' }, // already navigated
-        evalFn: (code: string) => (code.includes('scraped') ? 'scraped' : undefined),
-      },
+      env: { location: { href: 'https://demo.com/s?q=cats' } }, // already navigated
     });
     const r = await runAdapterInPage({
       source: GOTO_TOP,
@@ -121,7 +126,13 @@ describe('runAdapterInPage — goto trampoline', () => {
   // load. With strict-equal the trampoline would re-throw NAVIGATE_RESTART
   // forever; with sameLogicalPage it sees "I'm there (modulo extras)".
   it('second run with server-appended tracking params: still treated as already-there', async () => {
-    const rpc = vi.fn(async () => undefined);
+    const rpc = vi.fn(async (method: string, args: { args?: unknown[] }) => {
+      if (method === 'evaluate') {
+        const js = String((args.args ?? [])[0] ?? '');
+        return js.includes('scraped') ? 'scraped' : undefined;
+      }
+      return undefined;
+    });
     const page = makeLocalPage({
       rpc,
       env: {
@@ -129,7 +140,6 @@ describe('runAdapterInPage — goto trampoline', () => {
         location: {
           href: 'https://demo.com/s?q=cats&xsec_source=foo&xsec_token=bar#init',
         },
-        evalFn: (code: string) => (code.includes('scraped') ? 'scraped' : undefined),
       },
     });
     const r = await runAdapterInPage({
@@ -170,11 +180,19 @@ describe('sameLogicalPage', () => {
 });
 
 describe('makeLocalPage — local vs RPC split', () => {
-  it('evaluate runs locally via the injected evalFn (no RPC)', async () => {
-    const rpc = vi.fn(async () => 'rpc');
+  it('evaluate is RPCd to the SW so it runs in MAIN world (sees window.<global>)', async () => {
+    // USER_SCRIPT and MAIN have isolated globalThis bindings — a local eval
+    // wouldn't see page bootstrap globals like window.ytInitialData. The SW
+    // fulfils via PageShim.evaluate → CDP Runtime.evaluate (MAIN world).
+    const rpc = vi.fn(async () => 'main-world-value');
     const page = makeLocalPage({ rpc, env: { evalFn: () => 42 } });
-    expect(await (page.evaluate as (j: string) => Promise<unknown>)('whatever')).toBe(42);
-    expect(rpc).not.toHaveBeenCalled();
+    expect(await (page.evaluate as (j: string) => Promise<unknown>)('window.ytInitialData')).toBe(
+      'main-world-value',
+    );
+    expect(rpc).toHaveBeenCalledWith(
+      'evaluate',
+      expect.objectContaining({ args: ['window.ytInitialData'] }),
+    );
   });
 
   it('getCurrentUrl is local', () => {
@@ -190,11 +208,13 @@ describe('makeLocalPage — local vs RPC split', () => {
     expect(await (page.screenshot as () => Promise<unknown>)()).toBe('did:screenshot');
   });
 
-  it('RPC_METHODS lists the chrome/CDP-bound methods incl. goto', () => {
+  it('RPC_METHODS lists the chrome/CDP/MAIN-world-bound methods incl. goto, evaluate', () => {
     expect(RPC_METHODS.has('goto')).toBe(true);
     expect(RPC_METHODS.has('getCookies')).toBe(true);
     expect(RPC_METHODS.has('cdp')).toBe(true);
-    expect(RPC_METHODS.has('evaluate')).toBe(false);
+    // evaluate is RPC'd so it runs in MAIN world via PageShim/CDP — required
+    // for adapters that read window.<global> page bootstrap data.
+    expect(RPC_METHODS.has('evaluate')).toBe(true);
     expect(RPC_METHODS.has('wait')).toBe(false);
   });
 

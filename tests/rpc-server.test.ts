@@ -22,6 +22,15 @@ describe('fulfillRpc — method/arg mapping', () => {
     expect(r.value).toEqual([{ name: 'a' }]);
   });
 
+  it('evaluate spreads (jsString) → page.evaluate(js) and returns the value', async () => {
+    // Routed through CDP MAIN world; adapter sees window.<global>.
+    const page: PageLike = { evaluate: vi.fn(async () => ({ ytInitialData: true })) };
+    const r = await fulfillRpc(page, { method: 'evaluate', args: ['window.ytInitialData'], tabId: 3 });
+    expect(r.ok).toBe(true);
+    expect(page.evaluate).toHaveBeenCalledWith('window.ytInitialData');
+    expect(r.value).toEqual({ ytInitialData: true });
+  });
+
   it('cdp spreads the args array → page.cdp(method, params)', async () => {
     const page: PageLike = { cdp: vi.fn(async () => ({ ok: 1 })) };
     const r = await fulfillRpc(page, { method: 'cdp', args: ['Page.navigate', { url: 'u' }] });
@@ -38,7 +47,7 @@ describe('fulfillRpc — method/arg mapping', () => {
 
 describe('fulfillRpc — error handling', () => {
   it('rejects an unsupported method', async () => {
-    const r = await fulfillRpc({}, { method: 'evaluate', args: [] });
+    const r = await fulfillRpc({}, { method: 'wait', args: [] });
     expect(r.ok).toBe(false);
     expect(r.error).toMatch(/unsupported/);
   });

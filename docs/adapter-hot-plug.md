@@ -348,6 +348,73 @@ adapter 请求: https://www.xiaohongshu.com/search_result?keyword=韬定律
 
 **关键启示**:**「无可见现象」的 bug 最贵**。每加一层诊断要确认它本身没 bug(我的 globalThis marker 就有 bug,误导了 1 轮)。**先验证诊断手段**,再用诊断结果推断真问题。
 
+### 10.7 page.evaluate 跨 world 隔离 — adapter 拿不到 window.ytInitialData
+
+**症状**:`youtube/search` 装好,trampoline + reinject 链路通,navigate 也对。但调用回来永远 `[]`,即使页面明明渲染出了视频列表。`channel`、`comments`、`video`、`transcript` 全军覆没。
+
+**根因**:Phase B 把 PageShim(CDP `Runtime.evaluate`,**默认 MAIN world**)换成 USER_SCRIPT world 的本地 `globalThis.eval` 后,语义悄悄变了。opencli 的 youtube adapter 普遍长这样:
+
+```js
+const data = await page.evaluate(`window.ytInitialData`);
+if (!data) return [];
+```
+
+`ytInitialData` 是 YouTube 自己的 JS 在 MAIN world 设的全局变量。USER_SCRIPT world 跟 MAIN world **共享 DOM,但 `globalThis` 绑定隔离** —— 这条规则在 10.2 已经踩过一次(diag marker),Phase B 文件头也写了。但 10.2 当时只把 marker 改成 DOM 属性,**没意识到本地化 evaluate 把这条隔离规则也送给了每一个 adapter**。
+
+凡是读站点 bootstrap 全局(`ytInitialData` / `ytcfg` / `__NUXT__` / `__INITIAL_STATE__` / `window.__NEXT_DATA__` …)的 adapter 全部静默返回空数据。
+
+**修法**(本次 commit):`'evaluate'` 加进 `RPC_METHODS` + `SERVER_METHODS`,`makeLocalPage` 不再自己 eval,RPC 回 SW 走 `PageShim.evaluate` → CDP `Runtime.evaluate` → MAIN world。`wait` / `scroll` / `autoScroll` 仍本地(DOM-only,无需跨 world)。
+
+代价:每次 evaluate 多一跳 RPC(USER_SCRIPT → SW → CDP → 回程)。874 个 evaluate 调用都吃这个代价。但是没别的办法 —— 跨 world `globalThis` 隔离是 Chrome 平台行为,只能走 CDP(或者每个 adapter 手写 MAIN-world script-injection 桥,~100 个 adapter 的工作量)。
+
+**教训**:**把执行环境换走时,要把语义对齐也算进迁移成本**。10.2 用 DOM 通信解决了 marker,但只是补丁,没把"USER_SCRIPT 看不到 MAIN globals"这条规则一般化到 adapter 评估面。换执行环境的时候,要逐条对照 page.* API 的旧语义,而不是只看"调用还能不能编译过"。
+
+**还有一条**:**「相同 API,默认世界变了」是最隐蔽的 breaking change**。`page.evaluate(js)` 函数签名一字未改,但 `js` 跑的世界从 MAIN 切到 USER_SCRIPT。零编译错、零类型错、零 runtime 异常 —— 只有"返回空"。下次替换底层执行器之前先列一张表:哪些方法语义跟"在哪个世界跑"耦合,迁移后逐条断言。
+
+### 10.8 marketplace 把 source 原样存进 JSON — 相对 import 运行时蒸发
+
+**症状**:`youtube/search` 修好之后,`youtube/transcript` 立刻报 `ReferenceError: parseVideoId is not defined`。`video`、`like`、`comments`、`subscribe` 一连串都中招。
+
+**根因**:opencli 的 adapter 文件普遍长这样:
+
+```js
+import { extractJsonAssignmentFromHtml, parseVideoId, prepareYoutubeApiPage } from './utils.js';
+// ...
+const videoId = parseVideoId(kwargs.url);
+```
+
+`scripts/build-marketplace-index.mjs` 把每个 adapter 文件**原文**塞进 `marketplace/index.json` 的 `source` 字段。运行时 `stripModuleSyntax` 把整条 `import ...;` 删掉,留下的符号靠 eval scope 注入 —— 但 scope 里只有 `@jackwener/opencli/*`(`cli`、`Strategy`、errors)。`./utils.js` 的 `parseVideoId` 没人给,直接 ReferenceError。
+
+`youtube/search` 没踩到是因为它纯自包含,没有 sibling 依赖。一去看其它就发现 marketplace 里 **123 个**adapter 有 `from './*'` 相对 import,跨各种站点(reddit、linkedin、weibo、zhihu、xiaohongshu…),全在等同样的雷。
+
+**修法**(本次 commit):builder 引入 esbuild,对每个有相对 import 的 adapter 做 in-memory bundle:
+
+```js
+await esbuild({
+  entryPoints: [entryPath],
+  bundle: true,
+  format: 'esm',
+  external: ['@jackwener/opencli/*'],  // 留 top-level import,运行时由 strip + scope 处理
+  ...
+});
+```
+
+sibling 工具函数全部 inline 到 `source` 字段;`@jackwener/opencli/*` 仍是 top-level import(原有 strip + scope 路径不变)。bundle 失败时 fallback 到原 raw source 并 warn(twitter/zhihu 的某些 adapter 有 transitive `node:fs` 依赖,跑不了 —— 行为不变)。
+
+**索引体积代价**:1.5 MB → 2.0 MB(+38%),因为大文件多了 inline 的 sibling 代码。`youtube/transcript` 27 KB → 33 KB。这不是问题,索引整体仍在 1 个 HTTP 请求量级。
+
+**用户操作雷**:老的坏 source 已经持久化在 IndexedDB(`installed-store.ts` 的 `source: string` 字段)。**单纯 reload 扩展不会自动迁移** —— 用户必须 uninstall + reinstall 受影响 adapter,install path 才会从新 marketplace 读到 bundle 后的 source。下次如果还要改 source 序列化,要么在 install-manager 加 "source schema version"+迁移逻辑,要么至少在 UI 显示一个 "marketplace 已更新,请重装" 的提示。
+
+**教训**:**marketplace 化 = 自包含化**。源文件靠文件系统隐式解析 `./xxx.js`,marketplace 靠一个字符串 —— 文件系统给的方便**必须显式 inline 进字符串**,否则全是"看起来在,运行时不在"的幽灵依赖。
+
+**还有一条**:**单测覆盖"装得上"不等于"跑得动"**。我们 Phase A/B 验证都是手动跑端到端,通过一两个自包含的 adapter(xiaohongshu/search、hackernews)就过了 —— 它们恰好没相对 import。如果当时挑一个带 `./utils.js` 的 adapter 验,这条雷在 Phase A 就该爆。**端到端验证的选样要刻意覆盖代码形态多样性**,不要只挑最简单的跑通就盖章。
+
+### 10.9 这两条共同的根
+
+10.7 和 10.8 看起来一个是 runtime/world 问题、一个是 build/marketplace 问题,但根上是同一件事:**当一个 adapter 从"开发态本地文件 + 完整 Node/CDP 环境"搬到"marketplace 字符串 + USER_SCRIPT world + RPC 桥",所有隐式假设都需要逐条对齐**。10.7 是执行环境的隐式假设(默认 world = MAIN);10.8 是模块解析的隐式假设(`./utils.js` 找得到)。
+
+下次再做"把 X 搬到 Y"的迁移时,先列一张**隐式假设清单**(执行 world、模块解析、`chrome.*` 可用性、CSP、`globalThis` 绑定、storage 路径、网络鉴权 cookie 容器…),逐条对照新环境给不给,不给的怎么补。比"做完再测"省的不是一两小时。
+
 ## 11. 对未来「自己拼 Tampermonkey 替代品」的人
 
 底层能力已经全部解锁:

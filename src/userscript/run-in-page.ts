@@ -3,9 +3,14 @@
  *
  * This code runs INSIDE a target tab's USER_SCRIPT world (injected via
  * chrome.userScripts), where:
- *   - the page's DOM is directly available, so page.evaluate/wait/scroll run
- *     LOCALLY (no RPC) — the win over the CDP model for the evaluate-heavy
- *     opencli corpus (~874 evaluate calls vs a long RPC tail);
+ *   - the page's DOM is shared with MAIN world, so DOM-only helpers
+ *     (wait/scroll/autoScroll) run LOCALLY — no RPC, no eval boundary;
+ *   - page.evaluate is RPC'd to the SW so it executes via CDP in MAIN world.
+ *     We can't run it locally: USER_SCRIPT and MAIN have isolated `globalThis`
+ *     bindings, so opencli adapters that read page bootstrap globals
+ *     (window.ytInitialData, window.ytcfg, window.__INITIAL_STATE__, …) would
+ *     get `undefined` if evaluate stayed in-world (see docs/adapter-hot-plug.md
+ *     §10.2). Routing through CDP matches the pre-Phase-B semantics exactly.
  *   - chrome.* is NOT available, so page.goto/getCookies/screenshot/cdp/... are
  *     RPC'd to the service worker (which holds chrome.tabs / chrome.cookies /
  *     chrome.debugger) via the injected `rpc` transport.
@@ -41,10 +46,16 @@ export function isNavigateRestart(v: unknown): v is NavigateRestart {
   return !!v && typeof v === 'object' && (v as Record<string, unknown>)[NAVIGATE_RESTART] === true;
 }
 
-/** page.* methods that must be RPC'd to the SW (need chrome.* / CDP). Everything
- * else runs locally in the page. Kept as data so it's greppable + testable. */
+/** page.* methods that must be RPC'd to the SW (need chrome.* / CDP / MAIN world).
+ * Everything else (wait/scroll/autoScroll/getCurrentUrl/getAttachments) runs
+ * locally — those are DOM-only and the DOM is shared across worlds.
+ * Kept as data so it's greppable + testable. */
 export const RPC_METHODS = new Set([
   'goto', // special-cased (trampoline) but still RPCs the navigate
+  // evaluate routes through CDP so adapter scripts see MAIN-world globals
+  // (ytInitialData, ytcfg, __NUXT__, __INITIAL_STATE__, …). USER_SCRIPT
+  // world has its own isolated globalThis — see file header.
+  'evaluate',
   'getCookies',
   'screenshot',
   'cdp',
@@ -136,9 +147,10 @@ export function makeLocalPage(opts: LocalPageOptions): Record<string, unknown> {
   const page: Record<string, unknown> = {
     tabId,
 
-    async evaluate(js: string): Promise<unknown> {
-      return doEval(wrapForEval(js));
-    },
+    // evaluate is added by the RPC_METHODS loop below — it goes through the SW
+    // so adapter scripts execute in MAIN world (see file header). Keeping it
+    // local would mean reading window.<global> from USER_SCRIPT world's
+    // isolated binding, which is `undefined` for every page bootstrap.
 
     async wait(arg: { time?: number; selector?: string; text?: string; timeout?: number } | number) {
       const o = typeof arg === 'number' ? { time: arg } : (arg ?? {});

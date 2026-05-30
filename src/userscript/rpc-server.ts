@@ -2,13 +2,15 @@
  * page.* RPC server — the service-worker counterpart to makeLocalPage()
  * (src/userscript/run-in-page.ts).
  *
- * When an installed func adapter runs in a tab's USER_SCRIPT world, its
- * DOM-local calls (evaluate/wait/scroll) run in-page, but the chrome.* / CDP
- * ones (goto, getCookies, screenshot, cdp, native input, interceptors,
- * downloadFile) are RPC'd back to the SW, which holds the real PageShim (CDP
- * via chrome.debugger
- * + chrome.cookies/tabs), so it fulfills each RPC by calling the matching shim
- * method. This module is that dispatch table.
+ * When an installed func adapter runs in a tab's USER_SCRIPT world, the
+ * DOM-only helpers (wait/scroll) run in-page, but everything that needs
+ * chrome.* / CDP / MAIN-world is RPC'd back to the SW. Notably this includes
+ * `evaluate`: adapter JS reads page bootstrap globals like
+ * `window.ytInitialData`, which live in MAIN world and are invisible from the
+ * isolated USER_SCRIPT globalThis (see run-in-page.ts header). The SW holds
+ * the real PageShim (CDP via chrome.debugger + chrome.cookies/tabs), so it
+ * fulfills each RPC by calling the matching shim method. This module is that
+ * dispatch table.
  *
  * Pure + testable: it takes a `PageLike` (the subset of PageShim it calls), so
  * tests pass a fake and assert the method/arg mapping without a browser.
@@ -25,6 +27,7 @@ import { log, warn } from '../runtime/log';
  * rather than a crash. */
 export interface PageLike {
   goto?(url: string): Promise<void>;
+  evaluate?(jsString: string): Promise<unknown>;
   getCookies?(): Promise<unknown>;
   screenshot?(): Promise<unknown>;
   cdp?(method: string, params?: Record<string, unknown>): Promise<unknown>;
@@ -57,6 +60,7 @@ export interface RpcResponse {
  * asserts the two agree. */
 export const SERVER_METHODS = new Set([
   'goto',
+  'evaluate',
   'getCookies',
   'screenshot',
   'cdp',
