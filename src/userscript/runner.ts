@@ -20,7 +20,7 @@
  * Real verification happens in real Chrome (Phase B B2b acceptance).
  */
 
-import { makeLocalPage, runAdapterInPage } from './run-in-page';
+import { makeLocalPage, runAdapterInPage, fmtError } from './run-in-page';
 import {
   PORT_NAME,
   type InitMsg,
@@ -54,13 +54,10 @@ import {
     mark('no-chrome-runtime', {
       hasChrome: !!(globalThis as { chrome?: unknown }).chrome,
       hasRuntime: !!rt,
-      hint:
-        'configureWorld may have missed messaging:true, or this world is not USER_SCRIPT — runner cannot reach the SW.',
+      hint: 'configureWorld may have missed messaging:true, or this world is not USER_SCRIPT — runner cannot reach the SW.',
     });
     try {
-      console.warn(
-        '[webchat-runner] chrome.runtime.connect not available — adapter cannot run.',
-      );
+      console.warn('[webchat-runner] chrome.runtime.connect not available — adapter cannot run.');
     } catch {
       /* ignore */
     }
@@ -70,7 +67,7 @@ import {
   try {
     port = rt.connect({ name: PORT_NAME });
   } catch (e) {
-    mark('connect-threw', { error: e instanceof Error ? e.message : String(e) });
+    mark('connect-threw', { error: fmtError(e) });
     try {
       console.warn('[webchat-runner] chrome.runtime.connect threw:', e);
     } catch {
@@ -108,6 +105,7 @@ import {
     const page = makeLocalPage({
       rpc: (method, args) => sendRpc(method, args as Record<string, unknown>),
       tabId: init.tabId,
+      lastNavigatedUrl: init.lastNavigatedUrl,
     });
     const result = await runAdapterInPage({
       source: init.source,
@@ -134,7 +132,7 @@ import {
         port.postMessage({
           type: 'DONE',
           status: 'error',
-          error: e instanceof Error ? `${e.name}: ${e.message}` : String(e),
+          error: fmtError(e),
         });
       });
     } else if (m.type === 'RPC_REPLY') {

@@ -3,10 +3,12 @@
 > 决策记录(ADR)。记录"不重 build 即可安装/卸载 adapter,并做成市场"这一功能的架构与关键取舍。
 >
 > **状态(2026-05 更新)**:**Phase A 和 Phase B 都全部落地,真实 Chrome 端到端验证通过**。
+>
 > - Phase A:用户从市场一键装 `zhihu/hot`(pipeline)→ agent 自动调用 → 抓到热榜数据 ✓
 > - Phase B:用户从市场一键装 `xiaohongshu/search`(func)→ agent 自动调用 → 在已登录 tab 里 navigate + evaluate + scroll + extract → 抓到笔记列表 ✓
 >
 > **当前状况**:
+>
 > - 市场内置 345 个 adapter(122 pipeline + 223 func,覆盖 ~25 个热门站点)— 见 `marketplace/index.json`
 > - pipeline 型装完即用,**零额外配置**
 > - func 型需 **Chrome 138+** 且用户在 `chrome://extensions` 详情页打开「允许用户脚本」开关
@@ -15,12 +17,13 @@
 > **分支**:`feat/adapter-hot-plug-marketplace`。最后更新:2026-05。
 >
 > **关键 commits 链**(按时间):
+>
 > - `c7c8014` A1 sandbox eval 宿主
 > - `3658b08` A2 后端(install-manager + IDB)
 > - `37a4904` A2 前端(SidePanel sandbox host + Adapters UI)
 > - `4318659` A3 市场客户端 + index 生成 + bundled 122 pipeline
 > - `f8e54e0` B1 in-page runner 可测核心
-> - `e7e8bff` B2a rpc-server(SW 侧 PageShim 兑现 page.*)
+> - `e7e8bff` B2a rpc-server(SW 侧 PageShim 兑现 page.\*)
 > - `0afecac` B2b chrome.userScripts 接线
 > - `677ac09` A3 finish:市场 UI 真正 wired
 > - `613ae04` pipeline 加 `wait` 步骤
@@ -33,6 +36,7 @@
 > - `cf1cc6b` 删内置 xiaohongshu/hackernews(让市场唯一供应)
 > - `4ed3527` docs: Phase B done + 4 pitfalls + clean up stale tree references
 > - `e20daa0` page.evaluate→MAIN world(§10.7)+ marketplace bundle relative imports(§10.8)
+> - `<next>` Phase B 三连修(zhihu/answer-detail 端到端): NavigateRestart 改 Error 子类 + deep-scan(§10.10) + `lastNavigatedUrl` 旁路解决 server-redirect 死循环(§10.11) + `getCurrentUrl` 改 async 对齐 PageShim(§10.12)
 
 ## 0. 动机(用户原话)
 
@@ -49,22 +53,22 @@
 
 所以"在哪 eval 一段不可信源码"是整个功能的技术核心。三条候选 venue(均已查证官方文档):
 
-| Venue | eval 能力 | 额外权限 | 用户开关 | 隔离 |
-|---|---|---|---|---|
-| **sandboxed iframe**(`sandbox.pages`) | 默认 CSP 含 `unsafe-eval` | 无 | **无** | 最强(opaque origin,无 `chrome.*`) |
-| **userScripts world**(`chrome.userScripts`) | `configureWorld({csp:'…unsafe-eval'})` | `"userScripts"` | **要**(Chrome138+「允许用户脚本」,代码无法自动开) | 中(world 隔离,可配 messaging) |
-| **CDP 注入**(`chrome.debugger`) | `Runtime.evaluate`(网页 world,不受扩展 CSP) | `"debugger"`(已有) | 无(黄条) | 弱(直接在真实页面) |
+| Venue                                       | eval 能力                                   | 额外权限           | 用户开关                                          | 隔离                              |
+| ------------------------------------------- | ------------------------------------------- | ------------------ | ------------------------------------------------- | --------------------------------- |
+| **sandboxed iframe**(`sandbox.pages`)       | 默认 CSP 含 `unsafe-eval`                   | 无                 | **无**                                            | 最强(opaque origin,无 `chrome.*`) |
+| **userScripts world**(`chrome.userScripts`) | `configureWorld({csp:'…unsafe-eval'})`      | `"userScripts"`    | **要**(Chrome138+「允许用户脚本」,代码无法自动开) | 中(world 隔离,可配 messaging)     |
+| **CDP 注入**(`chrome.debugger`)             | `Runtime.evaluate`(网页 world,不受扩展 CSP) | `"debugger"`(已有) | 无(黄条)                                          | 弱(直接在真实页面)                |
 
 ## 2. 决定性分野:pipeline 型 vs func 型
 
 这是比"选哪个 venue"更重要的事实。opencli adapter 有两类:
 
-| | pipeline 型(opencli 大多数,且在增多) | func 型(命令式 `page.*`,如小红书) |
-|---|---|---|
-| 定义本质 | 纯数据 `{site,name,args,pipeline,...}` | 含 `func` 闭包,**不可序列化** |
-| 装载 | eval 一次 → 提取纯数据 | eval → 但 func 存不下,只能存**源码字符串** |
-| 运行 | 现有 `pipeline.ts` 解释器跑,**运行期再不碰 eval/任何 venue** | func 必须**常驻**某个能 eval 的 venue;每次调用 RPC;func 里 `page.*` 再 RPC |
-| 难度 | 低 | 高 |
+|          | pipeline 型(opencli 大多数,且在增多)                         | func 型(命令式 `page.*`,如小红书)                                          |
+| -------- | ------------------------------------------------------------ | -------------------------------------------------------------------------- |
+| 定义本质 | 纯数据 `{site,name,args,pipeline,...}`                       | 含 `func` 闭包,**不可序列化**                                              |
+| 装载     | eval 一次 → 提取纯数据                                       | eval → 但 func 存不下,只能存**源码字符串**                                 |
+| 运行     | 现有 `pipeline.ts` 解释器跑,**运行期再不碰 eval/任何 venue** | func 必须**常驻**某个能 eval 的 venue;每次调用 RPC;func 里 `page.*` 再 RPC |
+| 难度     | 低                                                           | 高                                                                         |
 
 **关键洞察**:pipeline 型一旦装载提取成纯数据,运行期就和 venue 完全脱钩——venue 只在"安装那一刻"用一次。func 型则相反,func 要在 venue 里**常驻并反复调用**。
 
@@ -127,6 +131,7 @@
 ## 6. 文件清单
 
 **已建(A1)**
+
 - `src/sandbox/eval-core.ts` — 纯函数:`stripModuleSyntax` + `evalAdapterSource`(注入作用域、捕获、分类 pipeline/func、序列化)。node 可单测。
 - `src/sandbox/eval-host.ts` — sandbox 内消息宿主(`EVAL_ADAPTER`→`EVAL_RESULT`,`SANDBOX_READY`)。
 - `src/sandbox/sandbox.html` — 源(实际产物由 Vite 插件内联生成)。
@@ -134,6 +139,7 @@
 - `vite.config.ts` `sandboxPagePlugin` — 自产 sandbox.html + 补 manifest。
 
 **A2 安装管线**(✅)
+
 - `src/adapters/installed-store.ts` — IndexedDB(同 DB v2 与 `agent/session-store.ts` 共存)
 - `src/adapters/install-manager.ts` — installFromCaptured / loadOnBoot / setEnabled / uninstall + classifyKind/isRunnableNow
 - `src/runtime/registry.js` — `unregister(site,name)` + `_installed` 标 + **`_version` 版本号**(Task 3 用)
@@ -141,14 +147,16 @@
 - `src/sidepanel/sandbox-host.ts` — SidePanel 持有隐藏 sandbox iframe 转发 eval
 
 **A3 市场**(✅)
+
 - `src/sidepanel/marketplace.ts` — fetchMarketIndex + entryId + FEATURED_IDS
 - `scripts/build-marketplace-index.mjs` — 从 opencli `clis/` 生成 index.json(支持 `--popular` site allowlist)
 - `src/sidepanel/Adapters.tsx` — 「已安装」「市场」双 tab + 贴码安装 + 启用/卸载 + 类型筛选 + Phase B 警告 + 安装结果分类 toast
 - `marketplace/index.json` — 默认 bundle,**345 个 adapter**(122 pipeline + 223 func,~25 个热门站点)
 
 **Phase B func 型**(✅)
+
 - `src/userscript/run-in-page.ts` — in-page runner 可测核心(makeLocalPage、evalAdapterKeepingFuncs、sameLogicalPage、runAdapterInPage)
-- `src/userscript/rpc-server.ts` — SW 侧用 PageShim 兑现 chrome.*/CDP 类 page.* 方法
+- `src/userscript/rpc-server.ts` — SW 侧用 PageShim 兑现 chrome._/CDP 类 page._ 方法
 - `src/userscript/protocol.ts` — 共享 port 消息类型(PORT_NAME、WORLD_ID、INIT/RPC/DONE/NAVIGATE_RESTART)
 - `src/userscript/runner.ts` — Vite 打包成自包含 IIFE `dist/userscript-runner.js`
 - `src/userscript/sw-runner.ts` — `configureWebchatWorld` + `handleRunnerPortConnect` + `runInstalledFuncAdapter` 编排循环
@@ -160,6 +168,7 @@
 ### Phase B 可行性结论(实测,回答"opencli func adapter 能否转换后用 userScripts 跑")
 
 **能,且几乎零改造。** 扫描整个 opencli func 语料(~700 个):
+
 - **~526(75%)func 体内不调 `page.goto`** —— 靠 host 导航(`domain`/`navigateBefore`),只在已加载页面上 `evaluate`/`scroll` 抓取。**原样**就能在页内 world 跑。
 - **~170(24%)只调一次 `page.goto`**(goto-at-top → 抓取,如 youtube/zhihu/github search)。用 **navigate-then-reinject 蹦床**通用处理,无需逐个改:`goto(url)` 若不在目标 url 则 RPC SW 导航 + 抛 `NAVIGATE_RESTART`;SW 导航后**重新注入**;func 从头再跑,goto 此时 no-op,继续抓取。
 - **~4 个调两次 goto**(交错有状态)+ CDP 重度的 → 回落现有 CDP `PageShim`。
@@ -180,7 +189,7 @@
 3. **A3**(✅ `4318659` + `677ac09`):市场客户端 + index 生成 + Adapters UI(双 tab + 类型筛选 + 类型 chip + Phase B 警告)
 4. Phase A 真实 Chrome 验证(✅ zhihu/hot 装即用、navigate + evaluate + scroll + map 链路通)
 5. **B1**(✅ `f8e54e0`):可行性实测 + in-page func runner 可测核心
-6. **B2a**(✅ `e7e8bff`):SW 侧 page.* RPC 服务端(fulfillRpc + PageShim)
+6. **B2a**(✅ `e7e8bff`):SW 侧 page.\* RPC 服务端(fulfillRpc + PageShim)
 7. **B2b**(✅ `0afecac` + 4 个 fix):chrome.userScripts 接线 + dispatcher 路由 + 权限/开关
 8. Phase B 真实 Chrome 验证(✅ xiaohongshu/search 装即用、navigate + evaluate + scroll + extract 链路通)
 9. **后续清理**(✅ `cf1cc6b`):删内置 xiaohongshu/ + hackernews/,让市场成为 site adapter 的唯一供应,`HIDDEN_BY_DEFAULT` 泛化为 `access === 'write'`
@@ -340,13 +349,13 @@ adapter 请求: https://www.xiaohongshu.com/search_result?keyword=韬定律
 
 ### 10.6 总结:为什么花了几小时
 
-| 阶段 | 看到的 | 推断的 | 实际的 |
-|---|---|---|---|
-| 第一次测 | 60s 超时,零日志 | 不知道哪一步死了 | execute 静默+ onConnect 不响应 |
-| 加日志 | execute resolve frames=1 ok | 注入成功了 | ✓ |
-| 加 globalThis marker | marker 永 null | runner 没跑? | marker 跨 world 不可见(10.2) |
-| 改 DOM marker | marker='connected' | **真相** | runner 跑完,SW 收不到 port(10.3) |
-| 加 onUserScriptConnect | port 通了,goto loop | trampoline 不对 | URL 不稳定(10.4) |
+| 阶段                   | 看到的                      | 推断的           | 实际的                           |
+| ---------------------- | --------------------------- | ---------------- | -------------------------------- |
+| 第一次测               | 60s 超时,零日志             | 不知道哪一步死了 | execute 静默+ onConnect 不响应   |
+| 加日志                 | execute resolve frames=1 ok | 注入成功了       | ✓                                |
+| 加 globalThis marker   | marker 永 null              | runner 没跑?     | marker 跨 world 不可见(10.2)     |
+| 改 DOM marker          | marker='connected'          | **真相**         | runner 跑完,SW 收不到 port(10.3) |
+| 加 onUserScriptConnect | port 通了,goto loop         | trampoline 不对  | URL 不稳定(10.4)                 |
 
 **关键启示**:**「无可见现象」的 bug 最贵**。每加一层诊断要确认它本身没 bug(我的 globalThis marker 就有 bug,误导了 1 轮)。**先验证诊断手段**,再用诊断结果推断真问题。
 
@@ -369,7 +378,7 @@ if (!data) return [];
 
 代价:每次 evaluate 多一跳 RPC(USER_SCRIPT → SW → CDP → 回程)。874 个 evaluate 调用都吃这个代价。但是没别的办法 —— 跨 world `globalThis` 隔离是 Chrome 平台行为,只能走 CDP(或者每个 adapter 手写 MAIN-world script-injection 桥,~100 个 adapter 的工作量)。
 
-**教训**:**把执行环境换走时,要把语义对齐也算进迁移成本**。10.2 用 DOM 通信解决了 marker,但只是补丁,没把"USER_SCRIPT 看不到 MAIN globals"这条规则一般化到 adapter 评估面。换执行环境的时候,要逐条对照 page.* API 的旧语义,而不是只看"调用还能不能编译过"。
+**教训**:**把执行环境换走时,要把语义对齐也算进迁移成本**。10.2 用 DOM 通信解决了 marker,但只是补丁,没把"USER_SCRIPT 看不到 MAIN globals"这条规则一般化到 adapter 评估面。换执行环境的时候,要逐条对照 page.\* API 的旧语义,而不是只看"调用还能不能编译过"。
 
 **还有一条**:**「相同 API,默认世界变了」是最隐蔽的 breaking change**。`page.evaluate(js)` 函数签名一字未改,但 `js` 跑的世界从 MAIN 切到 USER_SCRIPT。零编译错、零类型错、零 runtime 异常 —— 只有"返回空"。下次替换底层执行器之前先列一张表:哪些方法语义跟"在哪个世界跑"耦合,迁移后逐条断言。
 
@@ -417,17 +426,188 @@ sibling 工具函数全部 inline 到 `source` 字段;`@jackwener/opencli/*` 仍
 
 下次再做"把 X 搬到 Y"的迁移时,先列一张**隐式假设清单**(执行 world、模块解析、`chrome.*` 可用性、CSP、`globalThis` 绑定、storage 路径、网络鉴权 cookie 容器…),逐条对照新环境给不给,不给的怎么补。比"做完再测"省的不是一两小时。
 
+### 10.10 goto trampoline 抛**裸对象** — 被 adapter try/catch 一吞就死
+
+**症状**:`zhihu__answer-detail` 报
+
+```
+CommandExecutionError: Failed to open Zhihu answer 2040071767796995118: [object Object]
+```
+
+**根因**:Phase B 的 `page.goto` 用 **navigate-then-reinject trampoline**:发 RPC 让 SW 准备好导航,然后抛一个标记物给 runner,runner 把它 map 成 `status:'navigating'` 让 SW 真正导航 + 重注入。原实现抛的是**裸对象** `{ [NAVIGATE_RESTART]: true, url }`(不是 Error 子类),作者写过注释说 "Tagged property so detection works across the eval boundary where `instanceof` is unreliable"。
+
+但**多数 opencli 适配器假设 `page.goto` 是 fail-safe 的**(在原生 puppeteer 控制器视角下,goto 失败 = 网络挂了/URL 错了,值得报错),所以**包了 try/catch + 重新 throw**。`zhihu/answer-detail.js` 的真实写法:
+
+```js
+try {
+  await page.goto(`https://www.zhihu.com/answer/${answerId}`);
+} catch (err) {
+  throw new CommandExecutionError(
+    `Failed to open Zhihu answer ${answerId}: ${err instanceof Error ? err.message : String(err)}`,
+    ...
+  );
+}
+```
+
+两层伤害一次性触发:
+
+1. `err` 是裸对象,`err instanceof Error` 为 false,走 `String(err)` → **`[object Object]`**(用户看到的没用错误信息)
+2. adapter 把它**重新包成 `CommandExecutionError`** 扔出去,runner 的 catch 用 `isNavigateRestart` 检查时只看顶层那一个 CommandExecutionError → false → `status:'error'`,**SW 永远不会真正导航**。
+
+也就是说,**adapter 一行 try/catch + 一行 rewrap 就能完全瘫痪 trampoline 协议**。zhihu 是第一个撞上,但这个失败模式对任何包了 goto 的 func 适配器都成立。
+
+**修法**(commit `<next>`):两层互补,光做第一层不解决导航没触发,光做第二层 stringify 还是难看。
+
+1. **`NavigateRestart` 改 Error 子类**(`src/userscript/run-in-page.ts`)
+   - 新 `class NavigateRestartError extends Error implements NavigateRestart`,保留 `[NAVIGATE_RESTART]: true` 标记 + `url` 属性。
+   - 关键:**把 marker 字符串嵌进 `.message`**:`super(\`${NAVIGATE_RESTART}|${url}\`)`。`String(err)`不再是`[object Object]`,而是 `NavigateRestart: **webchat_navigate_restart**|<url>`— 即使被 adapter`${err.message}` 插值进新错误也保留可恢复信号。
+
+2. **`findNavigateRestart(e)` 深扫描器**
+   - 顶层 tag 检测(原 `isNavigateRestart`)。
+   - 走 `.cause` 链(应付 `new Error(msg, {cause: err})` 这种现代写法)。
+   - **正则扫 `.message`** 抠出 URL —— 这一条才是真正救 zhihu 的:adapter 把 `${err.message}` 插进新错误的 message 里,深扫描 regex `${NAVIGATE_RESTART}\|([^\\s"'\`]+)` 还能从 CommandExecutionError 的 message 里把 URL 抠回来。
+   - 6 层递归上限防 self-referencing cause 死循环。
+
+3. **`runAdapterInPage` catch 改用 `findNavigateRestart`**(不再是浅层 `isNavigateRestart`):即使 adapter 包了 goto,runner 也能拿回 URL 并报 `status:'navigating'`,SW 继续做导航 + 重注入。
+
+4. **`fmtError(e)` 兜底**:plain 对象走 `JSON.stringify` 而不是 `String()`,避免任何剩下的 `[object Object]` 漏出来。已替换 `userscript/{run-in-page,runner,rpc-server,sw-runner}.ts` 里所有 `e instanceof Error ? ... : String(e)` 调用。
+
+**测试**(`tests/run-in-page.test.ts`):3 个新 it 单测覆盖 (a) 直接 throw、(b) `cause` 包装、(c) `${err.message}` 插值包装(模仿 zhihu 真实 catch+rewrap),外加 `runAdapterInPage` 端到端跑一个 zhihu-shaped wrapper adapter 确认能恢复 `status:'navigating'`。一共 +12 单测,共 172 全过。
+
+**教训**:trampoline 用 **throw** 触发 SW 协作的设计**天生脆**——只要 adapter 包 try/catch 就可能吞掉信号。备选 robust 方案是让 SW 收到 goto RPC **立即**触发导航(让 tab 上下文炸掉、runner 自然死亡),`await page.goto` 永远不 resolve、永远不 throw、adapter 永远走不到 catch 那一行;但这要求 SW 把 "port disconnected 是不是预期" 分清楚,改动较大。当前选**marker-survive-wrapping**(让信号在被包过之后依然能被深扫到)是更小更稳的局部修。下次设计**跨边界的协议**(throw、reject、postMessage)时,要预判**对手代码会不会无意中拦掉它**(try/catch、message 改写、promise 链断点),并设计**冗余信号通道**(tag prop + message regex + cause 三路都行)。
+
+### 10.11 goto trampoline 在 server-redirect 下死循环 — sameLogicalPage 救不了
+
+**症状**(10.10 修完之后才暴露,因为 10.10 之前直接被 `[object Object]` 报错挡住了):
+
+```
+zhihu__answer-detail: adapter exceeded 3 navigate-reinject cycles
+```
+
+SW log 4 次同样的反复:
+
+```
+runner requested navigate to https://www.zhihu.com/answer/2043942734407496358
+navigating tab=... → .../answer/2043942734407496358 (iter 1/4)
+[page navigates, runner reinjects]
+runner requested navigate to https://www.zhihu.com/answer/2043942734407496358   ← 又来
+navigating tab=... → .../answer/2043942734407496358 (iter 2/4)
+[...iter 3/4, iter 4/4 一模一样...]
+```
+
+**根因**:zhihu 把 `/answer/<aid>` **301/302 重定向**到 canonical 路径 `/question/<qid>/answer/<aid>`(`zhihu/answer-detail.js` 代码注释里就提了这件事,说"works even when the caller did not supply the parent question id")。Phase B trampoline 重注入后:
+
+1. 新 runner 在 `/question/456/answer/123` 起来
+2. adapter 头一句 `await page.goto('https://www.zhihu.com/answer/123')`
+3. `sameLogicalPage(loc.href, requested)` 检查:
+   - 同 origin ✓
+   - **同 pathname ✗** —— `/question/456/answer/123` !== `/answer/123`
+   - **返回 false**
+4. 触发 RPC + throw NavigateRestart → SW 再次导航 → zhihu 再次重定向 → 反复 → 4 圈打满 → `adapter exceeded N navigate-reinject cycles`
+
+`sameLogicalPage` 写的时候只考虑了 **server 加 query 参数**(xsec*source、xsec_token、utm*\*)和 hash 漂移 —— 那是 lenient 比较的初衷。但它**没考虑 pathname 重定向**,因为 query-only 差异是绝大多数 SPA 的实际行为,pathname 重定向比较少见。zhihu 是个反例:它真的把 `/answer/<aid>` 跳到不同 pathname。
+
+> 想"在 `sameLogicalPage` 里直接放宽路径匹配"的诱惑很大,但这样很危险:`/answer/123` 可能被错误地匹配到任何带 `/answer/123` 子串的页面。需要的不是"更宽的相等定义",而是"明确告诉 runner 这次导航是我帮你做的"。
+
+**修法**(commit `<next+1>`):**在协议里加一条 SW→runner 的旁路通道,直接告知"我刚帮你导到 X 了"**,而不是让 runner 再去推断。
+
+1. **`InitMsg.lastNavigatedUrl?: string`**(`src/userscript/protocol.ts`):
+   - 第一次注入:`undefined`
+   - 每次 SW 完成一次 navigate-reinject 循环后,下一次 INIT 把刚刚导航过的 URL 塞进来
+
+2. **`LocalPageOptions.lastNavigatedUrl?: string` + trampoline 优先级**(`src/userscript/run-in-page.ts`):
+
+   ```js
+   async goto(url) {
+     if (sameLogicalPage(loc.href, url)) return;       // 真正同一页
+     if (lastNavigatedUrl && lastNavigatedUrl === url) {  // 我们刚帮你导过
+       lastNavigatedUrl = undefined;                      // consume-once
+       return;
+     }
+     await rpc('goto', { url, tabId });
+     throw new NavigateRestartError(url);
+   }
+   ```
+
+   `consume-once` 关键:adapter 在同一次 run 里再 goto 同 URL,就该走正常 trampoline(否则会漏掉真正需要的 re-navigate)。
+
+3. **orchestrator 跨 iteration 记忆**(`src/userscript/sw-runner.ts`):
+
+   ```js
+   let lastNavigatedUrl;
+   for (let i = 0; i <= maxReinjects; i++) {
+     const outcome = await runOnceWithPort({ ..., init: { ..., lastNavigatedUrl } });
+     ...
+     if (outcome.kind === 'navigate') {
+       await args.page.goto(url);
+       lastNavigatedUrl = url;   // ← 给下一轮 INIT
+     }
+   }
+   ```
+
+4. **runner 透传**(`src/userscript/runner.ts`):`makeLocalPage({ ..., lastNavigatedUrl: init.lastNavigatedUrl })`。
+
+**测试**(`tests/run-in-page.test.ts`):3 个新 it:
+
+- post-reinject + pathname 不一致 + `lastNavigatedUrl` 匹配 → no-op,不 RPC,不 throw
+- consume-once:第二次 goto 同 URL 会走正常 trampoline 抛 NavigateRestart
+- mismatched goto 不消耗旁路:asking for `/different` 时旁路保留给 `/expected`
+
+175 单测全过。
+
+**为什么不直接放宽 `sameLogicalPage`**:URL 等价是个语义判断,要做对必须**了解服务端**。我们没那个上下文,任何"更宽"的规则(suffix 匹配、忽略 path 段、忽略 trailing id…)都会在某些站误判。**SW 知道它刚导航到哪**——把这件确定的事告诉 runner,比让 runner 猜安全得多。
+
+**与 10.4 的关系**:10.4 是 query-param 漂移(同 path,加 token);10.11 是 pathname 漂移(redirect)。两个都是"客户端请求的 URL ≠ 浏览器实际落地的 URL",但**判定方法不一样**:10.4 可以靠 URL 比较解决(subset 检查);10.11 不行,必须靠 SW 显式注入"我刚导过这个" hint。
+
+**教训**:**当一个判定问题在客户端没有足够信息做对,就别在客户端做,把已知信息从 server/orchestrator 显式注入下来**。`sameLogicalPage` 想猜"我是不是已经在那"的答案 —— 但唯一知道答案的是 SW(它刚做了 navigate)。让 SW 直接告诉 runner,比让 runner 凭 `location.href` 加各种 heuristic 推断更准确、更未来友好。
+
+### 10.12 `getCurrentUrl` 同步返回 — adapter 链 `.catch` 直接炸
+
+**症状**(10.10 + 10.11 修完之后,zhihu 又再多走一步暴露出来):
+
+```
+zhihu__answer-detail: page.getCurrentUrl(...).catch is not a function
+```
+
+**根因**:`zhihu/answer-detail.js` 第 125-127 行:
+
+```js
+const currentQuestionId = page.getCurrentUrl
+  ? extractQuestionIdFromAnswerUrl(await page.getCurrentUrl().catch(() => ''))
+  : '';
+```
+
+它假设 `page.getCurrentUrl()` 返回 Promise(因为它在上面链了 `.catch`)。我们的 CDP-based `PageShim.getCurrentUrl` 确实是 `async (): Promise<string | null>`(实现里要 `await chrome.tabs.get(tabId)` 拿 URL),但 Phase B 的 `makeLocalPage.getCurrentUrl` 写成**同步**返回 `loc.href: string`(因为 USER_SCRIPT world 里读 `location.href` 不需要异步)。
+
+`'https://x/y'.catch` === `undefined` → `TypeError`。adapter 直接挂在这一行,**根本走不到下面的 `page.evaluate(API)` 抓数据**。
+
+**修法**(commit `<next+2>`):`makeLocalPage.getCurrentUrl` 改 `async`,跟 PageShim contract 保持一致。DOM 读还是同步,只是包一层 promise:
+
+```ts
+async getCurrentUrl(): Promise<string> {
+  return loc.href;
+},
+```
+
+**测试**:把原 `getCurrentUrl is local` sync 单测改成 async,并断言返回值的 `.then` 和 `.catch` 都是 function(防 regression — sync string 一眼看不出哪不对)。
+
+**为什么这一类 bug 容易漏过去**:Phase B 的 PageShim 是**两套**——SW 端走 CDP(`src/runtime/page.ts`, 700+ LOC),USER_SCRIPT 端走 DOM(`makeLocalPage`, 200 LOC)。两端方法名一致但**返回类型可以悄悄不一致**:`page.evaluate` 一致(都 async),`getCookies/screenshot/cdp` 一致(都 RPC 出去所以都 async),`wait/scroll` 都一致 async,但 `getCurrentUrl` 一边 async 一边 sync —— TypeScript 不抓,因为 `LocalPageOptions` 的 `page` 是 `Record<string, unknown>`,类型边界处放开了。
+
+**教训**:**两套 shim 实现同一个 interface 时,要让 interface 真的是 ts interface 而不是 `Record<string, unknown>`**——否则签名漂移到 adapter 报 `.catch is not a function` 之前都没人会发现。下一步小修:给 `makeLocalPage` 的返回类型用 PageShim 的子接口,让 tsc 顶住签名漂移。当下先把 getCurrentUrl 这一个修了 + 加单测当 guard。也是同一个家族的教训:**跨实现的"约等于" interface 必须用真 TS 顶住,不能靠 `Record<string, unknown>` 兜底**(同 10.7/10.8 的"隐式假设清单"思想)。
+
 ## 11. 对未来「自己拼 Tampermonkey 替代品」的人
 
 底层能力已经全部解锁:
+
 - USER_SCRIPT world(`chrome.userScripts` API,Chrome 138+)有 DOM + `chrome.runtime.connect/sendMessage` + 可配 CSP
 - runner 注入和双向通信链路已建好(`src/userscript/runner.ts` + `src/userscript/sw-runner.ts` + `protocol.ts`)
-- page.* RPC 桥已建好,跟 CDP-based PageShim 拼接(`src/userscript/rpc-server.ts`)
+- page.\* RPC 桥已建好,跟 CDP-based PageShim 拼接(`src/userscript/rpc-server.ts`)
 - 安装/卸载/启停/持久化已有(`src/adapters/install-manager.ts` + `installed-store.ts`)
 - 跨重启恢复已有(`loadInstalledOnBoot`)
 - session 内热刷已有(`getRegistryVersion()` + `session.lastSeenRegistryVersion`)
 
 差什么:
+
 - URL 匹配自动注入(目前是 agent 主动调时按需注入;Tampermonkey 是页面加载时自动跑)→ 用 `chrome.userScripts.register({matches, runAt, js})` 替代 `execute`
 - `GM_*` API shim(`GM_xmlhttpRequest`/`GM_setValue`/`GM_getValue`/...)→ 包装现有 `page.*` RPC 或加 SW 的 `chrome.storage` 路由
 - 脚本编辑器 UI(现在只有「贴码安装」 + 市场浏览)

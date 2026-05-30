@@ -11,6 +11,9 @@ import {
   makeLocalPage,
   runAdapterInPage,
   isNavigateRestart,
+  findNavigateRestart,
+  fmtError,
+  NavigateRestartError,
   sameLogicalPage,
   RPC_METHODS,
   NAVIGATE_RESTART,
@@ -93,7 +96,10 @@ describe('runAdapterInPage — goto trampoline', () => {
     });
     expect(r.status).toBe('navigating');
     expect(r.navigateUrl).toBe('https://demo.com/s?q=cats');
-    expect(rpc).toHaveBeenCalledWith('goto', expect.objectContaining({ url: 'https://demo.com/s?q=cats' }));
+    expect(rpc).toHaveBeenCalledWith(
+      'goto',
+      expect.objectContaining({ url: 'https://demo.com/s?q=cats' }),
+    );
   });
 
   it('second run (already at target url): goto is a no-op → func scrapes → ok', async () => {
@@ -195,9 +201,18 @@ describe('makeLocalPage — local vs RPC split', () => {
     );
   });
 
-  it('getCurrentUrl is local', () => {
-    const page = makeLocalPage({ rpc: async () => undefined, env: { location: { href: 'https://x/y' } } });
-    expect((page.getCurrentUrl as () => string)()).toBe('https://x/y');
+  it('getCurrentUrl is local AND async (matches PageShim Promise<string|null> contract)', async () => {
+    const page = makeLocalPage({
+      rpc: async () => undefined,
+      env: { location: { href: 'https://x/y' } },
+    });
+    const res = (page.getCurrentUrl as () => Promise<string>)();
+    // Adapters do `await page.getCurrentUrl().catch(() => '')` — both `.then`
+    // and `.catch` must exist (sync string had neither, hence the
+    // "page.getCurrentUrl(...).catch is not a function" in zhihu/answer-detail).
+    expect(typeof (res as Promise<string>).then).toBe('function');
+    expect(typeof (res as Promise<string>).catch).toBe('function');
+    expect(await res).toBe('https://x/y');
   });
 
   it('getCookies / cdp / screenshot delegate to RPC', async () => {
@@ -230,5 +245,175 @@ describe('isNavigateRestart', () => {
     expect(isNavigateRestart({ [NAVIGATE_RESTART]: true, url: 'x' })).toBe(true);
     expect(isNavigateRestart(new Error('nope'))).toBe(false);
     expect(isNavigateRestart(null)).toBe(false);
+  });
+
+  it('NavigateRestartError is detected as a NavigateRestart marker', () => {
+    const err = new NavigateRestartError('https://x.com/a');
+    expect(isNavigateRestart(err)).toBe(true);
+    expect(err.url).toBe('https://x.com/a');
+    // Crucially: String() must NOT be `[object Object]` — the whole point of
+    // the Error subclass. An adapter that catches goto and re-throws with
+    // `${err.message}` interpolation now carries readable signal.
+    expect(String(err)).toMatch(/NavigateRestart/);
+    expect(err.message).toContain(NAVIGATE_RESTART);
+    expect(err.message).toContain('https://x.com/a');
+  });
+});
+
+describe('findNavigateRestart — recovers marker even when adapter wraps it', () => {
+  it('finds the marker on a directly-thrown NavigateRestartError', () => {
+    expect(findNavigateRestart(new NavigateRestartError('https://x.com/a'))?.url).toBe(
+      'https://x.com/a',
+    );
+  });
+
+  it('walks .cause chain (modern `new Error(msg, {cause: nr})`)', () => {
+    const inner = new NavigateRestartError('https://x.com/a');
+    const outer = new Error('CommandExecutionError: failed', { cause: inner });
+    expect(findNavigateRestart(outer)?.url).toBe('https://x.com/a');
+  });
+
+  it('extracts URL from wrapping `${err.message}` interpolation (the zhihu pattern)', () => {
+    // Mirrors zhihu/answer-detail's actual wrapping shape:
+    //   catch (err) { throw new CommandExecutionError(`Failed to open ... ${err.message}`) }
+    const inner = new NavigateRestartError('https://www.zhihu.com/answer/123');
+    const wrapped = new Error(`Failed to open Zhihu answer 123: ${inner.message}`);
+    const nr = findNavigateRestart(wrapped);
+    expect(nr?.url).toBe('https://www.zhihu.com/answer/123');
+  });
+
+  it('returns null for unrelated errors', () => {
+    expect(findNavigateRestart(new Error('boom'))).toBeNull();
+    expect(findNavigateRestart('nope')).toBeNull();
+    expect(findNavigateRestart(null)).toBeNull();
+    expect(findNavigateRestart({ random: 'object' })).toBeNull();
+  });
+
+  it('caps recursion on pathological self-referential .cause', () => {
+    const e = new Error('a') as Error & { cause?: unknown };
+    e.cause = e; // cycle
+    expect(findNavigateRestart(e)).toBeNull();
+  });
+});
+
+describe('runAdapterInPage — server-redirect bypass via lastNavigatedUrl', () => {
+  // Zhihu redirects `/answer/<aid>` to `/question/<qid>/answer/<aid>` after the
+  // SW's navigate. The new runner lands at the canonical path, sameLogicalPage
+  // returns false (different pathname), and pre-fix the trampoline looped
+  // until maxReinjects ("adapter exceeded 3 navigate-reinject cycles"). The
+  // SW now passes the URL it just navigated to as init.lastNavigatedUrl, and
+  // the trampoline treats matching goto(url) as already-done.
+  it('post-reinject: goto(url) where url === lastNavigatedUrl → no-op even on path mismatch', async () => {
+    const rpc = vi.fn(async (method: string, args: { args?: unknown[] }) => {
+      if (method === 'evaluate') {
+        const js = String((args.args ?? [])[0] ?? '');
+        return js.includes('scraped') ? 'scraped' : undefined;
+      }
+      return undefined;
+    });
+    const page = makeLocalPage({
+      rpc,
+      // Asked for /answer/<aid>; zhihu redirected → /question/<qid>/answer/<aid>.
+      env: { location: { href: 'https://www.zhihu.com/question/456/answer/123' } },
+      lastNavigatedUrl: 'https://www.zhihu.com/answer/123',
+    });
+    const goto = page.goto as (u: string) => Promise<void>;
+    await goto('https://www.zhihu.com/answer/123'); // must NOT throw, must NOT RPC
+    expect(rpc).not.toHaveBeenCalledWith('goto', expect.anything());
+  });
+
+  it('consume-once: second goto with the same URL goes through the normal trampoline', async () => {
+    const rpc = vi.fn(async () => undefined);
+    const page = makeLocalPage({
+      rpc,
+      env: { location: { href: 'https://www.zhihu.com/question/456/answer/123' } },
+      lastNavigatedUrl: 'https://www.zhihu.com/answer/123',
+    });
+    const goto = page.goto as (u: string) => Promise<void>;
+    await goto('https://www.zhihu.com/answer/123'); // consumes
+    await expect(goto('https://www.zhihu.com/answer/123')).rejects.toMatchObject({
+      [NAVIGATE_RESTART]: true,
+      url: 'https://www.zhihu.com/answer/123',
+    });
+    expect(rpc).toHaveBeenCalledWith('goto', expect.objectContaining({ url: expect.any(String) }));
+  });
+
+  it('mismatched goto does NOT consume the bypass', async () => {
+    const rpc = vi.fn(async () => undefined);
+    const page = makeLocalPage({
+      rpc,
+      env: { location: { href: 'https://x.com/start' } },
+      lastNavigatedUrl: 'https://x.com/expected',
+    });
+    const goto = page.goto as (u: string) => Promise<void>;
+    // First goto goes to a different URL than lastNavigatedUrl → trampoline.
+    await expect(goto('https://x.com/different')).rejects.toMatchObject({
+      [NAVIGATE_RESTART]: true,
+      url: 'https://x.com/different',
+    });
+    // Subsequent goto matching lastNavigatedUrl should still bypass — we only
+    // consume on a positive match, not on any goto attempt.
+    await goto('https://x.com/expected'); // must not throw
+  });
+});
+
+describe('runAdapterInPage — goto trampoline survives adapter try/catch wrapping', () => {
+  // Mirrors zhihu/answer-detail.js: it wraps `await page.goto(...)` in a
+  // try/catch and re-throws as a CommandExecutionError, interpolating
+  // `${err.message}` into the wrap. Pre-fix this defeated the trampoline —
+  // runner saw an unrelated error, navigate never fired, user saw
+  //   `Failed to open Zhihu answer ...: [object Object]`.
+  const ZHIHU_LIKE = `import { cli, Strategy } from '@jackwener/opencli/registry';
+cli({
+  site: 'demo', name: 'wrap', access: 'read', domain: 'demo.com', strategy: Strategy.COOKIE,
+  args: [{ name: 'id', required: true, positional: true }],
+  func: async (page, kwargs) => {
+    try {
+      await page.goto('https://demo.com/answer/' + kwargs.id);
+    } catch (err) {
+      throw new Error(
+        'Failed to open answer ' + kwargs.id + ': ' +
+          (err && err.message ? err.message : String(err))
+      );
+    }
+    return 'scraped';
+  },
+});`;
+
+  it('first run: adapter catches NavigateRestart and rewraps → runner still routes to navigating', async () => {
+    const rpc = vi.fn(async () => undefined);
+    const page = makeLocalPage({ rpc, env: { location: { href: 'https://demo.com/home' } } });
+    const r = await runAdapterInPage({
+      source: ZHIHU_LIKE,
+      site: 'demo',
+      name: 'wrap',
+      kwargs: { id: '123' },
+      page,
+    });
+    expect(r.status).toBe('navigating');
+    expect(r.navigateUrl).toBe('https://demo.com/answer/123');
+  });
+});
+
+describe('fmtError', () => {
+  it('Error → name: message', () => {
+    expect(fmtError(new Error('boom'))).toBe('Error: boom');
+    const te = new TypeError('typed');
+    expect(fmtError(te)).toBe('TypeError: typed');
+  });
+  it('string passes through', () => {
+    expect(fmtError('plain string')).toBe('plain string');
+  });
+  it('plain object → JSON (not "[object Object]")', () => {
+    expect(fmtError({ code: 42, msg: 'x' })).toBe('{"code":42,"msg":"x"}');
+  });
+  it('null / undefined stringify safely', () => {
+    expect(fmtError(null)).toBe('null');
+    expect(fmtError(undefined)).toBe('undefined');
+  });
+  it('circular object falls back to String() (avoids JSON crash)', () => {
+    const o: Record<string, unknown> = { a: 1 };
+    o.self = o;
+    expect(fmtError(o)).toBe('[object Object]'); // last-resort String() is fine; just don't throw
   });
 });

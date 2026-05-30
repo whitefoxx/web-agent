@@ -37,6 +37,16 @@ export interface InitMsg {
   kwargs: Record<string, unknown>;
   /** Tab id the runner is in (forwarded on RPCs that need it). */
   tabId: number;
+  /** URL the SW just navigated to as a result of a NAVIGATE_RESTART from a
+   * prior runner instance for THIS adapter run. Undefined on the very first
+   * run. When set, the goto trampoline treats `page.goto(thatUrl)` as a no-op
+   * on the FIRST call, even if `location.href` doesn't match — because the
+   * server may have redirected to a different canonical URL (zhihu:
+   * `/answer/<aid>` → `/question/<qid>/answer/<aid>`). Without this hint
+   * `sameLogicalPage` returns false on path mismatch and the trampoline
+   * loops until maxReinjects. Consume-once: subsequent gotos in the same
+   * runner go through the normal trampoline. See adapter-hot-plug.md §10.11. */
+  lastNavigatedUrl?: string;
 }
 
 export interface RpcReplyMsg {

@@ -28,6 +28,7 @@
 import { log, warn, error as logError } from '../runtime/log';
 import type { PageShim } from '../runtime/page';
 import { fulfillRpc, type PageLike as RpcPageLike } from './rpc-server';
+import { fmtError } from './run-in-page';
 import {
   PORT_NAME,
   WORLD_ID,
@@ -208,14 +209,15 @@ async function diagnose(
         extra: document.documentElement?.getAttribute('data-webchat-runner-extra') ?? null,
       })`,
     );
-    if (typeof raw !== 'string') return { status: '(non-string eval result)', at: null, extra: null };
+    if (typeof raw !== 'string')
+      return { status: '(non-string eval result)', at: null, extra: null };
     return JSON.parse(raw);
   } catch (e) {
     return {
       status: null,
       at: null,
       extra: null,
-      readErr: `eval failed on tab=${tabId}: ${e instanceof Error ? e.message : String(e)}`,
+      readErr: `eval failed on tab=${tabId}: ${fmtError(e)}`,
     };
   }
 }
@@ -289,6 +291,12 @@ export async function runInstalledFuncAdapter(
   const maxReinjects = args.maxReinjects ?? 3;
   const timeoutMs = args.timeoutMs ?? 60_000;
 
+  // Threads the most recent navigate-target through to the next runner. Lets
+  // the trampoline recognise "I asked for X, you landed at Y after redirect"
+  // as already-done — otherwise sameLogicalPage rejects the path mismatch and
+  // we'd loop until maxReinjects. See adapter-hot-plug.md §10.11.
+  let lastNavigatedUrl: string | undefined;
+
   // Each loop iteration = one execute() + one runner lifecycle.
   for (let i = 0; i <= maxReinjects; i++) {
     const outcome = await runOnceWithPort({
@@ -301,6 +309,7 @@ export async function runInstalledFuncAdapter(
         name: args.name,
         kwargs: args.kwargs,
         tabId: args.tabId,
+        lastNavigatedUrl,
       },
       timeoutMs,
     });
@@ -314,12 +323,16 @@ export async function runInstalledFuncAdapter(
       // Drive the navigate via PageShim so we reuse its load-wait logic.
       const url = outcome.url ?? '';
       if (!url) return { ok: false, error: 'navigate signal carried no URL' };
-      log('userscript', `navigating tab=${args.tabId} → ${url} (iter ${i + 1}/${maxReinjects + 1})`);
+      log(
+        'userscript',
+        `navigating tab=${args.tabId} → ${url} (iter ${i + 1}/${maxReinjects + 1})`,
+      );
       try {
         await args.page.goto(url);
       } catch (e) {
-        return { ok: false, error: `navigate failed: ${e instanceof Error ? e.message : String(e)}` };
+        return { ok: false, error: `navigate failed: ${fmtError(e)}` };
       }
+      lastNavigatedUrl = url;
       // Loop continues → next iteration re-executes the runner script.
     }
   }
@@ -376,7 +389,7 @@ async function runOnceWithPort(args: {
         try {
           diag = await diagnose(args.page, args.tabId);
         } catch (e) {
-          diag = { status: null, at: null, extra: null, readErr: e instanceof Error ? e.message : String(e) };
+          diag = { status: null, at: null, extra: null, readErr: fmtError(e) };
         }
         warn('userscript', `runner timed out after ${args.timeoutMs}ms — diag`, diag);
         settle({
@@ -393,14 +406,13 @@ async function runOnceWithPort(args: {
     // .error if the script faulted in that frame).
     const us = chrome.userScripts;
     log('userscript', `chrome.userScripts.execute starting tab=${args.tabId}`);
-    us
-      .execute({
-        target: { tabId: args.tabId },
-        world: 'USER_SCRIPT',
-        worldId: WORLD_ID,
-        injectImmediately: true,
-        js: [{ file: 'userscript-runner.js' }],
-      })
+    us.execute({
+      target: { tabId: args.tabId },
+      world: 'USER_SCRIPT',
+      worldId: WORLD_ID,
+      injectImmediately: true,
+      js: [{ file: 'userscript-runner.js' }],
+    })
       .then((results: chrome.userScripts.InjectionResult[] | undefined) => {
         // Inline the result summary into the log STRING (not the {data} arg) so
         // the Chrome console shows it without needing a manual ▶ expand — and
@@ -423,7 +435,7 @@ async function runOnceWithPort(args: {
         settle({
           kind: 'done',
           ok: false,
-          error: `chrome.userScripts.execute failed: ${e instanceof Error ? e.message : String(e)}. Most likely "Allow user scripts" is off for this extension.`,
+          error: `chrome.userScripts.execute failed: ${fmtError(e)}. Most likely "Allow user scripts" is off for this extension.`,
         });
       });
   });

@@ -35,15 +35,96 @@ import { stripModuleSyntax } from '../sandbox/eval-core';
 
 /** Thrown by page.goto when a navigation is needed. The top-level runner maps
  * this to a "navigating, will resume after reinject" outcome rather than an
- * error. Tagged property (not an Error subclass) so detection works across the
- * eval boundary where `instanceof` is unreliable. */
+ * error.
+ *
+ * Why an Error subclass with BOTH a tag property AND the marker embedded in
+ * .message (used to be a bare plain object): some adapters wrap page.goto in
+ * try/catch and re-throw — e.g. zhihu/answer-detail does
+ *
+ *   try { await page.goto(url); }
+ *   catch (err) { throw new CommandExecutionError(
+ *     `Failed to open Zhihu answer ${id}: ${err.message ?? String(err)}`); }
+ *
+ * With a plain-object throw, `String(err)` returned `[object Object]` (useless
+ * for debugging) AND the runner lost the navigate signal entirely. Making this
+ * an Error fixes the stringify; embedding the marker in `.message` lets
+ * findNavigateRestart() recover the URL even from a wrapping adapter's
+ * `${err.message}` interpolation — see docs/adapter-hot-plug.md §10.10.
+ *
+ * Detection still uses the tag property (not instanceof) so it works across
+ * the eval boundary where realm-identity is iffy. */
 export const NAVIGATE_RESTART = '__webchat_navigate_restart__';
 export interface NavigateRestart {
   [NAVIGATE_RESTART]: true;
   url: string;
 }
+export class NavigateRestartError extends Error implements NavigateRestart {
+  readonly [NAVIGATE_RESTART] = true as const;
+  readonly url: string;
+  constructor(url: string) {
+    // Marker embedded in the message so a wrapping adapter that re-throws
+    // with `${err.message}` interpolation preserves enough signal for
+    // findNavigateRestart to pull the URL back out.
+    super(`${NAVIGATE_RESTART}|${url}`);
+    this.name = 'NavigateRestart';
+    this.url = url;
+  }
+}
 export function isNavigateRestart(v: unknown): v is NavigateRestart {
   return !!v && typeof v === 'object' && (v as Record<string, unknown>)[NAVIGATE_RESTART] === true;
+}
+
+/** Find a NavigateRestart marker even when an adapter wrapped our throw.
+ *
+ * Three detection paths, in order:
+ *   1. The value itself is tagged (the no-try/catch happy path).
+ *   2. The value (or any `.cause`) is tagged (modern `new Error(msg, {cause})`).
+ *   3. The value's `.message` string contains the embedded URL marker
+ *      (catches `throw new XxxError(\`prefix: ${err.message}\`)` — the zhihu
+ *      pattern). Capped recursion depth guards against pathological causes.
+ *
+ * Without (3), zhihu/answer-detail's `catch (err) { throw new
+ * CommandExecutionError(\`Failed to open Zhihu answer ${id}: ${err.message}\`) }`
+ * would defeat the trampoline — the runner would see an unrelated error and
+ * never trigger the navigate. */
+export function findNavigateRestart(e: unknown, depth = 0): NavigateRestart | null {
+  if (depth > 6) return null;
+  if (isNavigateRestart(e)) return e;
+  if (e && typeof e === 'object') {
+    const cause = (e as { cause?: unknown }).cause;
+    if (cause != null) {
+      const fromCause = findNavigateRestart(cause, depth + 1);
+      if (fromCause) return fromCause;
+    }
+    const msg = (e as { message?: unknown }).message;
+    if (typeof msg === 'string') {
+      // Match the embedded form `__webchat_navigate_restart__|<url>` and
+      // grab the URL up to the next whitespace/quote so a re-throw with a
+      // suffix doesn't break extraction.
+      const m = msg.match(new RegExp(`${NAVIGATE_RESTART}\\|([^\\s"'\`]+)`));
+      if (m) return { [NAVIGATE_RESTART]: true, url: m[1] };
+    }
+  }
+  return null;
+}
+
+/** Render an unknown thrown value as a debuggable string.
+ *
+ * Why not `String(e)`: a plain-object throw becomes `[object Object]`, which is
+ * actively misleading in logs and surfaced errors. We fall back to
+ * JSON.stringify so the keys/values are at least visible, then to String() as
+ * a last resort (BigInt, circular refs, …). */
+export function fmtError(e: unknown): string {
+  if (e instanceof Error) return `${e.name}: ${e.message}`;
+  if (typeof e === 'string') return e;
+  if (e == null) return String(e);
+  try {
+    const s = JSON.stringify(e);
+    if (s && s !== '{}' && s !== 'null') return s;
+  } catch {
+    // circular ref, BigInt, etc. — fall through
+  }
+  return String(e);
 }
 
 /** page.* methods that must be RPC'd to the SW (need chrome.* / CDP / MAIN world).
@@ -84,6 +165,14 @@ export interface LocalPageOptions {
   tabId?: number;
   /** User-attached files, surfaced via page.getAttachments(). */
   attachments?: File[];
+  /** URL the SW already navigated to as part of this adapter run (from a
+   * prior runner instance's NAVIGATE_RESTART). When the adapter's first
+   * `page.goto(url)` matches this, the trampoline returns immediately
+   * without RPC — even if `location.href` differs because the server
+   * redirected (zhihu `/answer/<aid>` → `/question/<qid>/answer/<aid>`).
+   * Consumed once: subsequent gotos go through normal trampoline.
+   * See adapter-hot-plug.md §10.11. */
+  lastNavigatedUrl?: string;
   /** DOM/global overrides for testing. Defaults to the ambient globals. */
   env?: {
     location?: { href: string };
@@ -134,6 +223,8 @@ function wrapForEval(js: string): string {
 export function makeLocalPage(opts: LocalPageOptions): Record<string, unknown> {
   const { rpc, tabId, attachments = [] } = opts;
   const loc = opts.env?.location ?? (typeof location !== 'undefined' ? location : { href: '' });
+  // Mutable so the trampoline can consume it on first match — see goto below.
+  let lastNavigatedUrl = opts.lastNavigatedUrl;
   // Indirect eval via globalThis.eval runs in global scope; in the USER_SCRIPT
   // world its CSP allows it. Using globalThis.eval (not the bare `eval` /
   // `(0,eval)` form) avoids bundler direct-eval special-casing. `evalFn`
@@ -152,7 +243,9 @@ export function makeLocalPage(opts: LocalPageOptions): Record<string, unknown> {
     // local would mean reading window.<global> from USER_SCRIPT world's
     // isolated binding, which is `undefined` for every page bootstrap.
 
-    async wait(arg: { time?: number; selector?: string; text?: string; timeout?: number } | number) {
+    async wait(
+      arg: { time?: number; selector?: string; text?: string; timeout?: number } | number,
+    ) {
       const o = typeof arg === 'number' ? { time: arg } : (arg ?? {});
       if (o.selector || o.text) {
         const timeoutMs = typeof o.timeout === 'number' ? o.timeout : 10_000;
@@ -195,7 +288,12 @@ export function makeLocalPage(opts: LocalPageOptions): Record<string, unknown> {
       await doEval(`window.scrollBy(0, ${typeof amount === 'number' ? amount : 600})`);
     },
 
-    getCurrentUrl(): string {
+    // Async to match PageShim.getCurrentUrl's `Promise<string | null>` shape —
+    // some adapters (zhihu/answer-detail) chain `.catch(() => '')` on it, and
+    // `.catch` on a sync string is undefined → "page.getCurrentUrl(...).catch
+    // is not a function". The DOM read itself is sync; we just wrap. See
+    // adapter-hot-plug.md §10.12.
+    async getCurrentUrl(): Promise<string> {
       return loc.href;
     },
 
@@ -221,9 +319,22 @@ export function makeLocalPage(opts: LocalPageOptions): Record<string, unknown> {
      */
     async goto(url: string): Promise<void> {
       if (sameLogicalPage(loc.href, url)) return; // already here (post-reinject): no-op
+      // Post-reinject server-redirect path: the SW already navigated to `url`
+      // on our behalf, but the server redirected to a different canonical URL
+      // (zhihu `/answer/<aid>` → `/question/<qid>/answer/<aid>`). sameLogicalPage
+      // rejects path mismatches, but we KNOW we asked for this URL — accept it.
+      // Consume the hint so a second adapter goto goes through the trampoline
+      // normally.
+      if (lastNavigatedUrl && lastNavigatedUrl === url) {
+        lastNavigatedUrl = undefined;
+        return;
+      }
       await rpc('goto', { url, tabId });
-      // Stop the func; the SW will re-inject after the tab loads.
-      throw { [NAVIGATE_RESTART]: true, url } as NavigateRestart;
+      // Stop the func; the SW will re-inject after the tab loads. Throw an
+      // Error subclass (not a plain object) so adapters that wrap goto in
+      // try/catch get a readable stringification + a recoverable marker
+      // even when they re-throw — see NavigateRestartError doc.
+      throw new NavigateRestartError(url);
     },
   };
 
@@ -331,19 +442,27 @@ export async function runAdapterInPage(args: {
   try {
     defs = evalAdapterKeepingFuncs(args.source);
   } catch (e) {
-    return { status: 'error', error: `eval failed: ${e instanceof Error ? e.message : String(e)}` };
+    return { status: 'error', error: `eval failed: ${fmtError(e)}` };
   }
   const def = defs.find((d) => d.site === args.site && d.name === args.name);
-  if (!def) return { status: 'error', error: `command ${args.site}/${args.name} not found in source` };
+  if (!def)
+    return { status: 'error', error: `command ${args.site}/${args.name} not found in source` };
   const func = def.func;
   if (typeof func !== 'function') {
     return { status: 'error', error: `${args.site}/${args.name} has no func` };
   }
   try {
-    const result = await (func as (p: unknown, k: unknown) => Promise<unknown>)(args.page, args.kwargs);
+    const result = await (func as (p: unknown, k: unknown) => Promise<unknown>)(
+      args.page,
+      args.kwargs,
+    );
     return { status: 'ok', result };
   } catch (e) {
-    if (isNavigateRestart(e)) return { status: 'navigating', navigateUrl: e.url };
-    return { status: 'error', error: e instanceof Error ? `${e.name}: ${e.message}` : String(e) };
+    // Deep-scan: an adapter that wraps page.goto in try/catch and re-throws
+    // (zhihu/answer-detail, …) still leaves a recoverable marker via .cause
+    // or the embedded message form — see findNavigateRestart.
+    const nr = findNavigateRestart(e);
+    if (nr) return { status: 'navigating', navigateUrl: nr.url };
+    return { status: 'error', error: fmtError(e) };
   }
 }

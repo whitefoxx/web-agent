@@ -21,6 +21,7 @@
  */
 
 import { log, warn } from '../runtime/log';
+import { fmtError } from './run-in-page';
 
 /** The PageShim subset the RPC server may invoke. All optional so a fake (and
  * a partial real shim) satisfy it; an unsupported method yields a clear error
@@ -99,6 +100,6 @@ export async function fulfillRpc(page: PageLike, req: RpcRequest): Promise<RpcRe
     return { ok: true, value };
   } catch (e) {
     warn('userscript-rpc', `page.${method} threw`, e);
-    return { ok: false, error: e instanceof Error ? `${e.name}: ${e.message}` : String(e) };
+    return { ok: false, error: fmtError(e) };
   }
 }
