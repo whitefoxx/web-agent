@@ -58,18 +58,21 @@ export async function fetchMarketIndex(): Promise<MarketIndex> {
 }
 
 /**
- * A small handpicked set surfaced in a "推荐" row at the top of the market
- * browser. All public, no-cookie, pipeline-only — so a fresh user can click
- * any of them and have a working tool a moment later. Order matters: shown
- * left-to-right top-to-bottom in the UI.
+ * Handpicked set surfaced in a "推荐" row at the top of the market browser.
+ * Mix of pipeline (装即用,zero-config) and func (需 Phase B + Chrome 138+
+ * 允许用户脚本) so users see both categories from the get-go. Order matters:
+ * shown left-to-right top-to-bottom; pipelines first for the smoothest first
+ * impression.
  */
 export const FEATURED_IDS: readonly string[] = [
+  // pipeline —装即用
   'hackernews/top',
   'bilibili/hot',
   'binance/price',
-  'v2ex/hot',
-  'bluesky/trending',
-  'lobsters/hot',
   'zhihu/hot',
-  'devto/top',
+  // func — 需要 Phase B (Chrome 138+ + 允许用户脚本开关)
+  'xiaohongshu/search',
+  'twitter/timeline',
+  'youtube/search',
+  'weread/notes',
 ];

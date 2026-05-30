@@ -30,6 +30,7 @@ import {
 import type { InstalledAdapterSummary } from '../connectors/messages';
 
 type Tab = 'installed' | 'market';
+type TypeFilter = 'all' | 'pipeline' | 'func';
 
 type InstallState =
   | { kind: 'idle' }
@@ -49,6 +50,7 @@ export function AdaptersSection() {
   const [market, setMarket] = useState<MarketIndex | null>(null);
   const [marketErr, setMarketErr] = useState<string | null>(null);
   const [search, setSearch] = useState('');
+  const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
   const [installing, setInstalling] = useState<Set<string>>(new Set());
 
   async function refresh(): Promise<void> {
@@ -95,14 +97,27 @@ export function AdaptersSection() {
   const filtered = useMemo<MarketAdapter[]>(() => {
     if (!market) return [];
     const q = search.trim().toLowerCase();
-    if (!q) return market.adapters;
-    return market.adapters.filter(
-      (a) =>
+    return market.adapters.filter((a) => {
+      if (typeFilter !== 'all' && a.type !== typeFilter) return false;
+      if (!q) return true;
+      return (
         a.site.toLowerCase().includes(q) ||
         a.name.toLowerCase().includes(q) ||
-        (a.description ?? '').toLowerCase().includes(q),
-    );
-  }, [market, search]);
+        (a.description ?? '').toLowerCase().includes(q)
+      );
+    });
+  }, [market, search, typeFilter]);
+
+  const marketCounts = useMemo(() => {
+    if (!market) return { all: 0, pipeline: 0, func: 0 };
+    let pipeline = 0;
+    let func = 0;
+    for (const a of market.adapters) {
+      if (a.type === 'pipeline') pipeline++;
+      else if (a.type === 'func') func++;
+    }
+    return { all: market.adapters.length, pipeline, func };
+  }, [market]);
 
   async function installSource(
     src: string,
@@ -246,9 +261,12 @@ export function AdaptersSection() {
           err={marketErr}
           featured={featured}
           filtered={filtered}
+          counts={marketCounts}
           installedIds={installedIds}
           installing={installing}
           search={search}
+          typeFilter={typeFilter}
+          onTypeFilterChange={setTypeFilter}
           onSearchChange={setSearch}
           onInstall={onInstallMarket}
         />
@@ -356,9 +374,12 @@ interface MarketPanelProps {
   err: string | null;
   featured: MarketAdapter[];
   filtered: MarketAdapter[];
+  counts: { all: number; pipeline: number; func: number };
   installedIds: Set<string>;
   installing: Set<string>;
   search: string;
+  typeFilter: TypeFilter;
+  onTypeFilterChange: (t: TypeFilter) => void;
   onSearchChange: (s: string) => void;
   onInstall: (a: MarketAdapter) => Promise<void>;
 }
@@ -377,13 +398,30 @@ function MarketPanel(p: MarketPanelProps): preact.JSX.Element {
   if (!p.market) {
     return <div style="font-size:11px;color:var(--muted)">加载市场目录…</div>;
   }
+  const typeBtn = (t: TypeFilter, label: string, n: number): preact.JSX.Element => (
+    <button
+      onClick={() => p.onTypeFilterChange(t)}
+      style={`font-size:10px;padding:2px 8px;border-radius:3px;cursor:pointer;border:1px solid ${
+        p.typeFilter === t ? 'var(--accent,#0ea5e9)' : 'var(--border,#e7e5e4)'
+      };background:${p.typeFilter === t ? 'var(--accent,#0ea5e9)' : 'transparent'};color:${
+        p.typeFilter === t ? '#fff' : 'inherit'
+      }`}
+    >
+      {label} <span style="opacity:0.75">{n}</span>
+    </button>
+  );
   return (
     <div>
-      <div style="font-size:11px;color:var(--muted);margin-bottom:6px">
-        内置 {p.market.count} 个 opencli adapter,均为 pipeline 型(纯数据,无登录,装完即用)。
+      <div style="font-size:11px;color:var(--muted);margin-bottom:4px">
+        内置 {p.counts.all} 个 opencli adapter ({p.counts.pipeline} pipeline · {p.counts.func} func)
       </div>
+      {p.counts.func > 0 && (
+        <div style="font-size:10px;color:var(--muted);background:#fef3c7;border:1px solid #fde68a;border-radius:4px;padding:4px 6px;margin-bottom:8px">
+          ⚠️ <strong>func 型</strong>需 Chrome 138+,并在「扩展详情 → 允许用户脚本」开关打开,否则装了也跑不起来(toast 会报红)。
+        </div>
+      )}
 
-      {p.featured.length > 0 && p.search.trim() === '' && (
+      {p.featured.length > 0 && p.search.trim() === '' && p.typeFilter === 'all' && (
         <div style="margin-bottom:10px">
           <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:4px">
             ⭐ 推荐
@@ -413,9 +451,16 @@ function MarketPanel(p: MarketPanelProps): preact.JSX.Element {
         />
       </div>
 
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
+        <span style="font-size:11px;color:var(--muted)">类型</span>
+        {typeBtn('all', '全部', p.counts.all)}
+        {typeBtn('pipeline', 'pipeline', p.counts.pipeline)}
+        {typeBtn('func', 'func', p.counts.func)}
+      </div>
+
       <div style="font-size:11px;color:var(--muted);margin-bottom:4px">
-        全部 ({p.filtered.length}
-        {p.search.trim() ? `/${p.market.count}` : ''})
+        显示 {p.filtered.length}
+        {p.filtered.length !== p.counts.all ? `/${p.counts.all}` : ''}
       </div>
       {p.filtered.length === 0 ? (
         <div style="font-size:11px;color:var(--muted)">没有匹配的 adapter</div>
@@ -446,13 +491,26 @@ interface MarketRowProps {
 
 function MarketRow({ a, installed, installing, onInstall, accent }: MarketRowProps): preact.JSX.Element {
   const id = entryId(a);
+  // pipeline 绿、func 橙(标识 Phase B 前提)。chip 用 inline style 而不是 className
+  // 以避免 sidepanel/style.css 改动。
+  const typeChip =
+    a.type === 'pipeline' ? (
+      <span style="font-size:9px;padding:1px 5px;border-radius:3px;background:#dcfce7;color:#166534;font-weight:600">
+        pipeline
+      </span>
+    ) : a.type === 'func' ? (
+      <span style="font-size:9px;padding:1px 5px;border-radius:3px;background:#ffedd5;color:#9a3412;font-weight:600">
+        func
+      </span>
+    ) : null;
   return (
     <li
       style={`border:1px solid ${accent ? 'var(--accent,#0ea5e9)' : 'var(--border,#e7e5e4)'};border-radius:4px;padding:4px 8px;display:flex;align-items:center;gap:6px`}
     >
       <div style="flex:1;min-width:0">
-        <div style="font-size:12px;display:flex;align-items:center;gap:4px">
+        <div style="font-size:12px;display:flex;align-items:center;gap:6px">
           <code>{id}</code>
+          {typeChip}
         </div>
         {a.description && (
           <div style="font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">

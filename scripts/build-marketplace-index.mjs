@@ -34,8 +34,50 @@ function arg(flag, def) {
   return i >= 0 && process.argv[i + 1] ? process.argv[i + 1] : def;
 }
 const includeAll = process.argv.includes('--all');
+const popularOnly = process.argv.includes('--popular');
 const clisDir = resolve(arg('--clis', join(ROOT, '..', 'browser-agent', 'opencli', 'clis')));
 const outFile = resolve(arg('--out', join(ROOT, 'marketplace', 'index.json')));
+
+/**
+ * Curated "popular sites" allowlist — used with --popular to ship a focused
+ * default marketplace instead of the full ~815-adapter dump. Mix of high-
+ * traffic 国内 sites + global classics + practical tools. Edit this list to
+ * tune what ships in the bundled index; users can still paste-install
+ * anything else by hand. All pipeline-only entries are always kept; func
+ * entries only kept if their site is in this set.
+ */
+const POPULAR_SITES = new Set([
+  // 国内主流
+  'xiaohongshu',
+  'bilibili',
+  'zhihu',
+  'weibo',
+  'douyin',
+  'weread',
+  'weread-official',
+  'douban',
+  'v2ex',
+  // 海外主流
+  'twitter',
+  'youtube',
+  'reddit',
+  'linkedin',
+  'hackernews',
+  'bluesky',
+  'lobsters',
+  // 论文 / 学术
+  'arxiv',
+  'pubmed',
+  // 工具 / 行情
+  'coingecko',
+  'binance',
+  'wikipedia',
+  // AI 工具
+  'notebooklm',
+  'chatgpt',
+  'claude',
+  'gemini',
+]);
 
 if (!existsSync(clisDir)) {
   console.error(`✗ clis dir not found: ${clisDir}`);
@@ -86,7 +128,19 @@ async function main() {
       scanned++;
 
       const type = classify(src);
-      if (!includeAll && type !== 'pipeline') {
+      // Without --all and without --popular: pipeline only (legacy default).
+      if (!includeAll && !popularOnly && type !== 'pipeline') {
+        skipped++;
+        continue;
+      }
+      // --popular: keep all pipeline + func from POPULAR_SITES.
+      if (popularOnly && type === 'func' && !POPULAR_SITES.has(site)) {
+        skipped++;
+        continue;
+      }
+      // 'unknown' = source registers a cli() with neither pipeline nor func
+      // body. Not installable in any path. Skip even under --all.
+      if (type === 'unknown') {
         skipped++;
         continue;
       }
