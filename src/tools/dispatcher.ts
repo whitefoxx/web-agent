@@ -8,7 +8,7 @@
  */
 
 import { lookupAdapter, type AdapterDef } from './manifest';
-import { runPipeline, type Pipeline } from '../runtime/opencli/pipeline';
+import { runPipeline, pipelineNeedsPage, type Pipeline } from '../runtime/opencli/pipeline';
 import { createPageShim } from '../runtime/page';
 import { log, warn, error as logError } from '../runtime/log';
 import { RateLimitedError, AuthRequiredError, EmptyResultError } from '../runtime/errors.js';
@@ -83,23 +83,67 @@ export async function executeAdapter(opts: {
     return failed(t0, argError, 'generic');
   }
 
-  // opencli pipeline-only adapters (no func, declarative `pipeline`): run the
-  // pipeline engine. These are pure HTTP+transform (hackernews/coingecko/
-  // weather/wikipedia/…) — no tab, no CDP, no anti-bot pacing needed. The SW's
-  // own fetch bypasses CORS via host_permissions.
+  // opencli pipeline-only adapters (no func, declarative `pipeline`). Two
+  // sub-paths:
+  //   (a) pure HTTP+transform (hackernews/coingecko/binance/…) — no tab, no
+  //       CDP, no anti-bot pacing. SW `fetch` bypasses CORS via host_permissions.
+  //   (b) has `navigate`/`evaluate` steps (zhihu/bilibili/douban/… — sites
+  //       whose data lives behind in-page JS or cookied APIs only the page
+  //       can call). Same lifecycle as a func adapter: pace → open tab →
+  //       PageShim → run → detach. The pipeline engine consumes options.page
+  //       for those steps and runs the rest in-SW.
   const pipeline = (adapter as { pipeline?: unknown }).pipeline;
   if (typeof adapter.func !== 'function') {
     if (!Array.isArray(pipeline) || pipeline.length === 0) {
       return failed(t0, `${opts.tool} cannot run: no func and no pipeline.`, 'generic');
     }
     const args = withArgDefaults(adapter, opts.args ?? {});
-    log('dispatcher', `executing ${opts.tool} (pipeline, ${pipeline.length} steps)`, { args });
+    const needsPage = pipelineNeedsPage(pipeline);
+    if (!needsPage) {
+      log('dispatcher', `executing ${opts.tool} (pipeline, ${pipeline.length} steps, tab-less)`, {
+        args,
+      });
+      try {
+        const { rows } = await runPipeline(pipeline as Pipeline, { args });
+        log('dispatcher', `success ${opts.tool}`, {
+          rows: rows.length,
+          durationMs: Date.now() - t0,
+        });
+        return { ok: true, result: rows, durationMs: Date.now() - t0 };
+      } catch (e) {
+        return classifyError(t0, e);
+      }
+    }
+
+    // Page-driven pipeline.
+    await humanPaceForSite(adapter.site);
+    let tabId: number;
     try {
-      const { rows } = await runPipeline(pipeline as Pipeline, { args });
-      log('dispatcher', `success ${opts.tool}`, { rows: rows.length, durationMs: Date.now() - t0 });
+      tabId = await ensureSiteTab(adapter.site, adapter.domain);
+    } catch (e) {
+      return failed(t0, `failed to open ${adapter.site} tab: ${msgOf(e)}`, 'tab');
+    }
+    log(
+      'dispatcher',
+      `executing ${opts.tool} on tab=${tabId} (pipeline, ${pipeline.length} steps, needs page)`,
+      { args },
+    );
+    const page = await createPageShim(tabId);
+    try {
+      const { rows } = await runPipeline(pipeline as Pipeline, { args }, { page });
+      log('dispatcher', `success ${opts.tool}`, {
+        rows: rows.length,
+        durationMs: Date.now() - t0,
+      });
       return { ok: true, result: rows, durationMs: Date.now() - t0 };
     } catch (e) {
       return classifyError(t0, e);
+    } finally {
+      try {
+        await page.detach();
+      } catch (e) {
+        warn('dispatcher', 'page.detach failed (ignored)', e);
+      }
     }
   }
 

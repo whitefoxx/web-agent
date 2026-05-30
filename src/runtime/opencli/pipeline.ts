@@ -668,6 +668,26 @@ export interface TransformStep {
 export interface PaginateStep {
   paginate: { fetch: FetchStepDef; maxPages?: number; until?: Expr; merge?: 'append' | 'replace' };
 }
+/** Pick a dot-path from the current root/data payload as the new rows.
+ * Opencli pattern (binance/asks, bluesky/*, stackoverflow/*): `fetch` returns
+ * `{asks:[...], bids:[...]}` once; then `{ select: 'asks' }` replaces rows
+ * with that array so subsequent `map` iterates over it. */
+export interface SelectStep {
+  select: Expr;
+}
+/** Drive a real tab to a URL (page-required). Form: `{ navigate: '<url>' }`
+ * or `{ navigate: { url, waitUntil?, settleMs? } }`. The dispatcher must
+ * provide `options.page` for this step. */
+export interface NavigateStep {
+  navigate: Expr | { url: Expr; waitUntil?: 'load' | 'none'; settleMs?: number };
+}
+/** Run a JS string inside the page world via `page.evaluate`. The return
+ * value becomes the new rows (array as-is; object wrapped to one row; an
+ * object with `.data: array` unwrapped). A returned JSON-looking string is
+ * auto-parsed (matches opencli stepEvaluate). */
+export interface EvaluateStep {
+  evaluate: Expr;
+}
 
 export type PipelineStep =
   | FetchStep
@@ -676,7 +696,10 @@ export type PipelineStep =
   | LimitStep
   | SortStep
   | TransformStep
-  | PaginateStep;
+  | PaginateStep
+  | SelectStep
+  | NavigateStep
+  | EvaluateStep;
 export type Pipeline = PipelineStep[];
 
 export interface PipelineResult {
@@ -689,11 +712,21 @@ export type FetchImpl = (
   init: { method: string; headers: Record<string, string>; body?: string },
 ) => Promise<{ ok: boolean; status: number; text: () => Promise<string> }>;
 
+/** Minimal subset of IPage that pipeline steps actually call. Keeps this
+ * module independent of the CDP-backed PageShim (so tests can pass a mock). */
+export interface PageLike {
+  goto(url: string, opts?: { waitUntil?: 'load' | 'none'; settleMs?: number }): Promise<unknown>;
+  evaluate<T = unknown>(script: string): Promise<T>;
+}
+
 export interface ExecutorOptions {
   fetchImpl?: FetchImpl;
   debug?: boolean;
   /** Max concurrent requests for per-row fetch. Default 6. */
   concurrency?: number;
+  /** Real-tab handle required by `navigate` / `evaluate` steps. Dispatcher
+   * detects need via `pipelineNeedsPage(pipeline)` and supplies it. */
+  page?: PageLike;
 }
 
 const MAX_PIPELINE_ROWS = 10000;
@@ -949,6 +982,92 @@ async function executePaginate(
   return allRows;
 }
 
+/** `select: 'path.to.array'` — pull a dot-path from the last fetch/evaluate
+ * payload (ctx.root, with ctx.data as fallback). The picked value becomes
+ * the new rows: arrays kept as-is, an object with `.data: array` unwrapped,
+ * scalars wrapped to a single row. ctx.root is preserved so subsequent
+ * expressions can still reference the whole payload. */
+function executeSelect(step: SelectStep, rows: unknown[], ctx: PipelineContext): unknown[] {
+  const path = String(evaluateExpr(step.select, ctx));
+  const source = ctx.root !== undefined ? ctx.root : ctx.data !== undefined ? ctx.data : rows[0];
+  if (source == null || typeof source !== 'object') return rows;
+  const picked = resolveJsonPath(source, path);
+  ctx.data = picked;
+  if (picked == null) return [];
+  if (Array.isArray(picked)) return picked;
+  if (typeof picked === 'object' && Array.isArray((picked as { data?: unknown }).data)) {
+    return (picked as { data: unknown[] }).data;
+  }
+  return [picked];
+}
+
+/** `navigate: '<url>'` or `navigate: { url, waitUntil?, settleMs? }`.
+ * Drives the dispatcher-provided page to the URL. Rows pass through; the
+ * payload is whatever the next fetch/evaluate produces. */
+async function executeNavigate(
+  step: NavigateStep,
+  rows: unknown[],
+  ctx: PipelineContext,
+  options: ExecutorOptions,
+): Promise<unknown[]> {
+  if (!options.page) {
+    throw new Error(
+      'Pipeline `navigate` step requires a page (target tab). The dispatcher should open one — adapters using `navigate` must declare `domain` so a tab can be created.',
+    );
+  }
+  const def = step.navigate;
+  if (typeof def === 'string') {
+    const url = String(evaluateExpr(def, ctx));
+    await options.page.goto(url);
+  } else if (def && typeof def === 'object') {
+    const url = String(evaluateExpr(def.url, ctx));
+    await options.page.goto(url, { waitUntil: def.waitUntil, settleMs: def.settleMs });
+  } else {
+    throw new Error('navigate step requires a URL string or { url, ... } object');
+  }
+  return rows;
+}
+
+/** `evaluate: '<js>'` — run JS in the page world and use the return value as
+ * the new payload. Sets ctx.root/ctx.data so a subsequent `select`/`map`
+ * sees it. Array → rows; object → 1 row; `{data: array}` → unwrapped array;
+ * a JSON-looking string is auto-parsed (matches opencli stepEvaluate). */
+async function executeEvaluate(
+  step: EvaluateStep,
+  rows: unknown[],
+  ctx: PipelineContext,
+  options: ExecutorOptions,
+): Promise<unknown[]> {
+  if (!options.page) {
+    throw new Error(
+      'Pipeline `evaluate` step requires a page (target tab) for in-page JS. The dispatcher should open one — adapters using `evaluate` must declare `domain` so a tab can be created.',
+    );
+  }
+  const js = String(evaluateExpr(step.evaluate, ctx));
+  let result: unknown = await options.page.evaluate(js);
+  if (typeof result === 'string') {
+    const trimmed = result.trim();
+    if (
+      (trimmed.startsWith('[') && trimmed.endsWith(']')) ||
+      (trimmed.startsWith('{') && trimmed.endsWith('}'))
+    ) {
+      try {
+        result = JSON.parse(trimmed);
+      } catch {
+        /* keep the raw string */
+      }
+    }
+  }
+  ctx.root = result;
+  ctx.data = result;
+  if (result == null) return rows;
+  if (Array.isArray(result)) return result;
+  if (typeof result === 'object' && Array.isArray((result as { data?: unknown }).data)) {
+    return (result as { data: unknown[] }).data;
+  }
+  return [result];
+}
+
 async function executeStep(
   step: PipelineStep,
   rows: unknown[],
@@ -962,6 +1081,9 @@ async function executeStep(
   if ('sort' in step) return executeSort(step, rows, ctx);
   if ('transform' in step) return executeTransform(step, rows);
   if ('paginate' in step) return executePaginate(step, rows, ctx, options);
+  if ('select' in step) return executeSelect(step, rows, ctx);
+  if ('navigate' in step) return executeNavigate(step, rows, ctx, options);
+  if ('evaluate' in step) return executeEvaluate(step, rows, ctx, options);
   throw new Error(`Unknown pipeline step: ${JSON.stringify(step)}`);
 }
 
@@ -1000,10 +1122,43 @@ export async function runPipeline(
   return executePipeline(pipeline, context, options);
 }
 
+/** Step names recognised by `executeStep`. Anything else short-circuits the
+ * pipeline. Kept centralised so `validatePipeline` and `pipelineNeedsPage`
+ * stay aligned. */
+const KNOWN_STEPS = [
+  'fetch',
+  'map',
+  'filter',
+  'limit',
+  'sort',
+  'paginate',
+  'transform',
+  'select',
+  'navigate',
+  'evaluate',
+] as const;
+
+/** Step types that require a real tab (PageLike). The dispatcher uses this
+ * to decide between the tab-less fast path and the tab+PageShim path. */
+const PAGE_STEPS = new Set<string>(['navigate', 'evaluate']);
+
+/** Does the pipeline contain at least one step that needs `options.page`?
+ * Returns false for invalid input (the dispatcher prefers to surface the
+ * concrete error from `validatePipeline` / `executeStep` rather than this
+ * predicate). */
+export function pipelineNeedsPage(pipeline: unknown): boolean {
+  if (!Array.isArray(pipeline)) return false;
+  for (const step of pipeline) {
+    if (!step || typeof step !== 'object') continue;
+    const k = Object.keys(step)[0];
+    if (k && PAGE_STEPS.has(k)) return true;
+  }
+  return false;
+}
+
 export function validatePipeline(pipeline: unknown): string[] {
   const errors: string[] = [];
   if (!Array.isArray(pipeline)) return ['Pipeline must be an array of steps'];
-  const known = ['fetch', 'map', 'filter', 'limit', 'sort', 'paginate', 'transform'];
   pipeline.forEach((step, i) => {
     if (typeof step !== 'object' || step === null) {
       errors.push(`Step ${i} must be an object`);
@@ -1011,7 +1166,9 @@ export function validatePipeline(pipeline: unknown): string[] {
     }
     const keys = Object.keys(step);
     if (keys.length === 0) errors.push(`Step ${i} has no operation`);
-    else if (!known.includes(keys[0])) errors.push(`Step ${i} has unknown operation: ${keys[0]}`);
+    else if (!KNOWN_STEPS.includes(keys[0] as (typeof KNOWN_STEPS)[number])) {
+      errors.push(`Step ${i} has unknown operation: ${keys[0]}`);
+    }
   });
   return errors;
 }

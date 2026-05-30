@@ -707,7 +707,8 @@ async function handleInstallAdapter(m: InstallAdapterReq) {
     id: r.id,
     title: r.title,
     registered: r.registered,
-    deferred: r.deferred,
+    deferredFunc: r.deferredFunc,
+    deferredUnsupported: r.deferredUnsupported,
     error: r.error,
   };
 }

@@ -22,7 +22,10 @@ export interface InstallOutcome {
   id?: string;
   title?: string;
   registered?: number;
-  deferred?: number;
+  /** Func-type defs persisted but not yet runnable (Phase B). */
+  deferredFunc?: number;
+  /** Pipeline defs using a step the engine doesn't support yet. */
+  deferredUnsupported?: number;
   error?: string;
 }
 
@@ -51,7 +54,8 @@ export async function installAdapterFromSource(
       id: resp.id,
       title: resp.title,
       registered: resp.registered,
-      deferred: resp.deferred,
+      deferredFunc: resp.deferredFunc,
+      deferredUnsupported: resp.deferredUnsupported,
       error: resp.error,
     };
   } catch (e) {

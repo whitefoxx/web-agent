@@ -889,6 +889,26 @@ function LlmBackendSection({
   );
   const [saved, setSaved] = useState(false);
 
+  // Re-sync local state when the saved config arrives (or changes externally).
+  // useState initializers fire ONCE at mount; the parent's loadLlmConfig() is
+  // async, so on first mount `config` is still DEFAULT_CONFIG and the api-key
+  // / model / baseUrl fields end up empty. Without this effect, the saved key
+  // never makes it back into the form — looked like persistence was broken.
+  // Safe against clobbering user edits: the parent only updates `config` after
+  // save (when local state already matches the new config → effect is a no-op),
+  // or on the initial load.
+  useEffect(() => {
+    setMode(config.mode);
+    if (config.mode === 'connector') {
+      setChatbot(config.chatbot);
+    } else {
+      setProvider(config.provider);
+      setBaseUrl(config.baseUrl);
+      setApiKey(config.apiKey);
+      setModel(config.model);
+    }
+  }, [config]);
+
   function pickProvider(id: string): void {
     setProvider(id);
     const p = providerById(id);

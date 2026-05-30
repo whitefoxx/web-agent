@@ -75,13 +75,14 @@ describe('installFromCaptured → registry wiring', () => {
     expect(r.ok).toBe(true);
     expect(r.id).toBe('inst/one');
     expect(r.registered).toBe(1);
-    expect(r.deferred).toBe(0);
+    expect(r.deferredFunc).toBe(0);
+    expect(r.deferredUnsupported).toBe(0);
     const found = findAdapter('inst', 'one');
     expect(found).toBeTruthy();
     expect((found as { _installed?: boolean })._installed).toBe(true);
   });
 
-  it('a mixed source registers pipeline defs and defers func defs', async () => {
+  it('a mixed source registers pipeline defs and defers func defs (deferredFunc)', async () => {
     const r = await installFromCaptured(
       {
         source: 'src',
@@ -92,9 +93,34 @@ describe('installFromCaptured → registry wiring', () => {
     );
     expect(r.ok).toBe(true);
     expect(r.registered).toBe(1); // only the pipeline one
-    expect(r.deferred).toBe(1); // the func one
+    expect(r.deferredFunc).toBe(1); // the func one
+    expect(r.deferredUnsupported).toBe(0);
     expect(findAdapter('instmix', 'one')).toBeTruthy();
     expect(findAdapter('instmix', 'two')).toBeUndefined(); // func not registered in Phase A
+  });
+
+  it('counts a pipeline using an unsupported step as deferredUnsupported (not deferredFunc)', async () => {
+    // `click` is a real opencli step type but we don't implement it yet.
+    // Should be reported distinctly from func/Phase B so the user knows it's
+    // a missing engine feature, not pending the func runner.
+    const unsupported: CapturedDef = {
+      site: 'instu',
+      name: 'one',
+      access: 'read',
+      description: 'p',
+      kind: 'pipeline',
+      hasFunc: false,
+      pipeline: [{ fetch: { url: 'x' } }, { click: '#btn' } as unknown as Record<string, unknown>],
+    };
+    const r = await installFromCaptured(
+      { source: 'src', defs: [unsupported], origin: { type: 'manual' } },
+      2_500,
+    );
+    expect(r.ok).toBe(true);
+    expect(r.registered).toBe(0);
+    expect(r.deferredUnsupported).toBe(1);
+    expect(r.deferredFunc).toBe(0);
+    expect(findAdapter('instu', 'one')).toBeUndefined();
   });
 
   it('rejects an empty capture', async () => {

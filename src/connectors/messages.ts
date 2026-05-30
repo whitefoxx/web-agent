@@ -361,8 +361,16 @@ export interface InstallAdapterResp {
   ok: boolean;
   id?: string;
   title?: string;
+  /** Number of captured defs successfully registered into the live tool
+   * registry (= runnable now). */
   registered?: number;
-  deferred?: number;
+  /** Captured defs that classified as `func` — persisted but Phase B (no
+   * runner). */
+  deferredFunc?: number;
+  /** Captured defs that classified as `pipeline` but use a step type the
+   * engine doesn't support (e.g. `wait`/`click`/`fill`). Persisted but not
+   * runnable. */
+  deferredUnsupported?: number;
   error?: string;
 }
 

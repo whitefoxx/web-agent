@@ -50,8 +50,15 @@ export interface InstallResult {
   ok: boolean;
   id?: string;
   title?: string;
-  registered: number; // how many defs became runnable now
-  deferred: number; // func-type defs persisted but not runnable (Phase B)
+  /** How many defs became runnable now. */
+  registered: number;
+  /** Defs persisted but not runnable because they are `func`-type (Phase B). */
+  deferredFunc: number;
+  /** Defs persisted but not runnable because they're `pipeline` using a step
+   * the engine doesn't support yet (e.g. wait/click/fill — not navigate/
+   * evaluate/select, which DO work). Distinct UX from deferredFunc so the user
+   * knows it's a missing feature, not pending the Phase B venue. */
+  deferredUnsupported: number;
   error?: string;
 }
 
@@ -110,10 +117,24 @@ function deriveId(defs: CapturedDef[]): string | null {
 export async function installFromCaptured(req: InstallRequest, now: number): Promise<InstallResult> {
   const { defs, source, origin } = req;
   if (!Array.isArray(defs) || defs.length === 0) {
-    return { ok: false, registered: 0, deferred: 0, error: 'no adapter definitions captured' };
+    return {
+      ok: false,
+      registered: 0,
+      deferredFunc: 0,
+      deferredUnsupported: 0,
+      error: 'no adapter definitions captured',
+    };
   }
   const id = deriveId(defs);
-  if (!id) return { ok: false, registered: 0, deferred: 0, error: 'captured def missing site/name' };
+  if (!id) {
+    return {
+      ok: false,
+      registered: 0,
+      deferredFunc: 0,
+      deferredUnsupported: 0,
+      error: 'captured def missing site/name',
+    };
+  }
 
   // Replace any prior registration of the same id's defs before re-adding.
   // Prefer the live map (always accurate); fall back to the persisted row.
@@ -137,9 +158,15 @@ export async function installFromCaptured(req: InstallRequest, now: number): Pro
 
   const registered = registerRunnable(defs);
   liveDefs.set(id, defs);
-  const deferred = defs.filter((d) => !isRunnableNow(d)).length;
-  log('install', `installed ${id}`, { kind, registered, deferred });
-  return { ok: true, id, title: row.title, registered, deferred };
+  let deferredFunc = 0;
+  let deferredUnsupported = 0;
+  for (const d of defs) {
+    if (isRunnableNow(d)) continue;
+    if (d.kind === 'func') deferredFunc++;
+    else deferredUnsupported++;
+  }
+  log('install', `installed ${id}`, { kind, registered, deferredFunc, deferredUnsupported });
+  return { ok: true, id, title: row.title, registered, deferredFunc, deferredUnsupported };
 }
 
 /** On SW boot: register the runnable defs of every ENABLED installed adapter. */
