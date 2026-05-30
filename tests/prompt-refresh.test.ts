@@ -106,4 +106,48 @@ describe('orchestrator continuation prompt refresh', () => {
     await runSession({ session: b, userText: 'q', driver: stubB.driver, continuation: true });
     expect(stubB.prompts[0].length).toBeLessThan(stubA.prompts[0].length / 3);
   });
+
+  // Task 3: hot-refresh on adapter install/uninstall mid-conversation.
+  // The first turn anchors with the catalog at version V; if a subsequent
+  // install/uninstall bumps the registry version to V+1, the very next
+  // continuation turn should re-anchor (instead of waiting up to 5 reminder
+  // turns) so the chatbot sees the new tools in the SAME conversation.
+  it('continuation force-re-anchors when the registry version changes since last anchor', async () => {
+    const { registerCommand, unregister } = await import('../src/runtime/registry.js');
+    const s = makeSession('drift-1');
+    // Turn 1: first turn → anchors with current registry version.
+    const stub1 = stubDriver();
+    await runSession({ session: s, userText: 'q1', driver: stub1.driver, continuation: false });
+    expect(stub1.prompts[0]).toContain(FULL_PROMPT_FINGERPRINT);
+    const baseline = s.lastSeenRegistryVersion;
+    expect(typeof baseline).toBe('number');
+
+    // Turn 2 (no install): reminder, as the interval hasn't been hit.
+    const stub2 = stubDriver();
+    await runSession({ session: s, userText: 'q2', driver: stub2.driver, continuation: true });
+    expect(stub2.prompts[0]).not.toContain(FULL_PROMPT_FINGERPRINT);
+
+    // User installs an adapter mid-conversation — registry version bumps.
+    registerCommand({
+      site: 'drift',
+      name: 'fresh',
+      description: 'a fresh tool',
+      pipeline: [{ fetch: { url: 'https://x.com/y' } }],
+    });
+
+    try {
+      // Turn 3: continuation, registry has drifted → MUST re-anchor with
+      // the new catalog (which now includes drift__fresh).
+      const stub3 = stubDriver();
+      await runSession({ session: s, userText: 'q3', driver: stub3.driver, continuation: true });
+      expect(stub3.prompts[0]).toContain(FULL_PROMPT_FINGERPRINT);
+      expect(stub3.prompts[0]).toContain('drift__fresh');
+      // After re-anchor, the baseline is updated.
+      expect(s.lastSeenRegistryVersion).toBeGreaterThan(baseline as number);
+      // And the per-interval counter is back to 0.
+      expect(s.turnsSinceFullPrompt).toBe(0);
+    } finally {
+      unregister('drift', 'fresh');
+    }
+  });
 });

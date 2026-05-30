@@ -124,7 +124,6 @@ export const apiEngine: AgentEngine = {
     session.pauseReason = null;
     session.iterations = 0;
 
-    const tools = openAiToolsFromRegistry();
     const maxIter = DEFAULT_MAX_ITERATIONS;
 
     // Persist the user turn for the history drawer, and seed the OpenAI message
@@ -138,8 +137,15 @@ export const apiEngine: AgentEngine = {
       model: cfg.model,
       baseUrl: cfg.baseUrl,
       historyLen: messages.length,
-      tools: tools.length,
     });
+
+    // Re-pull tools each iteration so a market install mid-conversation shows
+    // up on the very next LLM call (no need to start a new session). Cheap —
+    // building the schema array is sub-millisecond — and avoids stale tools
+    // that the LLM has been told it can call but the registry no longer holds.
+    // Track the registry version we last reported, so a one-liner log only
+    // fires when the set actually changed.
+    let lastToolsCount = -1;
 
     try {
       for (let iter = 0; iter < maxIter; iter++) {
@@ -148,6 +154,12 @@ export const apiEngine: AgentEngine = {
         const iterationId = `${session.id}__api${iter}`;
 
         ctx.emit({ type: 'iteration_progress', iteration: iter, iterationId, phase: 'awaiting' });
+
+        const tools = openAiToolsFromRegistry();
+        if (tools.length !== lastToolsCount) {
+          log('api', `tools refreshed: ${tools.length} available (was ${lastToolsCount === -1 ? 'initial' : lastToolsCount})`);
+          lastToolsCount = tools.length;
+        }
 
         let resp: ChatCompletionResponse;
         try {
