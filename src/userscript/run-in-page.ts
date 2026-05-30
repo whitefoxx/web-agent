@@ -81,6 +81,29 @@ export interface LocalPageOptions {
   };
 }
 
+/** True if `current` is the same logical page as `requested`: same origin +
+ * pathname, and every search-param the adapter asked for is present in the
+ * current URL with the same value. Hashes are ignored; extra params in
+ * `current` (tracking, `xsec_source`/`xsec_token`, etc.) are tolerated.
+ * Falls back to strict string equality on malformed input.
+ *
+ * Exported for tests; used by the navigate trampoline in makeLocalPage. */
+export function sameLogicalPage(current: string, requested: string): boolean {
+  if (current === requested) return true;
+  try {
+    const a = new URL(current);
+    const b = new URL(requested);
+    if (a.origin !== b.origin) return false;
+    if (a.pathname !== b.pathname) return false;
+    for (const [k, v] of b.searchParams) {
+      if (a.searchParams.get(k) !== v) return false;
+    }
+    return true;
+  } catch {
+    return current === requested;
+  }
+}
+
 /** Auto-IIFE-wrap a JS string before local eval, mirroring PageShim.wrapForEval
  * so adapters that pass a bare arrow/function/expression all work. */
 function wrapForEval(js: string): string {
@@ -168,9 +191,24 @@ export function makeLocalPage(opts: LocalPageOptions): Record<string, unknown> {
       return attachments.slice();
     },
 
-    /** Navigate trampoline — see file header. */
+    /** Navigate trampoline — see file header.
+     *
+     * The "are we already there" check has to be LENIENT, not strict-equal:
+     * most real sites (xiaohongshu, twitter, youtube, …) rewrite the URL
+     * after navigation by adding tracking query params (xsec_source,
+     * xsec_token, utm_*) and/or hashes. Strict `loc.href === url` would
+     * loop forever — reinject after reinject, all landing at the same
+     * effectively-correct page but a URL string the adapter doesn't
+     * recognise as "there".
+     *
+     * Lenient rule: same origin + same pathname + requested URL's
+     * searchParams are a SUBSET of current location's. Hashes ignored.
+     * Catches:
+     *   asked  https://x.com/a?q=1
+     *   landed https://x.com/a?q=1&xsec_token=abc#init   ← SAME PAGE
+     */
     async goto(url: string): Promise<void> {
-      if (loc.href === url) return; // already here (post-reinject): no-op
+      if (sameLogicalPage(loc.href, url)) return; // already here (post-reinject): no-op
       await rpc('goto', { url, tabId });
       // Stop the func; the SW will re-inject after the tab loads.
       throw { [NAVIGATE_RESTART]: true, url } as NavigateRestart;

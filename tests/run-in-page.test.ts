@@ -11,6 +11,7 @@ import {
   makeLocalPage,
   runAdapterInPage,
   isNavigateRestart,
+  sameLogicalPage,
   RPC_METHODS,
   NAVIGATE_RESTART,
 } from '../src/userscript/run-in-page';
@@ -114,6 +115,57 @@ describe('runAdapterInPage — goto trampoline', () => {
     expect(r.status).toBe('ok');
     expect(r.result).toBe('scraped');
     expect(rpc).not.toHaveBeenCalledWith('goto', expect.anything());
+  });
+
+  // Real-site case (xiaohongshu) — server appends xsec_source/xsec_token on
+  // load. With strict-equal the trampoline would re-throw NAVIGATE_RESTART
+  // forever; with sameLogicalPage it sees "I'm there (modulo extras)".
+  it('second run with server-appended tracking params: still treated as already-there', async () => {
+    const rpc = vi.fn(async () => undefined);
+    const page = makeLocalPage({
+      rpc,
+      env: {
+        // Asked for /s?q=cats; xhs-style added xsec_source + tracking + hash.
+        location: {
+          href: 'https://demo.com/s?q=cats&xsec_source=foo&xsec_token=bar#init',
+        },
+        evalFn: (code: string) => (code.includes('scraped') ? 'scraped' : undefined),
+      },
+    });
+    const r = await runAdapterInPage({
+      source: GOTO_TOP,
+      site: 'demo',
+      name: 'search',
+      kwargs: { q: 'cats' },
+      page,
+    });
+    expect(r.status).toBe('ok');
+    expect(rpc).not.toHaveBeenCalledWith('goto', expect.anything());
+  });
+});
+
+describe('sameLogicalPage', () => {
+  it('strict equality short-circuit', () => {
+    expect(sameLogicalPage('https://x.com/a?q=1', 'https://x.com/a?q=1')).toBe(true);
+  });
+  it('hash ignored', () => {
+    expect(sameLogicalPage('https://x.com/a?q=1#section', 'https://x.com/a?q=1')).toBe(true);
+  });
+  it('extra params in current are tolerated', () => {
+    expect(sameLogicalPage('https://x.com/a?q=1&utm=foo', 'https://x.com/a?q=1')).toBe(true);
+  });
+  it('missing requested param fails', () => {
+    expect(sameLogicalPage('https://x.com/a?utm=foo', 'https://x.com/a?q=1')).toBe(false);
+  });
+  it('different pathname fails', () => {
+    expect(sameLogicalPage('https://x.com/b?q=1', 'https://x.com/a?q=1')).toBe(false);
+  });
+  it('different origin fails', () => {
+    expect(sameLogicalPage('https://y.com/a?q=1', 'https://x.com/a?q=1')).toBe(false);
+  });
+  it('malformed url falls back to string equality', () => {
+    expect(sameLogicalPage('not-a-url', 'not-a-url')).toBe(true);
+    expect(sameLogicalPage('not-a-url', 'other')).toBe(false);
   });
 });
 
