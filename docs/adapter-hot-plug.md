@@ -36,7 +36,7 @@
 > - `cf1cc6b` 删内置 xiaohongshu/hackernews(让市场唯一供应)
 > - `4ed3527` docs: Phase B done + 4 pitfalls + clean up stale tree references
 > - `e20daa0` page.evaluate→MAIN world(§10.7)+ marketplace bundle relative imports(§10.8)
-> - `<next>` Phase B 三连修(zhihu/answer-detail 端到端): NavigateRestart 改 Error 子类 + deep-scan(§10.10) + `lastNavigatedUrl` 旁路解决 server-redirect 死循环(§10.11) + `getCurrentUrl` 改 async 对齐 PageShim(§10.12)
+> - `1648e84` Phase B 三连修(zhihu/answer-detail 端到端): NavigateRestart 改 Error 子类 + deep-scan(§10.10) + `lastNavigatedUrl` 旁路解决 server-redirect 死循环(§10.11) + `getCurrentUrl` 改 async 对齐 PageShim(§10.12)
 
 ## 0. 动机(用户原话)
 
