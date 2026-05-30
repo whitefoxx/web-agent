@@ -30,19 +30,59 @@ import {
 } from './protocol';
 
 (() => {
-  // chrome.runtime IS exposed to user scripts (limited subset). Bail loudly if
-  // the bundle ends up in a non-userscript world — the symptom would otherwise
-  // be silent inaction.
+  // Always leave a forensic breadcrumb: BEFORE checking chrome.runtime, stamp
+  // the window with a load marker + a status string. So if the runner gets
+  // injected but chrome.runtime.connect isn't available (messaging:false in
+  // configureWorld, or a Chrome version issue), the SW can detect that via
+  // PageShim.evaluate('window.__webchatRunner') rather than seeing "60s
+  // timeout, no port" with zero diagnostics.
+  try {
+    (globalThis as { __webchatRunner?: unknown }).__webchatRunner = {
+      loadedAt: Date.now(),
+      status: 'loaded',
+      portName: PORT_NAME,
+    };
+  } catch {
+    /* hostile global; ignore */
+  }
   const rt = (globalThis as { chrome?: { runtime?: typeof chrome.runtime } }).chrome?.runtime;
   if (!rt || typeof rt.connect !== 'function') {
-    // No way to report this without the runtime; just exit.
+    // Can't report via port — leave a marker in the page state instead.
+    try {
+      (globalThis as { __webchatRunner?: unknown }).__webchatRunner = {
+        loadedAt: Date.now(),
+        status: 'no-chrome-runtime',
+        portName: PORT_NAME,
+      };
+    } catch {
+      /* ignore */
+    }
     return;
   }
   let port: chrome.runtime.Port;
   try {
     port = rt.connect({ name: PORT_NAME });
-  } catch {
+  } catch (e) {
+    try {
+      (globalThis as { __webchatRunner?: unknown }).__webchatRunner = {
+        loadedAt: Date.now(),
+        status: 'connect-threw',
+        portName: PORT_NAME,
+        error: String(e),
+      };
+    } catch {
+      /* ignore */
+    }
     return;
+  }
+  try {
+    (globalThis as { __webchatRunner?: unknown }).__webchatRunner = {
+      loadedAt: Date.now(),
+      status: 'connected',
+      portName: PORT_NAME,
+    };
+  } catch {
+    /* ignore */
   }
 
   // RPC plumbing: each call gets a monotonically increasing id, and we resolve

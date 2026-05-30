@@ -118,6 +118,12 @@ const sessionsByTab = new Map<number, Session>();
 /** Registered once on SW boot (see service-worker.ts). Routes any incoming
  * port with our name to the right session by tab. */
 export function handleRunnerPortConnect(port: chrome.runtime.Port): void {
+  // Always log every onConnect so missing the runner port shows up clearly
+  // ("expected webchat-userscript-runner, got X" — vs nothing at all).
+  log('userscript', `onConnect port.name=${port.name}`, {
+    senderTabId: port.sender?.tab?.id,
+    senderUrl: port.sender?.url,
+  });
   if (port.name !== PORT_NAME) return;
   const tabId = port.sender?.tab?.id;
   if (typeof tabId !== 'number') {
@@ -131,7 +137,9 @@ export function handleRunnerPortConnect(port: chrome.runtime.Port): void {
   }
   const session = sessionsByTab.get(tabId);
   if (!session) {
-    warn('userscript', `runner port arrived for tabId=${tabId} with no active session — dropping`);
+    warn('userscript', `runner port arrived for tabId=${tabId} with no active session — dropping`, {
+      knownSessions: [...sessionsByTab.keys()],
+    });
     try {
       port.disconnect();
     } catch {
@@ -139,7 +147,7 @@ export function handleRunnerPortConnect(port: chrome.runtime.Port): void {
     }
     return;
   }
-  log('userscript', `runner port connected tabId=${tabId}`);
+  log('userscript', `runner port connected tabId=${tabId} — sending INIT`);
 
   port.onMessage.addListener(async (msg: RunnerToServer) => {
     if (!msg || typeof msg !== 'object') return;
@@ -175,6 +183,27 @@ export function handleRunnerPortConnect(port: chrome.runtime.Port): void {
     // don't synthesise an error here because that races with legitimate
     // post-DONE disconnects.
   });
+}
+
+/** Read the runner's load marker from the page (best-effort) so the SW can
+ * tell post-mortem what stage the runner reached. Catches everything — a
+ * detach/attach race or the page not being scriptable shouldn't break the
+ * surrounding timeout-handler. */
+async function diagnose(
+  page: PageLike,
+  tabId: number,
+): Promise<{ marker: unknown; readErr?: string }> {
+  const ev = (page as unknown as { evaluate?: (s: string) => Promise<unknown> }).evaluate;
+  if (typeof ev !== 'function') return { marker: '(page.evaluate unavailable)' };
+  try {
+    const marker = await ev.call(page, 'JSON.stringify(window.__webchatRunner ?? null)');
+    return { marker };
+  } catch (e) {
+    return {
+      marker: null,
+      readErr: `eval failed on tab=${tabId}: ${e instanceof Error ? e.message : String(e)}`,
+    };
+  }
 }
 
 async function handleRpcReq(req: RpcReqMsg, session: Session): Promise<RpcReplyMsg> {
@@ -220,8 +249,12 @@ export interface RunInstalledFuncArgs {
 export async function runInstalledFuncAdapter(
   args: RunInstalledFuncArgs,
 ): Promise<{ ok: true; value: unknown } | { ok: false; error: string }> {
+  log('userscript', `runInstalledFuncAdapter start tab=${args.tabId} ${args.site}/${args.name}`, {
+    kwargs: args.kwargs,
+  });
   const apiAvail = isUserScriptsApiAvailable();
   if (!apiAvail) {
+    warn('userscript', 'API not available — bail');
     return {
       ok: false,
       error:
@@ -230,12 +263,14 @@ export async function runInstalledFuncAdapter(
   }
   const worldOk = await configureWebchatWorld();
   if (!worldOk) {
+    warn('userscript', 'configureWorld returned false — bail');
     return {
       ok: false,
       error:
         'chrome.userScripts.configureWorld failed — please enable "Allow user scripts" for this extension at chrome://extensions and retry.',
     };
   }
+  log('userscript', `world ready, proceeding to inject runner into tab=${args.tabId}`);
 
   const maxReinjects = args.maxReinjects ?? 3;
   const timeoutMs = args.timeoutMs ?? 60_000;
@@ -315,12 +350,27 @@ async function runOnceWithPort(args: {
     sessionsByTab.set(args.tabId, session);
 
     const timer = setTimeout(() => {
-      settle({ kind: 'done', ok: false, error: `runner timed out after ${args.timeoutMs}ms` });
+      // Try to diagnose why the runner didn't finish by reading the marker
+      // it leaves on `window.__webchatRunner` (best-effort — needs a page
+      // with debugger attached). Lets us tell "runner never injected" from
+      // "runner injected but no chrome.runtime" from "runner connected but
+      // adapter hung mid-call". Doesn't block the settle.
+      void diagnose(args.page, args.tabId).then((diag) => {
+        warn('userscript', `runner timed out after ${args.timeoutMs}ms — diag`, diag);
+      });
+      settle({
+        kind: 'done',
+        ok: false,
+        error: `runner timed out after ${args.timeoutMs}ms (check SW console for "runner timed out … diag" line)`,
+      });
     }, args.timeoutMs);
 
     // Fire the inject. If execute fails (no "Allow user scripts", etc),
-    // surface the error synchronously.
+    // surface the error synchronously. Log start AND result with the full
+    // InjectionResult[] so per-frame load errors surface (each result has
+    // .error if the script faulted in that frame).
     const us = chrome.userScripts;
+    log('userscript', `chrome.userScripts.execute starting tab=${args.tabId}`);
     us
       .execute({
         target: { tabId: args.tabId },
@@ -329,8 +379,18 @@ async function runOnceWithPort(args: {
         injectImmediately: true,
         js: [{ file: 'userscript-runner.js' }],
       })
+      .then((results: chrome.userScripts.InjectionResult[] | undefined) => {
+        log('userscript', `chrome.userScripts.execute resolved tab=${args.tabId}`, {
+          frames: results?.length ?? 0,
+          results: results?.map((r) => ({
+            frameId: r.frameId,
+            hasError: !!r.error,
+            errorMsg: r.error?.message,
+          })),
+        });
+      })
       .catch((e: unknown) => {
-        logError('userscript', 'execute failed', e);
+        logError('userscript', 'execute REJECTED', e);
         settle({
           kind: 'done',
           ok: false,
