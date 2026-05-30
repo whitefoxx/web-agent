@@ -30,30 +30,37 @@ import {
 } from './protocol';
 
 (() => {
-  // Always leave a forensic breadcrumb: BEFORE checking chrome.runtime, stamp
-  // the window with a load marker + a status string. So if the runner gets
-  // injected but chrome.runtime.connect isn't available (messaging:false in
-  // configureWorld, or a Chrome version issue), the SW can detect that via
-  // PageShim.evaluate('window.__webchatRunner') rather than seeing "60s
-  // timeout, no port" with zero diagnostics.
-  try {
-    (globalThis as { __webchatRunner?: unknown }).__webchatRunner = {
-      loadedAt: Date.now(),
-      status: 'loaded',
-      portName: PORT_NAME,
-    };
-  } catch {
-    /* hostile global; ignore */
+  // Forensic breadcrumb stamped into the page DOM (NOT into a global variable):
+  // USER_SCRIPT world and MAIN world have isolated globalThis bindings, so a
+  // global written here is invisible to the SW's PageShim.evaluate (which
+  // defaults to MAIN world via CDP Runtime.evaluate). The DOM, however, is
+  // shared between worlds — so a `data-*` attribute on documentElement reads
+  // back correctly from either world. Status values map to call-stage so the
+  // SW's timeout post-mortem tells us exactly where the runner stopped.
+  function mark(status: string, extra?: Record<string, unknown>): void {
+    try {
+      const el = document.documentElement;
+      if (!el) return;
+      el.setAttribute('data-webchat-runner', status);
+      el.setAttribute('data-webchat-runner-at', String(Date.now()));
+      if (extra) el.setAttribute('data-webchat-runner-extra', JSON.stringify(extra));
+    } catch {
+      /* hostile DOM; ignore */
+    }
   }
+  mark('loaded');
   const rt = (globalThis as { chrome?: { runtime?: typeof chrome.runtime } }).chrome?.runtime;
   if (!rt || typeof rt.connect !== 'function') {
-    // Can't report via port — leave a marker in the page state instead.
+    mark('no-chrome-runtime', {
+      hasChrome: !!(globalThis as { chrome?: unknown }).chrome,
+      hasRuntime: !!rt,
+      hint:
+        'configureWorld may have missed messaging:true, or this world is not USER_SCRIPT — runner cannot reach the SW.',
+    });
     try {
-      (globalThis as { __webchatRunner?: unknown }).__webchatRunner = {
-        loadedAt: Date.now(),
-        status: 'no-chrome-runtime',
-        portName: PORT_NAME,
-      };
+      console.warn(
+        '[webchat-runner] chrome.runtime.connect not available — adapter cannot run.',
+      );
     } catch {
       /* ignore */
     }
@@ -63,27 +70,15 @@ import {
   try {
     port = rt.connect({ name: PORT_NAME });
   } catch (e) {
+    mark('connect-threw', { error: e instanceof Error ? e.message : String(e) });
     try {
-      (globalThis as { __webchatRunner?: unknown }).__webchatRunner = {
-        loadedAt: Date.now(),
-        status: 'connect-threw',
-        portName: PORT_NAME,
-        error: String(e),
-      };
+      console.warn('[webchat-runner] chrome.runtime.connect threw:', e);
     } catch {
       /* ignore */
     }
     return;
   }
-  try {
-    (globalThis as { __webchatRunner?: unknown }).__webchatRunner = {
-      loadedAt: Date.now(),
-      status: 'connected',
-      portName: PORT_NAME,
-    };
-  } catch {
-    /* ignore */
-  }
+  mark('connected', { portName: PORT_NAME });
 
   // RPC plumbing: each call gets a monotonically increasing id, and we resolve
   // the matching promise when an RPC_REPLY with that id arrives.

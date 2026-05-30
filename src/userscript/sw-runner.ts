@@ -186,21 +186,35 @@ export function handleRunnerPortConnect(port: chrome.runtime.Port): void {
 }
 
 /** Read the runner's load marker from the page (best-effort) so the SW can
- * tell post-mortem what stage the runner reached. Catches everything — a
- * detach/attach race or the page not being scriptable shouldn't break the
- * surrounding timeout-handler. */
+ * tell post-mortem what stage the runner reached. The runner stamps DOM
+ * attributes (NOT globals) precisely so PageShim.evaluate (which targets
+ * MAIN world via CDP) can see them across the USER_SCRIPT/MAIN world barrier.
+ * Catches everything — a detach/attach race or non-scriptable page shouldn't
+ * break the surrounding timeout-handler. */
 async function diagnose(
   page: PageLike,
   tabId: number,
-): Promise<{ marker: unknown; readErr?: string }> {
+): Promise<{ status: unknown; at: unknown; extra: unknown; readErr?: string }> {
   const ev = (page as unknown as { evaluate?: (s: string) => Promise<unknown> }).evaluate;
-  if (typeof ev !== 'function') return { marker: '(page.evaluate unavailable)' };
+  if (typeof ev !== 'function') {
+    return { status: '(page.evaluate unavailable)', at: null, extra: null };
+  }
   try {
-    const marker = await ev.call(page, 'JSON.stringify(window.__webchatRunner ?? null)');
-    return { marker };
+    const raw = await ev.call(
+      page,
+      `JSON.stringify({
+        status: document.documentElement?.getAttribute('data-webchat-runner') ?? null,
+        at: document.documentElement?.getAttribute('data-webchat-runner-at') ?? null,
+        extra: document.documentElement?.getAttribute('data-webchat-runner-extra') ?? null,
+      })`,
+    );
+    if (typeof raw !== 'string') return { status: '(non-string eval result)', at: null, extra: null };
+    return JSON.parse(raw);
   } catch (e) {
     return {
-      marker: null,
+      status: null,
+      at: null,
+      extra: null,
       readErr: `eval failed on tab=${tabId}: ${e instanceof Error ? e.message : String(e)}`,
     };
   }
@@ -380,14 +394,21 @@ async function runOnceWithPort(args: {
         js: [{ file: 'userscript-runner.js' }],
       })
       .then((results: chrome.userScripts.InjectionResult[] | undefined) => {
-        log('userscript', `chrome.userScripts.execute resolved tab=${args.tabId}`, {
-          frames: results?.length ?? 0,
-          results: results?.map((r) => ({
-            frameId: r.frameId,
-            hasError: !!r.error,
-            errorMsg: r.error?.message,
-          })),
-        });
+        // Inline the result summary into the log STRING (not the {data} arg) so
+        // the Chrome console shows it without needing a manual ▶ expand — and
+        // so it survives string-based grep / paste-into-issue.
+        const n = results?.length ?? 0;
+        const summary = (results ?? [])
+          .map(
+            (r) =>
+              `frame=${r.frameId}` +
+              (r.error ? ` ERROR=${JSON.stringify(r.error.message)}` : ' ok'),
+          )
+          .join('; ');
+        log(
+          'userscript',
+          `chrome.userScripts.execute resolved tab=${args.tabId} frames=${n} [${summary || '(no frames returned)'}]`,
+        );
       })
       .catch((e: unknown) => {
         logError('userscript', 'execute REJECTED', e);
