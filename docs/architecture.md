@@ -141,13 +141,16 @@ DOM 选择器（见 `src/connectors/deepseek/selectors.ts`）：
 - 提取流程：DOM → `extractMarkdownFromDom`（保留 ``\`\`\`lang`` 代码围栏） → `parseAgentCommands(md)`
 - 同时提取 `.ds-think-content`（思考过程）单独发给 SidePanel 展示
 
-## 7. xiaohongshu adapter 复用
+## 7. Adapter 来源:市场 + 运行时热插拔
 
-`src/runtime/`、`src/tools/manifest.ts`、`src/tools/xiaohongshu/*.js` 与 xhs-op upstream 字节一致；ESLint 和 Prettier 都忽略 `src/tools/**/*.js` 保证 re-sync 时只需 `cp`。
+**所有 site adapter 现在都从市场安装,不再有内置 site 目录。** `src/tools/` 只剩 `generic/`(站点无关的 open_url/click/screenshot/...)和 `manifest.ts`/`dispatcher.ts` 框架代码。
 
-`scripts/import-adapter.mjs` 可以从 `@jackwener/opencli` 拉新 adapter 进来并自动维护 `_all.ts`。
+热插拔架构完整设计见 [docs/adapter-hot-plug.md](./adapter-hot-plug.md)。要点:
+- **Phase A**(pipeline 型):sandbox iframe 一次性 eval 出纯数据 → 存 IDB → 由 `runtime/opencli/pipeline.ts` 解释器跑(无 eval)。装即用,零额外配置。
+- **Phase B**(func 型):`chrome.userScripts` API(Chrome 138+)把 func 注入目标 tab 的 USER_SCRIPT world 跑;`page.evaluate/wait` 本地执行,`page.goto/getCookies/...` 通过 port RPC 回 SW 用 `PageShim` 兑现。需用户在「允许用户脚本」开关开。
+- **市场**:`marketplace/index.json` 默认内置 345 个 adapter(122 pipeline + 223 func),`scripts/build-marketplace-index.mjs` 用 `--popular` 从 opencli `clis/` 生成。计划支持远程 index URL(架构留好接口位)。
 
-`PageShim`（`src/runtime/page.ts`）对 adapter 暴露 `page.goto / evaluate / autoScroll / captureNetwork / insertText` 等高级接口，内部用 `chrome.debugger` 直接发 CDP 命令。
+`PageShim`(`src/runtime/page.ts`)暴露 `page.goto / evaluate / autoScroll / captureNetwork / pressKey / ...` 给 adapter(无论是 SW 直接 invoke 内置的,还是 Phase B 经 port RPC 兑现的)。内部用 `chrome.debugger` 直接发 CDP 命令。
 
 ## 8. 日志
 
@@ -174,7 +177,7 @@ DeepSeek 偶尔会在你提交后立刻在 user 消息下方贴一条 "Server is
 
 ## 9. 安全 / 边界
 
-- **写操作 adapter 默认隐藏**：`xiaohongshu__publish / comment-create / download` 不出现在首轮工具摘要里。chatbot 仍可通过 `describe_tool` 拿到 schema，但 system prompt 强调"涉及写操作必须先和用户确认"。
+- **写操作 adapter 默认隐藏**：任何 `access: 'write'` 的工具（twitter/post、weibo/post、xiaohongshu/publish、reddit/comment、linkedin/connect 等）不出现在首轮工具摘要里。chatbot 仍可通过 `describe_tool` 拿到 schema，但 system prompt 强调"涉及写操作必须先和用户确认"，runtime 额外强制 WRITE_CONFIRM_REQ 二次确认弹窗。
 - **限流自我保护**：`RateLimitedError`（来自 `PageShim` 检测到 captcha 跳转）会被 dispatcher 包装成结构化错误返回，prompt 明确要求 chatbot 不要重试。
 - **CDP 权限**：仅在调 adapter 时 lazy attach，结束即 detach。`chrome.debugger` 的黄色提示条会出现在小红书 tab；DeepSeek tab 不需要 CDP，纯 DOM 操作，无提示条。
 - **同源 / 跨站**：DeepSeek 内容脚本只读 chat.deepseek.com 的 DOM，写入也只是发送一条 DeepSeek 自己已经允许的消息；不跨站抓 cookie。
@@ -204,7 +207,7 @@ webchat-agent/
 │   │   ├── session.ts          # 会话状态 + chrome.storage.session
 │   │   ├── command-parser.ts   # 抽取 ```agent-command JSON
 │   │   └── system-prompt.ts    # 分层 prompt 模板
-│   ├── runtime/                # ★ 字节复用自 xiaohongshu-operator
+│   ├── runtime/                # registry, errors, page (CDP PageShim), opencli/pipeline 引擎
 │   │   ├── page.ts             # PageShim（CDP 抽象）
 │   │   ├── registry.js         # cli({...}) 注册表
 │   │   ├── errors.js           # RateLimitedError 等
@@ -216,22 +219,23 @@ webchat-agent/
 │   │       ├── content.ts      # isolated-world 内容脚本
 │   │       └── selectors.ts    # DOM 选择器集中 + extractMarkdownFromDom
 │   ├── tools/
-│   │   ├── manifest.ts         # ★ 字节复用
-│   │   ├── dispatcher.ts       # adapter 调度（ensureSiteTab + PageShim）
-│   │   └── xiaohongshu/        # ★ 14 个 adapter + _all.ts 字节复用
+│   │   ├── manifest.ts         # adapter 类型 + openAiToolsFromRegistry + lookupAdapter
+│   │   ├── dispatcher.ts       # 三路 adapter 调度（generic / pipeline / installed-func）
+│   │   └── generic/            # 站点无关原语 (open_url/get_page_text/click/...)
+│   ├── sandbox/                # Phase A：MV3-CSP-clean adapter source eval
+│   ├── userscript/             # Phase B：USER_SCRIPT-world runner + sw orchestrator
+│   ├── adapters/               # 安装管线 + IndexedDB + 类型筛选
 │   └── sidepanel/
-│       ├── App.tsx, Markdown.tsx, types.ts
-│       ├── style.css, index.html, main.tsx
-├── tests/
-│   ├── command-parser.test.ts  # agent-command 抽取（重点）
-│   ├── orchestrator.test.ts    # 端到端 mock driver
-│   ├── registration.test.ts    # 字节复用断言
-│   ├── manifest.test.ts        # schema 生成断言
-│   ├── registry.test.ts        # cli() 行为
-│   ├── errors.test.ts          # error 类层级
-│   └── imported-adapters.test.ts # adapter 文件一致性
-├── scripts/import-adapter.mjs  # ★ 字节复用：从 opencli 同步新 adapter
-└── docs/architecture.md        # 本文件
+│       ├── App.tsx, Adapters.tsx, marketplace.ts, sandbox-host.ts
+│       └── style.css, index.html, main.tsx
+├── marketplace/index.json      # 默认市场 bundle (122 pipeline + 223 func, ~1.4 MB)
+├── tests/                      # vitest, 159 tests
+├── scripts/
+│   ├── import-adapter.mjs      # 单独 adapter 同步（开发者用,非用户路径）
+│   └── build-marketplace-index.mjs # 生成 marketplace/index.json
+└── docs/
+    ├── architecture.md         # 本文件
+    └── adapter-hot-plug.md     # Phase A + Phase B ADR + 4 个踩坑总结
 ````
 
-（标 ★ 的部分跟 xiaohongshu-operator 完全一致；改动这些会破坏 re-sync 流程。）
+「site adapter」现已**全部走市场**(运行时安装,IDB 持久化,跨重启自动恢复),src/tools 只剩 generic + 框架代码。
