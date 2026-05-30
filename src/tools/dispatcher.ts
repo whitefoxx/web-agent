@@ -84,6 +84,53 @@ export async function executeAdapter(opts: {
     return failed(t0, argError, 'generic');
   }
 
+  // Installed func adapters (Phase B): the captured def has neither a live
+  // `func` (sandbox eval stripped the closure) NOR a pipeline — only the
+  // verbatim source on `_userScriptSource`. Route to the userScripts runner,
+  // which evals the source in the page world to recover the closure. Must be
+  // checked BEFORE the pipeline/no-pipeline split below (otherwise we'd fail
+  // with "no func and no pipeline" for every installed func adapter).
+  const installedFuncSource = (adapter as { _userScriptSource?: string })._userScriptSource;
+  if (installedFuncSource) {
+    await humanPaceForSite(adapter.site);
+    let tabId: number;
+    try {
+      tabId = await ensureSiteTab(adapter.site, adapter.domain);
+    } catch (e) {
+      return failed(t0, `failed to open ${adapter.site} tab: ${msgOf(e)}`, 'tab');
+    }
+    log(
+      'dispatcher',
+      `executing ${opts.tool} on tab=${tabId} (installed func via userScripts)`,
+      { args: opts.args },
+    );
+    const page = await createPageShim(tabId);
+    try {
+      const r = await runInstalledFuncAdapter({
+        tabId,
+        page,
+        source: installedFuncSource,
+        site: adapter.site,
+        name: adapter.name,
+        kwargs: opts.args ?? {},
+      });
+      log('dispatcher', `userScripts result ${opts.tool}`, {
+        ok: r.ok,
+        durationMs: Date.now() - t0,
+      });
+      if (r.ok) return { ok: true, result: r.value, durationMs: Date.now() - t0 };
+      return failed(t0, r.error, 'generic');
+    } catch (e) {
+      return classifyError(t0, e);
+    } finally {
+      try {
+        await page.detach();
+      } catch (e) {
+        warn('dispatcher', 'page.detach failed (ignored)', e);
+      }
+    }
+  }
+
   // opencli pipeline-only adapters (no func, declarative `pipeline`). Two
   // sub-paths:
   //   (a) pure HTTP+transform (hackernews/coingecko/binance/…) — no tab, no
@@ -174,45 +221,6 @@ export async function executeAdapter(opts: {
     tabId = await ensureSiteTab(adapter.site, adapter.domain);
   } catch (e) {
     return failed(t0, `failed to open ${adapter.site} tab: ${msgOf(e)}`, 'tab');
-  }
-
-  // Phase B path: installed func adapters carry `_userScriptSource` instead
-  // of a real func closure (the func was lost in the sandbox capture; only
-  // the source string survives). Run them in the tab's USER_SCRIPT world via
-  // the userScripts runner. The page (PageShim) is still attached so the
-  // runner can RPC chrome.*/CDP-bound ops (getCookies/screenshot/...) back.
-  const installedFuncSource = (adapter as { _userScriptSource?: string })._userScriptSource;
-  if (installedFuncSource) {
-    log(
-      'dispatcher',
-      `executing ${opts.tool} on tab=${tabId} (installed func via userScripts)`,
-      { args: opts.args },
-    );
-    const page = await createPageShim(tabId);
-    try {
-      const r = await runInstalledFuncAdapter({
-        tabId,
-        page,
-        source: installedFuncSource,
-        site: adapter.site,
-        name: adapter.name,
-        kwargs: opts.args ?? {},
-      });
-      log('dispatcher', `userScripts result ${opts.tool}`, {
-        ok: r.ok,
-        durationMs: Date.now() - t0,
-      });
-      if (r.ok) return { ok: true, result: r.value, durationMs: Date.now() - t0 };
-      return failed(t0, r.error, 'generic');
-    } catch (e) {
-      return classifyError(t0, e);
-    } finally {
-      try {
-        await page.detach();
-      } catch (e) {
-        warn('dispatcher', 'page.detach failed (ignored)', e);
-      }
-    }
   }
 
   log('dispatcher', `executing ${opts.tool} on tab=${tabId}`, { args: opts.args });
