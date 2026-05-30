@@ -296,6 +296,9 @@ describe('pipelineNeedsPage', () => {
     expect(pipelineNeedsPage([{ navigate: 'https://x' }, { map: {} }])).toBe(true);
     expect(pipelineNeedsPage([{ fetch: { url: 'x' } }, { evaluate: 'y' }])).toBe(true);
   });
+  it('returns true when wait is present (needs a page too)', () => {
+    expect(pipelineNeedsPage([{ wait: 1 }])).toBe(true);
+  });
   it('returns false for pure HTTP+transform pipelines', () => {
     expect(pipelineNeedsPage([{ fetch: { url: 'x' } }, { map: {} }, { limit: 5 }])).toBe(false);
     expect(pipelineNeedsPage([{ fetch: { url: 'x' } }, { select: 'data' }, { map: {} }])).toBe(false);
@@ -303,5 +306,61 @@ describe('pipelineNeedsPage', () => {
   it('returns false for non-array input (dispatcher prefers concrete errors from validatePipeline)', () => {
     expect(pipelineNeedsPage('nope')).toBe(false);
     expect(pipelineNeedsPage(null)).toBe(false);
+  });
+});
+
+/* ───────── wait step (xiaoe/detail, jimeng/generate shape) ───────── */
+
+describe('pipeline executor: wait step', () => {
+  function pageWithWait(calls: unknown[]): PageLike {
+    return {
+      async goto() {},
+      async evaluate<T = unknown>(): Promise<T> {
+        return [] as unknown as T;
+      },
+      async wait(opts) {
+        calls.push(opts);
+      },
+    };
+  }
+
+  it('throws if no page is provided', async () => {
+    await expect(runPipeline([{ wait: 1 }], { args: {} })).rejects.toThrow(/requires a page/);
+  });
+
+  it('accepts a bare number (seconds — xiaoe/detail shape)', async () => {
+    const calls: unknown[] = [];
+    const page = pageWithWait(calls);
+    await runPipeline([{ navigate: 'https://x' }, { wait: 5 }], { args: {} }, { page });
+    expect(calls).toEqual([5]);
+  });
+
+  it('accepts a string expression that resolves to a number', async () => {
+    const calls: unknown[] = [];
+    const page = pageWithWait(calls);
+    await runPipeline([{ wait: '${{ args.t }}' }], { args: { t: 2 } }, { page });
+    expect(calls).toEqual([2]);
+  });
+
+  it('passes through {text, timeout} and {selector, timeout} object forms', async () => {
+    const calls: unknown[] = [];
+    const page = pageWithWait(calls);
+    await runPipeline(
+      [{ wait: { text: 'Loaded', timeout: 5000 } }, { wait: { selector: '#root', timeout: 2000 } }],
+      { args: {} },
+      { page },
+    );
+    expect(calls).toEqual([
+      { text: 'Loaded', timeout: 5000 },
+      { selector: '#root', timeout: 2000 },
+    ]);
+  });
+
+  it('rejects malformed object form (no time/text/selector)', async () => {
+    const calls: unknown[] = [];
+    const page = pageWithWait(calls);
+    await expect(
+      runPipeline([{ wait: { wat: 1 } as unknown as { time: number } }], { args: {} }, { page }),
+    ).rejects.toThrow(/requires one of/);
   });
 });

@@ -688,6 +688,18 @@ export interface NavigateStep {
 export interface EvaluateStep {
   evaluate: Expr;
 }
+/** Sleep / wait-for-text / wait-for-selector. Forms:
+ *   `wait: N`                            → sleep N seconds
+ *   `wait: '${{ args.t }}'`              → render-then-sleep
+ *   `wait: {time: N}`                    → sleep N seconds
+ *   `wait: {text: 'foo', timeout?: ms}`  → wait for substring
+ *   `wait: {selector: '#x', timeout?: ms}` → wait for CSS selector */
+export interface WaitStep {
+  wait:
+    | number
+    | Expr
+    | { time?: number | Expr; text?: Expr; selector?: Expr; timeout?: number };
+}
 
 export type PipelineStep =
   | FetchStep
@@ -699,7 +711,8 @@ export type PipelineStep =
   | PaginateStep
   | SelectStep
   | NavigateStep
-  | EvaluateStep;
+  | EvaluateStep
+  | WaitStep;
 export type Pipeline = PipelineStep[];
 
 export interface PipelineResult {
@@ -713,10 +726,14 @@ export type FetchImpl = (
 ) => Promise<{ ok: boolean; status: number; text: () => Promise<string> }>;
 
 /** Minimal subset of IPage that pipeline steps actually call. Keeps this
- * module independent of the CDP-backed PageShim (so tests can pass a mock). */
+ * module independent of the CDP-backed PageShim (so tests can pass a mock).
+ * `wait` is optional so existing tests that only mock goto/evaluate stay valid. */
 export interface PageLike {
   goto(url: string, opts?: { waitUntil?: 'load' | 'none'; settleMs?: number }): Promise<unknown>;
   evaluate<T = unknown>(script: string): Promise<T>;
+  wait?: (
+    opts: { time?: number; selector?: string; text?: string; timeout?: number } | number,
+  ) => Promise<void>;
 }
 
 export interface ExecutorOptions {
@@ -1028,6 +1045,67 @@ async function executeNavigate(
   return rows;
 }
 
+/** `wait: <seconds>`  |  `wait: '${{ args.t }}'`  |  `wait: {time: N}`  |
+ *  `wait: {text: '<substring>', timeout?: <ms>}`  |
+ *  `wait: {selector: '<css>', timeout?: <ms>}`.
+ *
+ * Pass-through step. Sleep / wait-for-text / wait-for-selector — covers
+ * opencli stepWait's full surface. PageShim.wait already takes number-or-opts
+ * and units are seconds in both, so this is a thin marshal.
+ *
+ * Why we have this even though no current bundled adapter uses click/type/fill:
+ * a handful of market adapters (jimeng/generate, xiaoe/detail, xiaoe/play-url)
+ * pair an evaluate block with a `{wait: N}` to let the page settle / render
+ * after navigation before scraping. Without it those install but their
+ * pipeline 0-rows on the first scrape attempt.
+ */
+async function executeWait(
+  step: { wait: unknown },
+  rows: unknown[],
+  ctx: PipelineContext,
+  options: ExecutorOptions,
+): Promise<unknown[]> {
+  if (!options.page) {
+    throw new Error(
+      'Pipeline `wait` step requires a page (target tab). Dispatcher should have provided one — wait is only meaningful between navigate/evaluate.',
+    );
+  }
+  const params = step.wait;
+  if (typeof params === 'number') {
+    await options.page.wait?.(params);
+  } else if (typeof params === 'string') {
+    const rendered = evaluateExpr(params, ctx);
+    const n = Number(rendered);
+    if (!Number.isFinite(n)) throw new Error(`wait: expected a number, got ${rendered}`);
+    await options.page.wait?.(n);
+  } else if (params && typeof params === 'object') {
+    const p = params as {
+      time?: unknown;
+      text?: unknown;
+      selector?: unknown;
+      timeout?: unknown;
+    };
+    if ('time' in p && p.time !== undefined) {
+      await options.page.wait?.(Number(evaluateExpr(String(p.time), ctx)));
+    } else if ('text' in p && p.text !== undefined) {
+      await options.page.wait?.({
+        text: String(evaluateExpr(String(p.text), ctx)),
+        timeout: typeof p.timeout === 'number' ? p.timeout : undefined,
+      });
+    } else if ('selector' in p && p.selector !== undefined) {
+      await options.page.wait?.({
+        selector: String(evaluateExpr(String(p.selector), ctx)),
+        timeout: typeof p.timeout === 'number' ? p.timeout : undefined,
+      });
+    } else {
+      throw new Error('wait: object form requires one of {time, text, selector}');
+    }
+  } else {
+    throw new Error('wait: expected number, string expression, or {time|text|selector} object');
+  }
+  return rows;
+}
+
 /** `evaluate: '<js>'` — run JS in the page world and use the return value as
  * the new payload. Sets ctx.root/ctx.data so a subsequent `select`/`map`
  * sees it. Array → rows; object → 1 row; `{data: array}` → unwrapped array;
@@ -1084,6 +1162,7 @@ async function executeStep(
   if ('select' in step) return executeSelect(step, rows, ctx);
   if ('navigate' in step) return executeNavigate(step, rows, ctx, options);
   if ('evaluate' in step) return executeEvaluate(step, rows, ctx, options);
+  if ('wait' in step) return executeWait(step as WaitStep, rows, ctx, options);
   throw new Error(`Unknown pipeline step: ${JSON.stringify(step)}`);
 }
 
@@ -1136,11 +1215,12 @@ const KNOWN_STEPS = [
   'select',
   'navigate',
   'evaluate',
+  'wait',
 ] as const;
 
 /** Step types that require a real tab (PageLike). The dispatcher uses this
  * to decide between the tab-less fast path and the tab+PageShim path. */
-const PAGE_STEPS = new Set<string>(['navigate', 'evaluate']);
+const PAGE_STEPS = new Set<string>(['navigate', 'evaluate', 'wait']);
 
 /** Does the pipeline contain at least one step that needs `options.page`?
  * Returns false for invalid input (the dispatcher prefers to surface the
