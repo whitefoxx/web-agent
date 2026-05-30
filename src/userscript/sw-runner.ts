@@ -364,19 +364,27 @@ async function runOnceWithPort(args: {
     sessionsByTab.set(args.tabId, session);
 
     const timer = setTimeout(() => {
-      // Try to diagnose why the runner didn't finish by reading the marker
-      // it leaves on `window.__webchatRunner` (best-effort — needs a page
-      // with debugger attached). Lets us tell "runner never injected" from
-      // "runner injected but no chrome.runtime" from "runner connected but
-      // adapter hung mid-call". Doesn't block the settle.
-      void diagnose(args.page, args.tabId).then((diag) => {
+      // Read the runner's DOM-attribute marker for a post-mortem hint, THEN
+      // settle. Awaiting is important: settle drops the session and the
+      // dispatcher's `finally` detaches the PageShim. If diagnose runs after
+      // detach, the shim's auto-reattach can collide with the next call's
+      // own attach → "Another debugger is already attached to the tab".
+      // Small (~50ms) latency vs. settling immediately, but worth it for
+      // reliable diagnostics + no follow-on attach race.
+      void (async () => {
+        let diag: Awaited<ReturnType<typeof diagnose>>;
+        try {
+          diag = await diagnose(args.page, args.tabId);
+        } catch (e) {
+          diag = { status: null, at: null, extra: null, readErr: e instanceof Error ? e.message : String(e) };
+        }
         warn('userscript', `runner timed out after ${args.timeoutMs}ms — diag`, diag);
-      });
-      settle({
-        kind: 'done',
-        ok: false,
-        error: `runner timed out after ${args.timeoutMs}ms (check SW console for "runner timed out … diag" line)`,
-      });
+        settle({
+          kind: 'done',
+          ok: false,
+          error: `runner timed out after ${args.timeoutMs}ms (check SW console for "runner timed out … diag" line)`,
+        });
+      })();
     }, args.timeoutMs);
 
     // Fire the inject. If execute fails (no "Allow user scripts", etc),

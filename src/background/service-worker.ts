@@ -179,11 +179,26 @@ chrome.runtime.onConnect.addListener((port) => {
     });
     return;
   }
-  // Phase B runner injects bring up a port named PORT_NAME — route it to the
-  // sw-runner module which owns the per-tab session state. Other named ports
-  // are ignored (current set: keepalive only).
-  handleRunnerPortConnect(port);
+  // Fallback (content-scripts / extension pages with custom names): future-
+  // proof a bit, but right now keepalive is the only non-user-script port.
+  log(SCOPE, `unexpected onConnect port name=${port.name} — ignored`);
 });
+
+// USER_SCRIPT-world (Phase B runner) ports come through a SEPARATE event —
+// chrome.runtime.onUserScriptConnect — NOT onConnect. The userScripts API
+// deliberately isolates user-script messaging so an extension can't
+// accidentally cross-talk between its content-script port set and its
+// user-script port set. Symptom of getting this wrong: runner connects
+// successfully (its DOM marker says status='connected'), but the SW's
+// onConnect listener never fires → 60s timeout, "no active session" warn
+// never appears either. Use the dedicated event.
+if (chrome.runtime.onUserScriptConnect) {
+  chrome.runtime.onUserScriptConnect.addListener((port) => {
+    handleRunnerPortConnect(port);
+  });
+} else {
+  warn(SCOPE, 'chrome.runtime.onUserScriptConnect not available — Phase B func adapters will not receive port connections');
+}
 
 /** On boot, find any persisted session whose status was 'running' at the
  * moment the prior SW instance died and mark it as 'error'. Its in-
