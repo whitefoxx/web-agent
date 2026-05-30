@@ -3,7 +3,7 @@
   "name": "WebChat Agent",
   "version": "0.0.1",
   "description": "Turn any chat AI webpage (DeepSeek, ChatGPT, Gemini…) into a browser agent — zero API key, zero config.",
-  "permissions": ["sidePanel", "debugger", "tabs", "scripting", "storage", "cookies", "downloads"],
+  "permissions": ["sidePanel", "debugger", "tabs", "scripting", "storage", "cookies", "downloads", "userScripts"],
   "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "src/background/service-worker.ts",
@@ -32,9 +32,9 @@
   },
   "web_accessible_resources": [
     {
-      "resources": ["sandbox.html", "marketplace-index.json"],
+      "resources": ["sandbox.html", "marketplace-index.json", "userscript-runner.js"],
       "matches": ["<all_urls>"]
     }
   ],
-  "minimum_chrome_version": "116"
+  "minimum_chrome_version": "138"
 }

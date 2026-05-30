@@ -91,6 +91,7 @@ import {
   setEnabled as setAdapterEnabled,
   listInstalledAdapters,
 } from '../adapters/install-manager';
+import { configureWebchatWorld, handleRunnerPortConnect } from '../userscript/sw-runner';
 import type {
   InstallAdapterReq,
   UninstallAdapterReq,
@@ -153,6 +154,11 @@ void recoverInterruptedSessionsOnBoot();
 // Restore runtime-installed adapters into the live registry. Fire-and-forget:
 // boot shouldn't block on IDB, and a brand-new install has nothing to restore.
 void loadInstalledOnBoot().catch((e) => warn(SCOPE, 'loadInstalledOnBoot failed', e));
+// Phase B: set up the USER_SCRIPT-world we inject installed func adapters
+// into. configureWorld is idempotent; we still call it eagerly so the first
+// adapter invocation doesn't pay the cost (and so failures — most likely
+// "Allow user scripts" disabled — surface in logs at boot, not on first call).
+void configureWebchatWorld();
 
 chrome.runtime.onInstalled.addListener(() => {
   log(SCOPE, 'onInstalled');
@@ -164,13 +170,19 @@ chrome.runtime.onInstalled.addListener(() => {
 chrome.runtime.onStartup.addListener(() => log(SCOPE, 'onStartup'));
 
 chrome.runtime.onConnect.addListener((port) => {
-  if (port.name !== 'webchat-keepalive') return;
-  keepaliveConnections.add(port);
-  log(SCOPE, `keepalive port connected (total=${keepaliveConnections.size})`);
-  port.onDisconnect.addListener(() => {
-    keepaliveConnections.delete(port);
-    log(SCOPE, `keepalive port disconnected (remaining=${keepaliveConnections.size})`);
-  });
+  if (port.name === 'webchat-keepalive') {
+    keepaliveConnections.add(port);
+    log(SCOPE, `keepalive port connected (total=${keepaliveConnections.size})`);
+    port.onDisconnect.addListener(() => {
+      keepaliveConnections.delete(port);
+      log(SCOPE, `keepalive port disconnected (remaining=${keepaliveConnections.size})`);
+    });
+    return;
+  }
+  // Phase B runner injects bring up a port named PORT_NAME — route it to the
+  // sw-runner module which owns the per-tab session state. Other named ports
+  // are ignored (current set: keepalive only).
+  handleRunnerPortConnect(port);
 });
 
 /** On boot, find any persisted session whose status was 'running' at the

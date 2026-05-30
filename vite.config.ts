@@ -34,6 +34,7 @@ const opencliAliases = {
  * sidesteps every path/loader pitfall.
  */
 const MARKET_INDEX = 'marketplace-index.json';
+const USERSCRIPT_RUNNER = 'userscript-runner.js';
 
 function sandboxPagePlugin(): Plugin {
   const SANDBOX_HTML = 'sandbox.html';
@@ -75,7 +76,26 @@ function sandboxPagePlugin(): Plugin {
         );
       }
 
-      // 3. Patch sandbox.pages into the built manifest.
+      // 3. Bundle the USER_SCRIPT-world runner into a self-contained IIFE,
+      //    same constraint as the sandbox host (no module loader, no chrome.*
+      //    bundler tricks). chrome.userScripts.execute({js:[{file:...}]}) loads
+      //    it into the target tab's runner world — declared as a WAR so the
+      //    extension URL is fetchable from the page context.
+      const runnerBuild = await esbuild({
+        entryPoints: [resolve(__dirname, 'src/userscript/runner.ts')],
+        bundle: true,
+        format: 'iife',
+        target: 'esnext',
+        write: false,
+        legalComments: 'none',
+      });
+      await writeFile(
+        resolve(__dirname, 'dist', USERSCRIPT_RUNNER),
+        runnerBuild.outputFiles[0].text,
+        'utf8',
+      );
+
+      // 4. Patch sandbox.pages into the built manifest.
       const manifestPath = resolve(__dirname, 'dist', 'manifest.json');
       if (existsSync(manifestPath)) {
         const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));

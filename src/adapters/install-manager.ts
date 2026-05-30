@@ -29,6 +29,7 @@ import {
   type CapturedDef,
 } from './installed-store';
 import { log, warn } from '../runtime/log';
+import { isUserScriptsApiAvailable } from '../userscript/sw-runner';
 
 /**
  * In-memory mirror of which captured defs each installed adapter put into the
@@ -74,25 +75,39 @@ export function classifyKind(defs: CapturedDef[]): InstalledAdapter['kind'] {
   return 'unknown';
 }
 
-/** A def is runnable NOW iff it's a valid pipeline def. (func → Phase B.) */
+/** Is a def runnable NOW given the runtime's capabilities?
+ *
+ *   pipeline → runnable iff the pipeline parses + only uses supported steps.
+ *   func     → runnable iff chrome.userScripts is available (Phase B runner).
+ *              We still need user to enable "Allow user scripts" — the runner
+ *              gives a clear error at call time if the toggle is off — but
+ *              that's not something we can pre-check synchronously.
+ *
+ * In node tests there's no `chrome` global, so func defs stay deferred and
+ * the existing test expectations hold. */
 export function isRunnableNow(def: CapturedDef): boolean {
+  if (def.kind === 'func') return isUserScriptsApiAvailable();
   if (def.kind !== 'pipeline') return false;
   if (!Array.isArray(def.pipeline) || def.pipeline.length === 0) return false;
   return validatePipeline(def.pipeline).length === 0;
 }
 
-/** Register a captured pipeline def into the live registry, tagged so it can
- * be told apart from built-ins and cleanly unregistered later. */
-function registerDef(def: CapturedDef): void {
-  registerCommand({ ...def, _installed: true });
+/** Register one captured def into the live registry, tagged so it can be told
+ * apart from built-ins and cleanly unregistered later. For func defs we also
+ * attach the verbatim source so the dispatcher can hand it to the userScripts
+ * runner (which evals it in the page world to recover the closure). */
+function registerDef(def: CapturedDef, source: string): void {
+  const entry: Record<string, unknown> = { ...def, _installed: true };
+  if (def.kind === 'func') entry._userScriptSource = source;
+  registerCommand(entry);
 }
 
 /** Register all runnable defs of an installed adapter. Returns count. */
-function registerRunnable(defs: CapturedDef[]): number {
+function registerRunnable(defs: CapturedDef[], source: string): number {
   let n = 0;
   for (const d of defs) {
     if (isRunnableNow(d)) {
-      registerDef(d);
+      registerDef(d, source);
       n++;
     }
   }
@@ -156,7 +171,7 @@ export async function installFromCaptured(req: InstallRequest, now: number): Pro
   };
   await putInstalled(row);
 
-  const registered = registerRunnable(defs);
+  const registered = registerRunnable(defs, source);
   liveDefs.set(id, defs);
   let deferredFunc = 0;
   let deferredUnsupported = 0;
@@ -176,7 +191,7 @@ export async function loadInstalledOnBoot(): Promise<{ adapters: number; command
   let commands = 0;
   for (const row of rows) {
     if (!row.enabled) continue;
-    const n = registerRunnable(row.defs);
+    const n = registerRunnable(row.defs, row.source);
     liveDefs.set(row.id, row.defs);
     if (n > 0) adapters++;
     commands += n;
@@ -196,10 +211,12 @@ export async function uninstall(id: string): Promise<{ ok: boolean }> {
 }
 
 export async function setEnabled(id: string, enabled: boolean): Promise<{ ok: boolean }> {
-  // Need the defs to (un)register. Live map is authoritative; fall back to DB.
-  const defs = liveDefs.get(id) ?? (await getInstalled(id))?.defs;
-  if (!defs) return { ok: false };
-  if (enabled) registerRunnable(defs);
+  // Need the defs to (un)register and the source to attach for func defs.
+  // Always read the row (the live map doesn't carry source).
+  const row = await getInstalled(id);
+  const defs = liveDefs.get(id) ?? row?.defs;
+  if (!defs || !row) return { ok: false };
+  if (enabled) registerRunnable(defs, row.source);
   else unregisterDefs(defs);
   await setInstalledEnabled(id, enabled);
   log('install', `${enabled ? 'enabled' : 'disabled'} ${id}`);
