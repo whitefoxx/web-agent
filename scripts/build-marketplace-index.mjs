@@ -1,28 +1,41 @@
 #!/usr/bin/env node
 /**
- * Build a self-contained adapter marketplace index from a local opencli
- * checkout.
+ * Build a per-file adapter marketplace from a local opencli checkout.
  *
- * Why self-contained (source inlined, not a sourceUrl): opencli's upstream
- * repo isn't a reachable public raw host, and this project's own repo is
- * private — so a per-file URL scheme can't be fetched from the extension. One
- * JSON artifact with the source embedded sidesteps hosting entirely: the
- * marketplace is a single file the operator can host anywhere (gist, gh-pages,
- * S3, a CDN, or a public mirror repo), and the extension installs from the
- * embedded source via the same sandbox-eval path as paste-install.
+ * Layout produced (committed to repo, also copied verbatim to dist/ at build
+ * time by vite.config.ts → sandboxPagePlugin):
+ *
+ *   marketplace/
+ *     index.json                    # metadata only, no embedded source
+ *     <site>/<name>.js              # bundled adapter source, one file per adapter
+ *
+ * Each index.json entry carries `source` as a RELATIVE path (e.g.
+ * "zhihu/answer-detail.js") that the extension resolves against a base URL —
+ * `chrome.runtime.getURL('marketplace/')` for the built-in shipped tree today,
+ * an HTTPS URL for the future public/community marketplace. Same schema both
+ * places; the only branch is which base the client uses.
+ *
+ * `sha256` is computed over the exact bytes the .js file contains and lets
+ * the install client refuse a body that doesn't match what the index promised
+ * (defends both built-in vs. tampered-dist and remote vs. man-in-the-middle /
+ * post-review swap). Also doubles as upgrade detection — installed adapter's
+ * sha256 differing from the index → "新版本可用".
  *
  * Usage:
- *   node scripts/build-marketplace-index.mjs [--clis <dir>] [--out <file>] [--all]
+ *   node scripts/build-marketplace-index.mjs [--clis <dir>] [--out <dir>] [--all|--popular]
  *
- * Defaults: --clis ../browser-agent/opencli/clis  --out marketplace/index.json
- * By default emits PIPELINE-type adapters only (the ones that actually run
- * post-install in Phase A). Pass --all to also include func-type (listed but
- * not runnable until Phase B).
+ * Defaults: --clis ../browser-agent/opencli/clis  --out marketplace/
+ *   no flags:  pipeline only
+ *   --popular: pipeline (all) + func (POPULAR_SITES allowlist only)
+ *   --all:     everything
  *
- * Each entry: { site, name, description, access, domain, type, source }.
+ * Pre-cleans every site subdirectory of `--out` before regen so adapters removed
+ * upstream don't linger as ghost .js files. `marketplace/index.json` is
+ * overwritten.
  */
 
-import { readFile, writeFile, mkdir, readdir, stat } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, readdir, stat, rm } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -37,15 +50,13 @@ function arg(flag, def) {
 const includeAll = process.argv.includes('--all');
 const popularOnly = process.argv.includes('--popular');
 const clisDir = resolve(arg('--clis', join(ROOT, '..', 'browser-agent', 'opencli', 'clis')));
-const outFile = resolve(arg('--out', join(ROOT, 'marketplace', 'index.json')));
+const outDir = resolve(arg('--out', join(ROOT, 'marketplace')));
 
 /**
- * Curated "popular sites" allowlist — used with --popular to ship a focused
- * default marketplace instead of the full ~815-adapter dump. Mix of high-
- * traffic 国内 sites + global classics + practical tools. Edit this list to
- * tune what ships in the bundled index; users can still paste-install
- * anything else by hand. All pipeline-only entries are always kept; func
- * entries only kept if their site is in this set.
+ * Curated allowlist used with --popular for the shipped built-in marketplace.
+ * Edit this to tune the default; users can still paste-install anything else
+ * by hand. All pipeline-only entries are kept regardless; func entries kept
+ * only if their site is in this set.
  */
 const POPULAR_SITES = new Set([
   // 国内主流
@@ -86,9 +97,8 @@ if (!existsSync(clisDir)) {
   process.exit(1);
 }
 
-/** Pull a string/quoted field out of a cli({...}) call via regex. Good enough
- * for the well-formatted opencli corpus; we don't need a full JS parser to
- * read site/name/description/access/domain. */
+/** Regex-grab a string field out of cli({...}). The opencli corpus is regular
+ * enough that we don't need a real parser to read site/name/description/etc. */
 function field(src, key) {
   const m = src.match(new RegExp(`\\b${key}\\s*:\\s*(['"\\\`])([^'"\\\`]*)\\1`));
   return m ? m[2] : undefined;
@@ -111,24 +121,13 @@ function isInstallable(src) {
 }
 
 /**
- * Self-contain an adapter source for marketplace shipping.
+ * esbuild-bundle one adapter so sibling imports (e.g. `import { parseVideoId }
+ * from './utils.js'`) get inlined. The runtime stripModuleSyntax drops every
+ * import line, so any unresolved name becomes a ReferenceError after load —
+ * §10.8 in docs/adapter-hot-plug.md.
  *
- * The adapter loader (src/sandbox/eval-core.ts → stripModuleSyntax) drops every
- * `import ... ;` line and resolves remaining names against an injected scope.
- * That scope only knows `@jackwener/opencli/*` (cli/Strategy/errors). A naked
- * relative `import { parseVideoId } from './utils.js';` becomes a runtime
- * `ReferenceError: parseVideoId is not defined` once the import line is
- * stripped — youtube/transcript, video, like, subscribe (and ~123 others)
- * all hit this.
- *
- * Fix: esbuild-bundle the entry with bundle:true so relative siblings get
- * inlined into a single self-contained source. Mark `@jackwener/opencli/*`
- * external so its imports remain as top-level `import {...} from '@jackwener/opencli/...';`
- * lines — the stripper handles those at runtime via the injected scope.
- *
- * Falls back to the raw source on bundle failure (sibling missing, transitive
- * node:* import, etc.) so the index still builds; the affected adapter will
- * surface the same error at runtime as before.
+ * `@jackwener/opencli/*` stays external: the runtime injects those names
+ * (cli/Strategy/errors) into the eval scope.
  */
 async function bundleAdapterSource(entryPath) {
   const result = await esbuild({
@@ -147,35 +146,55 @@ async function bundleAdapterSource(entryPath) {
 
 const SKIP = (f) => f.startsWith('_') || /\.(test|spec)\.[cm]?js$/.test(f) || f.endsWith('.d.ts');
 
+function sha256Hex(s) {
+  return createHash('sha256').update(s, 'utf8').digest('hex');
+}
+
+/** Drop every site subdir under outDir before regen, so adapters that were
+ * removed upstream don't linger. Leaves the top-level index.json untouched
+ * (it gets overwritten below); leaves anything else at root alone in case the
+ * dir was being used for something else by hand. */
+async function cleanSiteDirs(root) {
+  if (!existsSync(root)) return;
+  for (const entry of await readdir(root, { withFileTypes: true })) {
+    if (entry.isDirectory()) {
+      await rm(join(root, entry.name), { recursive: true, force: true });
+    }
+  }
+}
+
 async function main() {
+  await mkdir(outDir, { recursive: true });
+  await cleanSiteDirs(outDir);
+
   const sites = (await readdir(clisDir)).filter((d) => !d.startsWith('.'));
   const entries = [];
   let scanned = 0;
   let skipped = 0;
+  let written = 0;
 
   for (const site of sites) {
     const siteDir = join(clisDir, site);
     if (!(await stat(siteDir)).isDirectory()) continue;
+    let siteOutMade = false;
+
     for (const file of await readdir(siteDir)) {
       if (!file.endsWith('.js') || SKIP(file)) continue;
       const full = join(siteDir, file);
       const src = await readFile(full, 'utf8');
-      if (!/\bcli\s*\(\s*\{/.test(src)) continue; // not an adapter file
+      if (!/\bcli\s*\(\s*\{/.test(src)) continue;
       scanned++;
 
       const type = classify(src);
-      // Without --all and without --popular: pipeline only (legacy default).
       if (!includeAll && !popularOnly && type !== 'pipeline') {
         skipped++;
         continue;
       }
-      // --popular: keep all pipeline + func from POPULAR_SITES.
       if (popularOnly && type === 'func' && !POPULAR_SITES.has(site)) {
         skipped++;
         continue;
       }
-      // 'unknown' = source registers a cli() with neither pipeline nor func
-      // body. Not installable in any path. Skip even under --all.
+      // 'unknown' = cli() with neither pipeline nor func body. Not runnable.
       if (type === 'unknown') {
         skipped++;
         continue;
@@ -185,9 +204,7 @@ async function main() {
         continue;
       }
 
-      // Bundle adapters that import from sibling files; raw src would lose
-      // those symbols at runtime (stripModuleSyntax drops the import line and
-      // the names go undefined). Adapters without relative imports ship raw
+      // Bundle only when there are relative imports — bare adapters ship raw
       // so the embedded source diffs cleanly against the opencli original.
       let source = src;
       const hasRelativeImports = /from\s+['"]\.\.?\//.test(src);
@@ -201,34 +218,63 @@ async function main() {
         }
       }
 
+      // Write the per-adapter file under marketplace/<site>/<name>.js.
+      const declaredSite = field(src, 'site') ?? site;
+      const name = field(src, 'name') ?? basename(file, '.js');
+      const sourceRel = `${declaredSite}/${name}.js`;
+      if (!siteOutMade) {
+        await mkdir(join(outDir, declaredSite), { recursive: true });
+        siteOutMade = true;
+      }
+      await writeFile(join(outDir, sourceRel), source, 'utf8');
+      written++;
+
       entries.push({
-        site: field(src, 'site') ?? site,
-        name: field(src, 'name') ?? basename(file, '.js'),
+        site: declaredSite,
+        name,
         description: field(src, 'description') ?? '',
         access: field(src, 'access') ?? 'read',
         domain: field(src, 'domain'),
         type,
-        source,
+        // Everything shipped from opencli is tier=official. Community-tier
+        // adapters will land via the remote marketplace later, same schema,
+        // just `tier: 'community'` + a different base URL.
+        tier: 'official',
+        author: 'opencli',
+        // We don't track per-file versions upstream yet; bump manually when
+        // breaking an adapter's API shape. The sha256 is the real upgrade
+        // signal (changes whenever source changes).
+        version: '1.0.0',
+        source: sourceRel,
+        sha256: sha256Hex(source),
       });
     }
   }
 
   entries.sort((a, b) => (a.site + a.name).localeCompare(b.site + b.name));
 
+  // ISO date (not Date.now()) so the same source produces a stable enough
+  // index for git diffs to focus on what actually changed — the timestamp
+  // moving every build is unavoidable, but day-granularity would be nicer
+  // long term (skipped for now to keep this simple).
+  const bundledAt = new Date().toISOString();
+
   const index = {
-    version: 1,
+    // Bump when changing the on-disk schema; clients should treat unknown
+    // versions as "refuse to load" rather than parse-and-miss-fields.
+    version: 2,
+    bundledAt,
     generatedFrom: 'opencli/clis',
     includeAll,
     count: entries.length,
     adapters: entries,
   };
 
-  await mkdir(dirname(outFile), { recursive: true });
-  await writeFile(outFile, JSON.stringify(index, null, 2));
-  const bytes = JSON.stringify(index).length;
-  console.log(`✓ ${outFile}`);
+  await writeFile(join(outDir, 'index.json'), JSON.stringify(index, null, 2), 'utf8');
+  const indexBytes = JSON.stringify(index).length;
+  console.log(`✓ ${outDir}/index.json + ${written} per-adapter .js files`);
   console.log(
-    `  ${entries.length} adapters (${type_breakdown(entries)}) · scanned ${scanned} · skipped ${skipped} · ${(bytes / 1024).toFixed(0)} KB`,
+    `  ${entries.length} adapters (${type_breakdown(entries)}) · scanned ${scanned} · skipped ${skipped} · index ${(indexBytes / 1024).toFixed(0)} KB`,
   );
 }
 

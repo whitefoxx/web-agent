@@ -4,20 +4,20 @@
 
 ## 0. 当前状态速览(2026-05)
 
-| 模块 | 状态 | 说明 |
-|---|---|---|
-| **DeepSeek connector** | ✅ 生产可用 | `src/connectors/deepseek/`,首发并主测的 chatbot |
-| **ChatGPT / Gemini connector** | ⛔ 未实装 | `ChatbotConnector` 接口已抽象,无 content script |
-| **API mode(OpenAI-compatible)** | ✅ 生产可用 | `src/agent/api-engine.ts`,275 行;支持 DeepSeek/OpenAI/Anthropic 兼容 endpoint;UI 设置面板切换 |
-| **Adapter 市场(Phase A pipeline)** | ✅ 生产可用 | 装即用,零额外配置 |
-| **Adapter 市场(Phase B func)** | ✅ 生产可用 | 需 Chrome 138+ + 用户在 `chrome://extensions` 开「允许用户脚本」开关 |
-| **Adapter 市场内置 bundle** | 345 个 adapter(122 pipeline + 223 func),37 个站点,~2.0 MB | 见 `marketplace/index.json`,`scripts/build-marketplace-index.mjs --popular` 重建 |
-| **通用工具(generic)** | ✅ 10 个 | `open_url` / `screenshot` / `scroll_page` / `get_text_from_tab` / `get_page_text` / `close_tab` / `get_interactives` / `click` / `click_by_text` / `type_into`(`_helpers` 是内部模块,不是 tool) |
-| **写操作二次确认** | ✅ 实装 | SidePanel 弹窗 + 5 分钟超时,见 `service-worker.ts:WRITE_CONFIRM_RESP` |
-| **会话持久化** | ✅ IndexedDB | `session-store.ts`,跨 Chrome 重启幸存,DB v2 与 adapter store 共存 |
-| **session 内热刷工具列表** | ✅ | adapter 装好下一回合就出现在 agent 工具白名单(见 hot-plug §a9c0371) |
-| **跨 worlds bug 兼容** | ✅ | `page.evaluate` 走 CDP MAIN world(详见 hot-plug §10.7) |
-| **测试** | 160 个 vitest 用例,全 node 环境可跑 | `npm test` |
+| 模块                               | 状态                                                                                                                                            | 说明                                                                                                                                                                                            |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **DeepSeek connector**             | ✅ 生产可用                                                                                                                                     | `src/connectors/deepseek/`,首发并主测的 chatbot                                                                                                                                                 |
+| **ChatGPT / Gemini connector**     | ⛔ 未实装                                                                                                                                       | `ChatbotConnector` 接口已抽象,无 content script                                                                                                                                                 |
+| **API mode(OpenAI-compatible)**    | ✅ 生产可用                                                                                                                                     | `src/agent/api-engine.ts`,275 行;支持 DeepSeek/OpenAI/Anthropic 兼容 endpoint;UI 设置面板切换                                                                                                   |
+| **Adapter 市场(Phase A pipeline)** | ✅ 生产可用                                                                                                                                     | 装即用,零额外配置                                                                                                                                                                               |
+| **Adapter 市场(Phase B func)**     | ✅ 生产可用                                                                                                                                     | 需 Chrome 138+ + 用户在 `chrome://extensions` 开「允许用户脚本」开关                                                                                                                            |
+| **Adapter 市场内置 bundle**        | 345 个 adapter(122 pipeline + 223 func),37 个站点。schema-v2: 138KB `marketplace/index.json`(metadata + sha256)+ per-adapter `<site>/<name>.js` | 见 `marketplace/`,`scripts/build-marketplace-index.mjs --popular` 重建,详 hot-plug §11                                                                                                          |
+| **通用工具(generic)**              | ✅ 10 个                                                                                                                                        | `open_url` / `screenshot` / `scroll_page` / `get_text_from_tab` / `get_page_text` / `close_tab` / `get_interactives` / `click` / `click_by_text` / `type_into`(`_helpers` 是内部模块,不是 tool) |
+| **写操作二次确认**                 | ✅ 实装                                                                                                                                         | SidePanel 弹窗 + 5 分钟超时,见 `service-worker.ts:WRITE_CONFIRM_RESP`                                                                                                                           |
+| **会话持久化**                     | ✅ IndexedDB                                                                                                                                    | `session-store.ts`,跨 Chrome 重启幸存,DB v2 与 adapter store 共存                                                                                                                               |
+| **session 内热刷工具列表**         | ✅                                                                                                                                              | adapter 装好下一回合就出现在 agent 工具白名单(见 hot-plug §a9c0371)                                                                                                                             |
+| **跨 worlds bug 兼容**             | ✅                                                                                                                                              | `page.evaluate` 走 CDP MAIN world(详见 hot-plug §10.7)                                                                                                                                          |
+| **测试**                           | 160 个 vitest 用例,全 node 环境可跑                                                                                                             | `npm test`                                                                                                                                                                                      |
 
 详细取舍记录:见各章 + [adapter-hot-plug.md §3 决策](./adapter-hot-plug.md#3-决策)。
 
@@ -167,9 +167,10 @@ DOM 选择器（见 `src/connectors/deepseek/selectors.ts`）：
 **所有 site adapter 现在都从市场安装,不再有内置 site 目录。** `src/tools/` 只剩 `generic/`(站点无关的 open_url/click/screenshot/...)和 `manifest.ts`/`dispatcher.ts` 框架代码。
 
 热插拔架构完整设计见 [docs/adapter-hot-plug.md](./adapter-hot-plug.md)。要点:
+
 - **Phase A**(pipeline 型):sandbox iframe 一次性 eval 出纯数据 → 存 IDB → 由 `runtime/opencli/pipeline.ts` 解释器跑(无 eval)。装即用,零额外配置。
 - **Phase B**(func 型):`chrome.userScripts` API(Chrome 138+)把 func 注入目标 tab 的 USER_SCRIPT world 跑;`page.evaluate/wait` 本地执行,`page.goto/getCookies/...` 通过 port RPC 回 SW 用 `PageShim` 兑现。需用户在「允许用户脚本」开关开。
-- **市场**:`marketplace/index.json` 默认内置 345 个 adapter(122 pipeline + 223 func),`scripts/build-marketplace-index.mjs` 用 `--popular` 从 opencli `clis/` 生成。计划支持远程 index URL(架构留好接口位)。
+- **市场**:`marketplace/` 默认内置 345 个 adapter(122 pipeline + 223 func)。schema-v2:138KB metadata-only `index.json` + per-adapter `<site>/<name>.js`。`scripts/build-marketplace-index.mjs` 用 `--popular` 从 opencli `clis/` 生成。客户端 install 时 fetch 单个 .js 并 sha256 校验。远程市场 URL 的接口位已留好,只差 `baseUrl` 配置项。详 hot-plug §11。
 
 `PageShim`(`src/runtime/page.ts`)暴露 `page.goto / evaluate / autoScroll / captureNetwork / pressKey / ...` 给 adapter(无论是 SW 直接 invoke 内置的,还是 Phase B 经 port RPC 兑现的)。内部用 `chrome.debugger` 直接发 CDP 命令。
 
@@ -200,15 +201,15 @@ DeepSeek 偶尔会在你提交后立刻在 user 消息下方贴一条 "Server is
 
 项目同时支持两条推理路径,UI 设置面板里切换:
 
-| | **chat-tab 模式(默认)** | **API 模式** |
-|---|---|---|
-| 推理来源 | 用户已登录的 chat.deepseek.com tab | 用户填的 OpenAI-compatible endpoint |
-| 配置 | 零(开扩展前已登录即可) | 必须填 provider / model / baseUrl / apiKey,见 SidePanel 设置 |
-| 编排入口 | `orchestrator.ts:runSession()`(注 inject prompt → 等 DOM 响应 → 抽 agent-command 循环) | `agent/api-engine.ts:runApiSession()`(标准 chat/completions POST + tool_calls 循环) |
-| 工具协议 | 文本 `agent-command` JSON 代码块(因为 DeepSeek 没暴露 tool API) | 原生 OpenAI tool_calls(API 给的) |
-| 消息历史 | DOM 重建 + `chrome.storage.session` 缓存 | `ApiMessage[]` 数组持久化到 `session-store.ts`(thinking models 需要把 `reasoning_content` 回喂) |
-| 写操作 | 同样走 WRITE_CONFIRM 弹窗 | 同样走 WRITE_CONFIRM 弹窗 |
-| 适用人群 | 不想花 API 钱的普通用户(命名所言的"zero API key") | 已有 API key 的开发者 / 要稳定性 / 要长上下文 |
+|          | **chat-tab 模式(默认)**                                                                | **API 模式**                                                                                    |
+| -------- | -------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| 推理来源 | 用户已登录的 chat.deepseek.com tab                                                     | 用户填的 OpenAI-compatible endpoint                                                             |
+| 配置     | 零(开扩展前已登录即可)                                                                 | 必须填 provider / model / baseUrl / apiKey,见 SidePanel 设置                                    |
+| 编排入口 | `orchestrator.ts:runSession()`(注 inject prompt → 等 DOM 响应 → 抽 agent-command 循环) | `agent/api-engine.ts:runApiSession()`(标准 chat/completions POST + tool_calls 循环)             |
+| 工具协议 | 文本 `agent-command` JSON 代码块(因为 DeepSeek 没暴露 tool API)                        | 原生 OpenAI tool_calls(API 给的)                                                                |
+| 消息历史 | DOM 重建 + `chrome.storage.session` 缓存                                               | `ApiMessage[]` 数组持久化到 `session-store.ts`(thinking models 需要把 `reasoning_content` 回喂) |
+| 写操作   | 同样走 WRITE_CONFIRM 弹窗                                                              | 同样走 WRITE_CONFIRM 弹窗                                                                       |
+| 适用人群 | 不想花 API 钱的普通用户(命名所言的"zero API key")                                      | 已有 API key 的开发者 / 要稳定性 / 要长上下文                                                   |
 
 两条路径共享:tool 注册表(`src/runtime/registry.js`)、dispatcher(`src/tools/dispatcher.ts`)、PageShim(`src/runtime/page.ts`)、写操作确认弹窗、会话存储。**只有"如何拿到下一段 assistant 文本"不同**;拿到之后命令解析(`command-parser.ts` for chat-tab,native tool_calls for api)+ 工具调度完全一致。
 
@@ -223,15 +224,15 @@ DeepSeek 偶尔会在你提交后立刻在 user 消息下方贴一条 "Server is
 
 ## 10. 已知限制 / 后续工作
 
-| 限制                              | 影响                                             | 后续                                                            |
-| --------------------------------- | ------------------------------------------------ | --------------------------------------------------------------- |
-| Service Worker 可能被 Chrome 杀掉 | 长任务（>30s 无活动）可能中断;orchestrator 循环里有 `Port` 防 idle,但 chrome 仍可能强杀 | 用 chrome.alarms 自 ping;或迁移长任务到 offscreen document        |
-| 纯 DOM 注入                       | DeepSeek UI 改版即失效                           | 备选：MAIN-world 拦截 `fetch` 改 request body / SSE 响应        |
-| 工具调用串行                      | 单轮内一个 agent-command 一个 tool;DeepSeek 自己也不发并发 tool_calls | 后续支持单轮多 tool 的并发执行(API 模式更容易,native 协议支持)                                  |
-| 未支持 ChatGPT / Gemini connector   | 想用 chat-tab 模式只能选 DeepSeek;想用其它需走 API 模式 | `ChatbotConnector` 接口已抽象,加新 content script + 选择器即可 |
-| chat-tab 模式无 streaming 渲染    | 一轮内只在 chatbot 结束后整段呈现;tool trace 是即时的 | DeepSeek connector 走 textContent diff,改增量 push 工作量大     |
-| 跨 worlds 性能开销                | `page.evaluate` 每次走 RPC → CDP(详 hot-plug §10.7) | 用 `page.evaluateMain()` 显式分流;或脚本编排端整段 batch          |
-| 装好的 marketplace adapter 升级路径 | 改 source 序列化方式后用户必须手动 uninstall + reinstall(详 hot-plug §10.8) | 加 "source schema version" 字段 + 启动时自动迁移         |
+| 限制                                | 影响                                                                                    | 后续                                                           |
+| ----------------------------------- | --------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| Service Worker 可能被 Chrome 杀掉   | 长任务（>30s 无活动）可能中断;orchestrator 循环里有 `Port` 防 idle,但 chrome 仍可能强杀 | 用 chrome.alarms 自 ping;或迁移长任务到 offscreen document     |
+| 纯 DOM 注入                         | DeepSeek UI 改版即失效                                                                  | 备选：MAIN-world 拦截 `fetch` 改 request body / SSE 响应       |
+| 工具调用串行                        | 单轮内一个 agent-command 一个 tool;DeepSeek 自己也不发并发 tool_calls                   | 后续支持单轮多 tool 的并发执行(API 模式更容易,native 协议支持) |
+| 未支持 ChatGPT / Gemini connector   | 想用 chat-tab 模式只能选 DeepSeek;想用其它需走 API 模式                                 | `ChatbotConnector` 接口已抽象,加新 content script + 选择器即可 |
+| chat-tab 模式无 streaming 渲染      | 一轮内只在 chatbot 结束后整段呈现;tool trace 是即时的                                   | DeepSeek connector 走 textContent diff,改增量 push 工作量大    |
+| 跨 worlds 性能开销                  | `page.evaluate` 每次走 RPC → CDP(详 hot-plug §10.7)                                     | 用 `page.evaluateMain()` 显式分流;或脚本编排端整段 batch       |
+| 装好的 marketplace adapter 升级路径 | 改 source 序列化方式后用户必须手动 uninstall + reinstall(详 hot-plug §10.8)             | 加 "source schema version" 字段 + 启动时自动迁移               |
 
 ## 11. 文件结构速查
 
@@ -294,17 +295,19 @@ webchat-agent/
 │       ├── Adapters.tsx                # 「已安装」「市场」双 tab + 贴码安装 + 启用/卸载(535 行)
 │       ├── Markdown.tsx                # marked + dompurify 渲染助手
 │       ├── adapters-client.ts          # 跟 SW 的 install/list/uninstall RPC
-│       ├── marketplace.ts              # fetchMarketIndex + FEATURED_IDS
+│       ├── marketplace.ts              # fetchMarketIndex + fetchAdapterSource(sha256-verified)+ FEATURED_IDS
 │       ├── sandbox-host.ts             # 持有隐藏 sandbox iframe 转发 eval(install path)
 │       ├── types.ts, main.tsx, index.html, style.css
-├── marketplace/index.json              # 默认市场 bundle(345 个 adapter = 122 pipeline + 223 func,37 个站点,~2.0 MB)
-├── tests/                              # vitest, 160 用例(全 node 环境)
+├── marketplace/                        # schema-v2(详 hot-plug §11):138KB metadata-only index.json + per-adapter <site>/<name>.js
+│   ├── index.json                      # {version:2, adapters:[{site,name,...,source,sha256,tier,author,version}]}
+│   └── <site>/<name>.js                # bundled adapter source(345 个文件)
+├── tests/                              # vitest, 182 用例(全 node 环境)
 ├── scripts/
 │   ├── import-adapter.mjs              # build-time 单 adapter 同步(开发者用,非用户路径)
-│   └── build-marketplace-index.mjs     # 生成 marketplace/index.json(esbuild bundle 相对 import,详 hot-plug §10.8)
+│   └── build-marketplace-index.mjs     # 生成 marketplace/ 树(esbuild bundle 相对 import,详 hot-plug §10.8)
 └── docs/
     ├── architecture.md                 # 本文件 — 整体架构 / 当前状态 / 安全 / 限制
-    └── adapter-hot-plug.md             # Phase A + Phase B ADR + 9 个踩坑总结
+    └── adapter-hot-plug.md             # Phase A + Phase B ADR + 踩坑总结 + 市场 v2 schema(§11)
 ````
 
 「site adapter」现已**全部走市场**(运行时安装,IndexedDB 持久化,跨 Chrome 重启自动恢复),`src/tools/` 只剩 generic + 框架代码。
@@ -313,11 +316,11 @@ webchat-agent/
 
 写在每个章节里的"取舍"已经够多了,但有几个跨章节的坑值得单独标出来(完整 post-mortem 见 [adapter-hot-plug.md §10](./adapter-hot-plug.md#10-phase-b-真实部署的坑)):
 
-| 坑 | 教训 | 详 |
-|---|---|---|
-| diag marker 在 USER_SCRIPT 写、SW MAIN world 读 → 永 null | **跨 world 通信只能走 DOM 或 postMessage**,`globalThis` 隔离 | hot-plug §10.2 |
-| USER_SCRIPT port → SW 永远收不到 | Chrome 把 USER_SCRIPT 连接路由到独立事件 `onUserScriptConnect`(非 `onConnect`) | hot-plug §10.3 |
-| goto trampoline 因 tracking 参数无限循环 | 网页 URL 不稳定,匹配用 origin+pathname+params subset 而非 strict-equal | hot-plug §10.4 |
-| `page.evaluate` 从 CDP MAIN 换到 USER_SCRIPT 本地后,所有 `window.<global>` 静默返回空 | **换执行环境时必须逐条对照旧语义** | hot-plug §10.7(2026-05 修) |
-| marketplace 存 source 原文 → 相对 import 运行时 ReferenceError | **marketplace 化 = 自包含化**,隐式依赖必须显式 inline | hot-plug §10.8(2026-05 修) |
-| 改 source 序列化方式后老用户必须手动重装 | 加 "source schema version" 字段 + 启动时自动迁移 | hot-plug §10.8(后续) |
+| 坑                                                                                    | 教训                                                                           | 详                         |
+| ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ | -------------------------- |
+| diag marker 在 USER_SCRIPT 写、SW MAIN world 读 → 永 null                             | **跨 world 通信只能走 DOM 或 postMessage**,`globalThis` 隔离                   | hot-plug §10.2             |
+| USER_SCRIPT port → SW 永远收不到                                                      | Chrome 把 USER_SCRIPT 连接路由到独立事件 `onUserScriptConnect`(非 `onConnect`) | hot-plug §10.3             |
+| goto trampoline 因 tracking 参数无限循环                                              | 网页 URL 不稳定,匹配用 origin+pathname+params subset 而非 strict-equal         | hot-plug §10.4             |
+| `page.evaluate` 从 CDP MAIN 换到 USER_SCRIPT 本地后,所有 `window.<global>` 静默返回空 | **换执行环境时必须逐条对照旧语义**                                             | hot-plug §10.7(2026-05 修) |
+| marketplace 存 source 原文 → 相对 import 运行时 ReferenceError                        | **marketplace 化 = 自包含化**,隐式依赖必须显式 inline                          | hot-plug §10.8(2026-05 修) |
+| 改 source 序列化方式后老用户必须手动重装                                              | 加 "source schema version" 字段 + 启动时自动迁移                               | hot-plug §10.8(后续)       |

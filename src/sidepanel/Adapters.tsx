@@ -22,6 +22,7 @@ import {
 } from './adapters-client';
 import {
   fetchMarketIndex,
+  fetchAdapterSource,
   entryId,
   FEATURED_IDS,
   type MarketIndex,
@@ -181,7 +182,24 @@ export function AdaptersSection() {
 
   async function onInstallMarket(a: MarketAdapter): Promise<void> {
     const id = entryId(a);
-    await installSource(a.source, { type: 'marketplace', url: `bundled:${id}` }, id);
+    // Schema-v2: index carries only a relative source path; the actual `.js`
+    // body lives at marketplace/<site>/<name>.js and is fetched on demand
+    // here, with sha256 verified against the index (refuses tampered bodies).
+    setState({ kind: 'installing' });
+    setInstalling((p) => new Set(p).add(id));
+    let src: string;
+    try {
+      src = await fetchAdapterSource(a);
+    } catch (e) {
+      setState({ kind: 'err', msg: e instanceof Error ? e.message : String(e) });
+      setInstalling((p) => {
+        const s = new Set(p);
+        s.delete(id);
+        return s;
+      });
+      return;
+    }
+    await installSource(src, { type: 'marketplace', url: `bundled:${id}` }, id);
   }
 
   async function onToggle(a: InstalledAdapterSummary): Promise<void> {
@@ -390,7 +408,9 @@ function MarketPanel(p: MarketPanelProps): preact.JSX.Element {
       <div style="font-size:11px;color:var(--err,#dc2626)">
         市场加载失败:{p.err}
         <div style="color:var(--muted);margin-top:4px">
-          确保 dist/marketplace-index.json 存在,且 manifest 把它列在 web_accessible_resources。
+          确保 dist/marketplace/index.json 存在,且 manifest 把 marketplace/* 列在
+          web_accessible_resources。重建:node scripts/build-marketplace-index.mjs --popular
+
         </div>
       </div>
     );

@@ -2,9 +2,9 @@ import { defineConfig, type Plugin } from 'vite';
 import { crx } from '@crxjs/vite-plugin';
 import preact from '@preact/preset-vite';
 import manifest from './manifest.json';
-import { resolve } from 'node:path';
+import { resolve, join } from 'node:path';
 import { existsSync } from 'node:fs';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, readdir, copyFile } from 'node:fs/promises';
 import { build as esbuild } from 'esbuild';
 
 // Aliases so UNMODIFIED opencli adapters can `import { ... } from
@@ -33,8 +33,26 @@ const opencliAliases = {
  * no chrome.* loader), and register the page in the built manifest. Inlining
  * sidesteps every path/loader pitfall.
  */
-const MARKET_INDEX = 'marketplace-index.json';
+const MARKETPLACE_DIR = 'marketplace';
 const USERSCRIPT_RUNNER = 'userscript-runner.js';
+
+/** Recursive copy of one directory tree to another (mkdir -p as it goes).
+ * No symlink/special-file handling — the marketplace tree is just .json + .js. */
+async function copyDir(src: string, dst: string): Promise<number> {
+  let copied = 0;
+  await mkdir(dst, { recursive: true });
+  for (const entry of await readdir(src, { withFileTypes: true })) {
+    const s = join(src, entry.name);
+    const d = join(dst, entry.name);
+    if (entry.isDirectory()) {
+      copied += await copyDir(s, d);
+    } else if (entry.isFile()) {
+      await copyFile(s, d);
+      copied++;
+    }
+  }
+  return copied;
+}
 
 function sandboxPagePlugin(): Plugin {
   const SANDBOX_HTML = 'sandbox.html';
@@ -66,14 +84,18 @@ function sandboxPagePlugin(): Plugin {
 `;
       await writeFile(resolve(__dirname, 'dist', SANDBOX_HTML), html, 'utf8');
 
-      // 2. Copy the real marketplace index to dist (overwriting the placeholder).
-      const indexSrc = resolve(__dirname, 'marketplace/index.json');
-      if (existsSync(indexSrc)) {
-        await writeFile(
-          resolve(__dirname, 'dist', MARKET_INDEX),
-          await readFile(indexSrc, 'utf8'),
-          'utf8',
-        );
+      // 2. Copy the entire marketplace/ tree to dist/marketplace/.
+      //    Schema-v2 (see scripts/build-marketplace-index.mjs) splits each
+      //    adapter into its own .js file under <site>/<name>.js, with a small
+      //    metadata-only index.json at the root. The extension fetches the
+      //    index for browsing and pulls per-adapter source on install. See
+      //    docs/adapter-hot-plug.md for why per-file > one big JSON blob.
+      const marketSrc = resolve(__dirname, MARKETPLACE_DIR);
+      const marketDst = resolve(__dirname, 'dist', MARKETPLACE_DIR);
+      if (existsSync(marketSrc)) {
+        const n = await copyDir(marketSrc, marketDst);
+        // eslint-disable-next-line no-console
+        console.log(`[sandboxPagePlugin] copied ${n} marketplace files → dist/${MARKETPLACE_DIR}/`);
       }
 
       // 3. Bundle the USER_SCRIPT-world runner into a self-contained IIFE,

@@ -37,6 +37,7 @@
 > - `4ed3527` docs: Phase B done + 4 pitfalls + clean up stale tree references
 > - `e20daa0` page.evaluate→MAIN world(§10.7)+ marketplace bundle relative imports(§10.8)
 > - `1648e84` Phase B 三连修(zhihu/answer-detail 端到端): NavigateRestart 改 Error 子类 + deep-scan(§10.10) + `lastNavigatedUrl` 旁路解决 server-redirect 死循环(§10.11) + `getCurrentUrl` 改 async 对齐 PageShim(§10.12)
+> - `<next>` 市场布局 v2:从单 2MB JSON 切到 `marketplace/<site>/<name>.js` per-file + sha256 + 远程友好 schema(§11)
 
 ## 0. 动机(用户原话)
 
@@ -595,7 +596,81 @@ async getCurrentUrl(): Promise<string> {
 
 **教训**:**两套 shim 实现同一个 interface 时,要让 interface 真的是 ts interface 而不是 `Record<string, unknown>`**——否则签名漂移到 adapter 报 `.catch is not a function` 之前都没人会发现。下一步小修:给 `makeLocalPage` 的返回类型用 PageShim 的子接口,让 tsc 顶住签名漂移。当下先把 getCurrentUrl 这一个修了 + 加单测当 guard。也是同一个家族的教训:**跨实现的"约等于" interface 必须用真 TS 顶住,不能靠 `Record<string, unknown>` 兜底**(同 10.7/10.8 的"隐式假设清单"思想)。
 
-## 11. 对未来「自己拼 Tampermonkey 替代品」的人
+## 11. 市场布局 v2:per-file + sha256(为公开市场铺路)
+
+> 关键改动 commit:`<next>`(本节描述的整体 schema-v2 切换)。
+
+### 11.1 为什么不能继续一个 JSON 包到底
+
+v1 把 345 个 adapter 全部 inline 进一个 `marketplace/index.json`(2.0MB / 3060 行),想法是"单文件可托管在任何地方(gist/S3/CDN/gh-pages)"。这个简化在初期合理,但跑了一阵后暴露三个问题:
+
+1. **改不动**:想看一个 adapter 的代码,要在 3000 行 JSON 里挖一段 escape 过的字符串源码,IDE 无语法高亮、无跳转、grep 噪音爆炸。AI agent 读这玩意儿尤其惨——一次 read 撑爆 context。
+2. **缓存粒度太大**:任何一个 adapter 改一行,整个 2MB 重下。远程市场化之后这是浪费;本地包也有 git diff 体积问题(每次 build 整个文件 churn)。
+3. **schema 没准备好长线**:v1 字段(`{site, name, source, type, ...}`)漏了所有"市场即将需要"的元数据 —— 版本号、作者归属、tier(官方/社区)、内容哈希。要等远程上线再加,就得做一次 schema 迁移 + 老 cache 兼容。提前把字段加齐,更省事。
+
+### 11.2 v2 schema
+
+```
+marketplace/
+  index.json                  # metadata only, ~138KB for 345 adapters
+  <site>/<name>.js            # bundled adapter source (one file per adapter)
+```
+
+`index.json` 每条:
+
+```jsonc
+{
+  "site": "zhihu",
+  "name": "answer-detail",
+  "description": "知乎单个回答完整内容(按 answer ID 获取)",
+  "access": "read",
+  "type": "func",
+  "tier": "official", // 或 'community' — 远程社区 adapter 上线后启用
+  "author": "opencli", // 社区 adapter 写 GitHub handle
+  "version": "1.0.0", // 手动 bump;真正的 upgrade 判定靠 sha256
+  "source": "zhihu/answer-detail.js", // 相对路径,远程/本地同一份 schema
+  "sha256": "1dc7b57b...", // 内容哈希:防替换 + upgrade 检测
+}
+```
+
+顶层加 `version: 2`(schema 版本)+ `bundledAt`(ISO 时间戳)。客户端见到 `version !== 2` **拒绝加载**,而不是宽松解析丢字段,防止 half-migrated cache 静默 fail。
+
+### 11.3 fetch 路径:两阶段 + 哈希校验
+
+```
+SidePanel 打开 → fetchMarketIndex() → index.json (~138KB) 一次性
+                                    → 显示卡片
+用户点 install → fetchAdapterSource(adapter)
+                     → URL = new URL(adapter.source, baseUrl)
+                     → 拉单个 .js (5-30KB)
+                     → 算 sha256, 跟 adapter.sha256 比
+                     → 不匹配抛错,绝不 silently 用差异 bytes
+                → installAdapterFromSource(text, ...)
+```
+
+`baseUrl` 当前 = `chrome.runtime.getURL('marketplace/')`(本地包)。**远程市场上线时只改这一处**——schema 不动、fetch 代码不动、install 路径不动。这是当下做 v2 重写的最大价值:**远程 readiness 几乎零代码差**。
+
+### 11.4 为什么 sha256 而不是 ETag / version
+
+- **内容寻址 vs 元数据**:ETag 是服务器声明,version 是作者声明,都需要"信"。sha256 是**客户端可验证**的事实 —— index 说 X,body 是不是 X,自己算一遍就知道,不需要信任中间任何一环。
+- **防"审核后偷换"**:未来开发者市场最现实的攻击是 review 通过后悄悄换 body。CDN/storage 端没"内容 immutable"保证。客户端校 sha256 是唯一可靠门控。
+- **upgrade 检测**:installed adapter 存 sha256(install 时记下);客户端定期跟当前 index 比对,不同 → "有新版可用"。比 version 字符串可靠(开发者忘 bump 也能检测到)。
+- **本地包也得校**:即便 built-in,也防 dist 被外部工具篡改 / build 时部分文件 stale。零信任默认更省事。
+
+### 11.5 兼容性
+
+- **已装 adapter**:source 已经在 IndexedDB,**不需要再走市场 fetch**,完全 untouched。schema-v2 只影响"装新 adapter"路径。
+- **手动 paste-install**:不走市场,源码直接进 sandbox eval,跟以前一样。
+- **老的 `marketplace-index.json` URL**:废弃。`web_accessible_resources` 移除该条目,改成 `marketplace/index.json` + `marketplace/*/*.js` glob。老的 dist 重 build 即新。
+
+### 11.6 没做的事(留给后续 PR)
+
+- **远程 baseUrl 设置项**:`chrome.storage.local` 加个 `remoteMarketUrl` 字段 + SidePanel 设置 UI。代码层 fetch 已支持(`fetchMarketIndex(baseUrl)` / `fetchAdapterSource(adapter, baseUrl)` 都接 baseUrl 参数)。
+- **community tier UI**:`MarketAdapter.tier` 字段已存在,但 Adapters.tsx 还没按 tier 分组渲染。等远程跑通了再做。
+- **审核 / 上传 pipeline**:需要后端 + GitHub-style 提交流。完全独立工程。
+- **upgrade 提示**:installed adapter 存 sha256 字段,周期性跟 index 比对,UI 弹"有更新"。代码 hook 点都已就位(`installed-store.ts` schema 加 `sha256` 字段即可)。
+
+## 12. 对未来「自己拼 Tampermonkey 替代品」的人
 
 底层能力已经全部解锁:
 
