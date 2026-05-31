@@ -91,6 +91,20 @@ const POPULAR_SITES = new Set([
   'gemini',
 ]);
 
+// 当前不想内置的站点 — 直接跳过,不参与任何后续过滤。
+const SKIP_SITES = new Set([
+  'binance',
+  'coingecko',
+  'dictionary',
+  'facebook',
+  'hupu',
+  'nowcoder',
+  'pixiv',
+  'pubmed',
+  'steam',
+  'xiaoe',
+]);
+
 if (!existsSync(clisDir)) {
   console.error(`✗ clis dir not found: ${clisDir}`);
   console.error('  pass --clis <path-to-opencli/clis>');
@@ -182,6 +196,7 @@ async function main() {
   let written = 0;
 
   for (const site of sites) {
+    if (SKIP_SITES.has(site)) continue;
     const siteDir = join(clisDir, site);
     if (!(await stat(siteDir)).isDirectory()) continue;
     let siteOutMade = false;

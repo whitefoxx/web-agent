@@ -11,7 +11,7 @@
 | **API mode(OpenAI-compatible)**    | ✅ 生产可用                                                                                                                                     | `src/agent/api-engine.ts`,275 行;支持 DeepSeek/OpenAI/Anthropic 兼容 endpoint;UI 设置面板切换                                                                                                   |
 | **Adapter 市场(Phase A pipeline)** | ✅ 生产可用                                                                                                                                     | 装即用,零额外配置                                                                                                                                                                               |
 | **Adapter 市场(Phase B func)**     | ✅ 生产可用                                                                                                                                     | 需 Chrome 138+ + 用户在 `chrome://extensions` 开「允许用户脚本」开关                                                                                                                            |
-| **Adapter 市场内置 bundle**        | 345 个 adapter(122 pipeline + 223 func),37 个站点。schema-v2: 138KB `marketplace/index.json`(metadata + sha256)+ per-adapter `<site>/<name>.js` | 见 `marketplace/`,`scripts/build-marketplace-index.mjs --popular` 重建,详 hot-plug §11                                                                                                          |
+| **Adapter 市场内置 bundle**        | 284 个 adapter(73 pipeline + 211 func),27 个站点。schema-v2: 116KB `marketplace/index.json`(metadata + sha256)+ per-adapter `<site>/<name>.js` | 见 `marketplace/`,`scripts/build-marketplace-index.mjs --popular` 重建,详 hot-plug §11                                                                                                          |
 | **通用工具(generic)**              | ✅ 10 个                                                                                                                                        | `open_url` / `screenshot` / `scroll_page` / `get_text_from_tab` / `get_page_text` / `close_tab` / `get_interactives` / `click` / `click_by_text` / `type_into`(`_helpers` 是内部模块,不是 tool) |
 | **写操作二次确认**                 | ✅ 实装                                                                                                                                         | SidePanel 弹窗 + 5 分钟超时,见 `service-worker.ts:WRITE_CONFIRM_RESP`                                                                                                                           |
 | **会话持久化**                     | ✅ IndexedDB                                                                                                                                    | `session-store.ts`,跨 Chrome 重启幸存,DB v2 与 adapter store 共存                                                                                                                               |
@@ -170,7 +170,7 @@ DOM 选择器（见 `src/connectors/deepseek/selectors.ts`）：
 
 - **Phase A**(pipeline 型):sandbox iframe 一次性 eval 出纯数据 → 存 IDB → 由 `runtime/opencli/pipeline.ts` 解释器跑(无 eval)。装即用,零额外配置。
 - **Phase B**(func 型):`chrome.userScripts` API(Chrome 138+)把 func 注入目标 tab 的 USER_SCRIPT world 跑;`page.evaluate/wait` 本地执行,`page.goto/getCookies/...` 通过 port RPC 回 SW 用 `PageShim` 兑现。需用户在「允许用户脚本」开关开。
-- **市场**:`marketplace/` 默认内置 345 个 adapter(122 pipeline + 223 func)。schema-v2:138KB metadata-only `index.json` + per-adapter `<site>/<name>.js`。`scripts/build-marketplace-index.mjs` 用 `--popular` 从 opencli `clis/` 生成。客户端 install 时 fetch 单个 .js 并 sha256 校验。远程市场 URL 的接口位已留好,只差 `baseUrl` 配置项。详 hot-plug §11。
+- **市场**:`marketplace/` 默认内置 284 个 adapter(73 pipeline + 211 func)。schema-v2:116KB metadata-only `index.json` + per-adapter `<site>/<name>.js`。`scripts/build-marketplace-index.mjs` 用 `--popular` 从 opencli `clis/` 生成。客户端 install 时 fetch 单个 .js 并 sha256 校验。远程市场 URL 的接口位已留好,只差 `baseUrl` 配置项。详 hot-plug §11。
 
 `PageShim`(`src/runtime/page.ts`)暴露 `page.goto / evaluate / autoScroll / captureNetwork / pressKey / ...` 给 adapter(无论是 SW 直接 invoke 内置的,还是 Phase B 经 port RPC 兑现的)。内部用 `chrome.debugger` 直接发 CDP 命令。
 
@@ -213,7 +213,7 @@ DeepSeek 偶尔会在你提交后立刻在 user 消息下方贴一条 "Server is
 
 两条路径共享:tool 注册表(`src/runtime/registry.js`)、dispatcher(`src/tools/dispatcher.ts`)、PageShim(`src/runtime/page.ts`)、写操作确认弹窗、会话存储。**只有"如何拿到下一段 assistant 文本"不同**;拿到之后命令解析(`command-parser.ts` for chat-tab,native tool_calls for api)+ 工具调度完全一致。
 
-> 取舍:chat-tab 是命名所言的"零 API key"卖点,但有几个固有限制:DeepSeek 的 "Server is busy"(已有自动重试,§8.5)、上下文长度受 chatbot 端限制、不支持 streaming。API 模式去掉了所有这些,但要 key,要钱。设计意图是让重度用户在不放弃这个项目的工具生态(345 个市场 adapter + 11 个 generic + 写操作确认 + 会话存储)的前提下,接入自己的 API。
+> 取舍:chat-tab 是命名所言的"零 API key"卖点,但有几个固有限制:DeepSeek 的 "Server is busy"(已有自动重试,§8.5)、上下文长度受 chatbot 端限制、不支持 streaming。API 模式去掉了所有这些,但要 key,要钱。设计意图是让重度用户在不放弃这个项目的工具生态(284 个市场 adapter + 11 个 generic + 写操作确认 + 会话存储)的前提下,接入自己的 API。
 
 ## 9. 安全 / 边界
 
@@ -298,9 +298,9 @@ webchat-agent/
 │       ├── marketplace.ts              # fetchMarketIndex + fetchAdapterSource(sha256-verified)+ FEATURED_IDS
 │       ├── sandbox-host.ts             # 持有隐藏 sandbox iframe 转发 eval(install path)
 │       ├── types.ts, main.tsx, index.html, style.css
-├── marketplace/                        # schema-v2(详 hot-plug §11):138KB metadata-only index.json + per-adapter <site>/<name>.js
+├── marketplace/                        # schema-v2(详 hot-plug §11):116KB metadata-only index.json + per-adapter <site>/<name>.js
 │   ├── index.json                      # {version:2, adapters:[{site,name,...,source,sha256,tier,author,version}]}
-│   └── <site>/<name>.js                # bundled adapter source(345 个文件)
+│   └── <site>/<name>.js                # bundled adapter source(284 个文件)
 ├── tests/                              # vitest, 182 用例(全 node 环境)
 ├── scripts/
 │   ├── import-adapter.mjs              # build-time 单 adapter 同步(开发者用,非用户路径)

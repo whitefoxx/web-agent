@@ -9,7 +9,7 @@
 >
 > **当前状况**:
 >
-> - 市场内置 345 个 adapter(122 pipeline + 223 func,覆盖 ~25 个热门站点)— 见 `marketplace/index.json`
+> - 市场内置 284 个 adapter(73 pipeline + 211 func,覆盖 27 个热门站点)— 见 `marketplace/index.json`
 > - pipeline 型装完即用,**零额外配置**
 > - func 型需 **Chrome 138+** 且用户在 `chrome://extensions` 详情页打开「允许用户脚本」开关
 > - `src/tools/` 已清理:不再有内置 site adapter,只剩 `generic/`(站点无关的 open_url/screenshot/click/...),其他 site 全走市场
@@ -39,6 +39,7 @@
 > - `1648e84` Phase B 三连修(zhihu/answer-detail 端到端): NavigateRestart 改 Error 子类 + deep-scan(§10.10) + `lastNavigatedUrl` 旁路解决 server-redirect 死循环(§10.11) + `getCurrentUrl` 改 async 对齐 PageShim(§10.12)
 > - `<next>` 市场布局 v2:从单 2MB JSON 切到 `marketplace/<site>/<name>.js` per-file + sha256 + 远程友好 schema(§11)
 > - `<next+1>` `node:*` shim:rewriter + 纯 JS MD5,bilibili/zhihu 等需要 node 内建的 adapter 可用(§10.13)
+> - `<next+2>` 从内置市场剔除 binance/coingecko/dictionary/facebook/hupu/nowcoder/pixiv/pubmed/steam/xiaoe:345 → 284 个 adapter,27 个站点
 
 ## 0. 动机(用户原话)
 
@@ -153,7 +154,7 @@
 - `src/sidepanel/marketplace.ts` — fetchMarketIndex + entryId + FEATURED_IDS
 - `scripts/build-marketplace-index.mjs` — 从 opencli `clis/` 生成 index.json(支持 `--popular` site allowlist)
 - `src/sidepanel/Adapters.tsx` — 「已安装」「市场」双 tab + 贴码安装 + 启用/卸载 + 类型筛选 + Phase B 警告 + 安装结果分类 toast
-- `marketplace/index.json` — 默认 bundle,**345 个 adapter**(122 pipeline + 223 func,~25 个热门站点)
+- `marketplace/index.json` — 默认 bundle,**284 个 adapter**(73 pipeline + 211 func,27 个热门站点)
 
 **Phase B func 型**(✅)
 
@@ -673,7 +674,7 @@ v1 把 345 个 adapter 全部 inline 进一个 `marketplace/index.json`(2.0MB / 
 
 ```
 marketplace/
-  index.json                  # metadata only, ~138KB for 345 adapters
+  index.json                  # metadata only, ~116KB for 284 adapters
   <site>/<name>.js            # bundled adapter source (one file per adapter)
 ```
 
@@ -699,7 +700,7 @@ marketplace/
 ### 11.3 fetch 路径:两阶段 + 哈希校验
 
 ```
-SidePanel 打开 → fetchMarketIndex() → index.json (~138KB) 一次性
+SidePanel 打开 → fetchMarketIndex() → index.json (~116KB) 一次性
                                     → 显示卡片
 用户点 install → fetchAdapterSource(adapter)
                      → URL = new URL(adapter.source, baseUrl)
