@@ -25,7 +25,7 @@ cli({
   site: "weibo",
   name: "search",
   access: "read",
-  description: "\u641C\u7D22\u5FAE\u535A",
+  description: "搜索微博",
   domain: "weibo.com",
   browser: true,
   strategy: Strategy.COOKIE,

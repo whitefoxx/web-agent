@@ -147,7 +147,7 @@ cli({
   site: "zhihu",
   name: "answer-comments",
   access: "read",
-  description: "\u77E5\u4E4E\u56DE\u7B54\u8BC4\u8BBA\u5217\u8868",
+  description: "知乎回答评论列表",
   domain: "www.zhihu.com",
   strategy: Strategy.COOKIE,
   args: [

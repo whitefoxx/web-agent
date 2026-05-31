@@ -100,8 +100,8 @@ import { CliError as CliError2 } from "@jackwener/opencli/errors";
 var RESULT_ROW_RESERVED_KEYS = /* @__PURE__ */ new Set(["status", "outcome", "message", "target_type", "target"]);
 var NAV_SCOPE_SELECTOR = 'header, nav, [role="banner"], [role="navigation"]';
 var PROFILE_LINK_SELECTOR = 'a[href^="/people/"]';
-var AVATAR_SELECTOR = 'img, [class*="Avatar"], [data-testid*="avatar" i], [aria-label*="\u5934\u50CF"]';
-var SELF_LABEL_TOKENS = ["\u6211", "\u6211\u7684", "\u4E2A\u4EBA\u4E3B\u9875"];
+var AVATAR_SELECTOR = 'img, [class*="Avatar"], [data-testid*="avatar" i], [aria-label*="头像"]';
+var SELF_LABEL_TOKENS = ["我", "我的", "个人主页"];
 var EXPLICIT_IDENTITY_META_TOKEN_GROUPS = [
   ["self"],
   ["current", "user"],

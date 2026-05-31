@@ -157,8 +157,8 @@ cli({
             var normalizeCollectionName = function(value) {
                 return String(value || '')
                     .replace(/\\s+/g, ' ')
-                    .replace(/\\s+\\d+\\s*(\u6761\u5185\u5BB9|\u4E2A\u5185\u5BB9|items?)$/i, '')
-                    .replace(/\\s+(\u516C\u5F00|\u79C1\u5BC6|\u9ED8\u8BA4)$/i, '')
+                    .replace(/\\s+\\d+\\s*(条内容|个内容|items?)$/i, '')
+                    .replace(/\\s+(公开|私密|默认)$/i, '')
                     .trim()
                     .toLowerCase();
             };

@@ -77,11 +77,11 @@ cli({
   site: "douyin",
   name: "stats",
   access: "read",
-  description: "\u4F5C\u54C1\u6570\u636E\u5206\u6790",
+  description: "作品数据分析",
   domain: "creator.douyin.com",
   strategy: Strategy.COOKIE,
   args: [
-    { name: "aweme_id", required: true, positional: true, help: "\u6296\u97F3\u4F5C\u54C1 ID\uFF08aweme_id\uFF0C\u53EF\u4ECE\u4F5C\u54C1 URL \u672B\u5C3E\u83B7\u53D6\uFF09" }
+    { name: "aweme_id", required: true, positional: true, help: "抖音作品 ID（aweme_id，可从作品 URL 末尾获取）" }
   ],
   columns: ["metric", "value"],
   func: async (page, kwargs) => {

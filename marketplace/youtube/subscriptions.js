@@ -53,7 +53,7 @@ cli({
     const data = await page.evaluate(`
       (async () => {
         const d = window.ytInitialData;
-        if (!d) return { error: 'YouTube data not found \u2014 are you logged in?' };
+        if (!d) return { error: 'YouTube data not found — are you logged in?' };
 
         const limit = ${limit};
 
@@ -78,7 +78,7 @@ cli({
     `);
     if (!Array.isArray(data)) {
       const errMsg = data && typeof data === "object" ? String(data.error || "") : "";
-      throw new CommandExecutionError(errMsg || "Failed to fetch subscriptions \u2014 make sure you are logged into YouTube");
+      throw new CommandExecutionError(errMsg || "Failed to fetch subscriptions — make sure you are logged into YouTube");
     }
     if (data.length === 0) {
       throw new EmptyResultError("youtube subscriptions");

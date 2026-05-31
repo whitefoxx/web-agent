@@ -50,7 +50,7 @@ cli({
     const data = await page.evaluate(`
       (async () => {
         const d = window.ytInitialData;
-        if (!d) return { error: 'YouTube data not found \u2014 are you logged in?' };
+        if (!d) return { error: 'YouTube data not found — are you logged in?' };
 
         const limit = ${limit};
         const cfg = window.ytcfg?.data_ || {};
@@ -88,7 +88,7 @@ cli({
       })()
     `);
     if (!data || typeof data !== "object") {
-      throw new CommandExecutionError("Failed to fetch Watch Later \u2014 make sure you are logged into YouTube");
+      throw new CommandExecutionError("Failed to fetch Watch Later — make sure you are logged into YouTube");
     }
     if (data.error) {
       throw new CommandExecutionError(String(data.error));

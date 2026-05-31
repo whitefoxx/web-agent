@@ -160,7 +160,7 @@ cli({
   site: "bilibili",
   name: "user-videos",
   access: "read",
-  description: "\u67E5\u770B\u6307\u5B9A\u7528\u6237\u7684\u6295\u7A3F\u89C6\u9891",
+  description: "查看指定用户的投稿视频",
   domain: "www.bilibili.com",
   strategy: Strategy.COOKIE,
   args: [

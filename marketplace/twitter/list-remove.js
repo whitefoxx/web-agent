@@ -418,11 +418,11 @@ cli2({
                 window.__opencliListMutations.length = 0;
 
                 const caret = await waitFor(() => findOne('[data-testid="userActions"]'));
-                if (!caret) return { ok: false, message: 'Could not find user actions (\u2026) button' };
+                if (!caret) return { ok: false, message: 'Could not find user actions (…) button' };
                 caret.click();
                 await sleep(600);
                 const menuItems = Array.from(document.querySelectorAll('[role="menuitem"]'));
-                const addToListItem = menuItems.find(el => /add\\/remove|\u4ECE\u5217\u8868|\u5217\u8868|add to list|add or remove/i.test(el.innerText));
+                const addToListItem = menuItems.find(el => /add\\/remove|从列表|列表|add to list|add or remove/i.test(el.innerText));
                 if (!addToListItem) return { ok: false, message: 'Could not find "Add/remove from Lists" menu item' };
                 addToListItem.click();
                 await sleep(1200);
@@ -485,7 +485,7 @@ cli2({
                 const rowRect = listCell.getBoundingClientRect();
                 const saveButton = Array.from(dialog.querySelectorAll('[role="button"], button')).find(b => {
                     const txt = (b.innerText || '').trim();
-                    return /^(Save|Done|\u4FDD\u5B58|\u5B8C\u6210|\u5132\u5B58)$/i.test(txt);
+                    return /^(Save|Done|保存|完成|儲存)$/i.test(txt);
                 });
                 const saveRect = saveButton ? saveButton.getBoundingClientRect() : null;
                 return {
@@ -535,9 +535,9 @@ cli2({
       }
       const memberCountAfter = Number(afterList.members) || 0;
       if (memberCountAfter < memberCountBefore) {
-        verifiedBy = `member_count ${memberCountBefore} \u2192 ${memberCountAfter}`;
+        verifiedBy = `member_count ${memberCountBefore} → ${memberCountAfter}`;
       } else {
-        throw new CommandExecutionError2(`Failed to remove @${username} from list ${listId}: member_count unchanged (${memberCountBefore} \u2192 ${memberCountAfter}).`);
+        throw new CommandExecutionError2(`Failed to remove @${username} from list ${listId}: member_count unchanged (${memberCountBefore} → ${memberCountAfter}).`);
       }
     }
     return [{

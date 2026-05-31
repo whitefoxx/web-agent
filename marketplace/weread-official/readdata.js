@@ -78,7 +78,7 @@ async function callGateway(apiName, params = {}, { timeoutMs = DEFAULT_TIMEOUT_M
     const required = info?.required_version ?? info?.version ?? "unknown";
     const message = info?.message ?? "WeRead skill version is outdated";
     throw new CommandExecutionError(
-      `WeRead skill \u9700\u5347\u7EA7: ${message}. Required skill_version=${required}, current=${SKILL_VERSION}`,
+      `WeRead skill 需升级: ${message}. Required skill_version=${required}, current=${SKILL_VERSION}`,
       "Pull the latest weread-skills.zip and bump SKILL_VERSION in clis/weread-official/utils.js."
     );
   }
@@ -115,8 +115,8 @@ function formatDuration(secs) {
   const seconds = Math.floor(total);
   const hours = Math.floor(seconds / 3600);
   const minutes = Math.floor(seconds % 3600 / 60);
-  if (hours > 0) return `${hours}\u5C0F\u65F6${minutes}\u5206\u949F`;
-  return `${minutes}\u5206\u949F`;
+  if (hours > 0) return `${hours}小时${minutes}分钟`;
+  return `${minutes}分钟`;
 }
 function requirePositiveInt(value, label, { defaultValue, max } = {}) {
   if (value === void 0 || value === null || value === "") {
@@ -226,7 +226,7 @@ cli({
         idx: i + 1,
         key: String(entry?.categoryTitle ?? ""),
         value: formatDuration(seconds),
-        detail: `${Number(entry?.readingCount ?? 0)}\u672C`
+        detail: `${Number(entry?.readingCount ?? 0)}本`
       });
     });
     const preferAuthor = Array.isArray(payload?.preferAuthor) ? payload.preferAuthor : [];
@@ -237,7 +237,7 @@ cli({
         key: String(entry?.name ?? ""),
         // preferAuthor[].readTime is server-formatted ("5小时30分钟"), not seconds.
         value: String(entry?.readTime ?? ""),
-        detail: `${Number(entry?.count ?? 0)}\u672C`
+        detail: `${Number(entry?.count ?? 0)}本`
       });
     });
     const preferPublisher = Array.isArray(payload?.preferPublisher) ? payload.preferPublisher : [];
@@ -246,7 +246,7 @@ cli({
         section: "preferPublisher",
         idx: i + 1,
         key: String(entry?.name ?? ""),
-        value: `${Number(entry?.count ?? 0)}\u672C`,
+        value: `${Number(entry?.count ?? 0)}本`,
         detail: ""
       });
     });

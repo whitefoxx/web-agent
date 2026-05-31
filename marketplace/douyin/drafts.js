@@ -77,7 +77,7 @@ cli({
   site: "douyin",
   name: "drafts",
   access: "read",
-  description: "\u83B7\u53D6\u8349\u7A3F\u5217\u8868",
+  description: "获取草稿列表",
   domain: "creator.douyin.com",
   strategy: Strategy.COOKIE,
   args: [

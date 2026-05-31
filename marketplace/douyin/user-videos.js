@@ -141,14 +141,14 @@ cli({
   site: "douyin",
   name: "user-videos",
   access: "read",
-  description: "\u83B7\u53D6\u6307\u5B9A\u7528\u6237\u7684\u89C6\u9891\u5217\u8868\uFF08\u542B\u4E0B\u8F7D\u5730\u5740\u548C\u70ED\u95E8\u8BC4\u8BBA\uFF09",
+  description: "获取指定用户的视频列表（含下载地址和热门评论）",
   domain: "www.douyin.com",
   strategy: Strategy.COOKIE,
   args: [
-    { name: "sec_uid", type: "string", required: true, positional: true, help: "\u7528\u6237 sec_uid\uFF08URL \u672B\u5C3E\u90E8\u5206\uFF09" },
-    { name: "limit", type: "int", default: 20, help: "\u83B7\u53D6\u6570\u91CF\uFF08\u6700\u5927 20\uFF09" },
-    { name: "with_comments", type: "bool", default: true, help: "\u5305\u542B\u70ED\u95E8\u8BC4\u8BBA\uFF08\u9ED8\u8BA4: true\uFF09" },
-    { name: "comment_limit", type: "int", default: 10, help: "\u6BCF\u4E2A\u89C6\u9891\u83B7\u53D6\u591A\u5C11\u6761\u8BC4\u8BBA\uFF08\u6700\u5927 10\uFF09" }
+    { name: "sec_uid", type: "string", required: true, positional: true, help: "用户 sec_uid（URL 末尾部分）" },
+    { name: "limit", type: "int", default: 20, help: "获取数量（最大 20）" },
+    { name: "with_comments", type: "bool", default: true, help: "包含热门评论（默认: true）" },
+    { name: "comment_limit", type: "int", default: 10, help: "每个视频获取多少条评论（最大 10）" }
   ],
   columns: ["index", "aweme_id", "title", "duration", "digg_count", "play_url", "top_comments"],
   func: async (page, kwargs) => {

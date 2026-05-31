@@ -78,12 +78,12 @@ var MIN_OFFSET = 7200;
 var MAX_OFFSET = 14 * 86400;
 function validateTiming(unixSeconds) {
   if (!Number.isFinite(unixSeconds))
-    throw new Error(`\u65E0\u6548\u7684\u65F6\u95F4\u6233: ${unixSeconds}`);
+    throw new Error(`无效的时间戳: ${unixSeconds}`);
   const now = Math.floor(Date.now() / 1e3);
   if (unixSeconds < now + MIN_OFFSET)
-    throw new Error(`\u5B9A\u65F6\u53D1\u5E03\u65F6\u95F4\u5FC5\u987B\u5728\u81F3\u5C11 2 \u5C0F\u65F6\u540E`);
+    throw new Error(`定时发布时间必须在至少 2 小时后`);
   if (unixSeconds > now + MAX_OFFSET)
-    throw new Error(`\u5B9A\u65F6\u53D1\u5E03\u65F6\u95F4\u4E0D\u80FD\u8D85\u8FC7 14 \u5929`);
+    throw new Error(`定时发布时间不能超过 14 天`);
 }
 function toUnixSeconds(input) {
   if (typeof input === "number")
@@ -93,7 +93,7 @@ function toUnixSeconds(input) {
   }
   const ms = new Date(input).getTime();
   if (isNaN(ms))
-    throw new Error(`\u65E0\u6548\u7684\u65F6\u95F4\u683C\u5F0F: "${input}"`);
+    throw new Error(`无效的时间格式: "${input}"`);
   return Math.floor(ms / 1e3);
 }
 
@@ -102,18 +102,18 @@ cli({
   site: "douyin",
   name: "update",
   access: "write",
-  description: "\u66F4\u65B0\u89C6\u9891\u4FE1\u606F",
+  description: "更新视频信息",
   domain: "creator.douyin.com",
   strategy: Strategy.COOKIE,
   args: [
-    { name: "aweme_id", required: true, positional: true, help: "\u6296\u97F3\u4F5C\u54C1 ID\uFF08aweme_id\uFF0C\u53EF\u4ECE\u4F5C\u54C1 URL \u672B\u5C3E\u83B7\u53D6\uFF09" },
-    { name: "reschedule", default: "", help: "\u65B0\u7684\u53D1\u5E03\u65F6\u95F4\uFF08ISO8601 \u6216 Unix \u79D2\uFF09" },
-    { name: "caption", default: "", help: "\u65B0\u7684\u6B63\u6587\u5185\u5BB9" }
+    { name: "aweme_id", required: true, positional: true, help: "抖音作品 ID（aweme_id，可从作品 URL 末尾获取）" },
+    { name: "reschedule", default: "", help: "新的发布时间（ISO8601 或 Unix 秒）" },
+    { name: "caption", default: "", help: "新的正文内容" }
   ],
   columns: ["status"],
   func: async (page, kwargs) => {
     if (!kwargs.reschedule && !kwargs.caption) {
-      throw new ArgumentError("\u5FC5\u987B\u63D0\u4F9B --reschedule \u6216 --caption");
+      throw new ArgumentError("必须提供 --reschedule 或 --caption");
     }
     if (kwargs.reschedule) {
       const newTime = toUnixSeconds(kwargs.reschedule);
@@ -123,6 +123,6 @@ cli({
     if (kwargs.caption) {
       await browserFetch(page, "POST", "https://creator.douyin.com/web/api/media/update/desc/?aid=1128", { body: { aweme_id: kwargs.aweme_id, desc: kwargs.caption } });
     }
-    return [{ status: "\u2705 \u66F4\u65B0\u6210\u529F" }];
+    return [{ status: "✅ 更新成功" }];
   }
 });

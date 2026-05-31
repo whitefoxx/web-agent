@@ -77,11 +77,11 @@ cli({
   site: "douyin",
   name: "location",
   access: "read",
-  description: "\u5730\u7406\u4F4D\u7F6E POI \u641C\u7D22",
+  description: "地理位置 POI 搜索",
   domain: "creator.douyin.com",
   strategy: Strategy.COOKIE,
   args: [
-    { name: "query", required: true, positional: true, help: "\u5730\u540D\u5173\u952E\u8BCD" },
+    { name: "query", required: true, positional: true, help: "地名关键词" },
     { name: "limit", type: "int", default: 20 }
   ],
   columns: ["poi_id", "name", "address", "city"],

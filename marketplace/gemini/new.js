@@ -22,10 +22,10 @@ function clickNewChatScript() {
         return isVisible(node) && (
           text === 'new chat'
           || aria === 'new chat'
-          || text === '\u53D1\u8D77\u65B0\u5BF9\u8BDD'
-          || aria === '\u53D1\u8D77\u65B0\u5BF9\u8BDD'
-          || text === '\u65B0\u5BF9\u8BDD'
-          || aria === '\u65B0\u5BF9\u8BDD'
+          || text === '发起新对话'
+          || aria === '发起新对话'
+          || text === '新对话'
+          || aria === '新对话'
         );
       });
 

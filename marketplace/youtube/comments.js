@@ -73,7 +73,7 @@ cli({
           continuationToken = commentSection?.itemSectionRenderer?.contents?.[0]?.continuationItemRenderer?.continuationEndpoint?.continuationCommand?.token;
         }
 
-        if (!continuationToken) return {error: 'No comment section found \u2014 comments may be disabled'};
+        if (!continuationToken) return {error: 'No comment section found — comments may be disabled'};
 
         // Step 2: Fetch comments
         const commentResp = await fetch('/youtubei/v1/next?key=' + apiKey + '&prettyPrint=false', {

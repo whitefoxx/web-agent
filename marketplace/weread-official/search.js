@@ -79,7 +79,7 @@ async function callGateway(apiName, params = {}, { timeoutMs = DEFAULT_TIMEOUT_M
     const required = info?.required_version ?? info?.version ?? "unknown";
     const message = info?.message ?? "WeRead skill version is outdated";
     throw new CommandExecutionError(
-      `WeRead skill \u9700\u5347\u7EA7: ${message}. Required skill_version=${required}, current=${SKILL_VERSION}`,
+      `WeRead skill 需升级: ${message}. Required skill_version=${required}, current=${SKILL_VERSION}`,
       "Pull the latest weread-skills.zip and bump SKILL_VERSION in clis/weread-official/utils.js."
     );
   }
@@ -101,18 +101,18 @@ async function callGateway(apiName, params = {}, { timeoutMs = DEFAULT_TIMEOUT_M
 }
 function formatRating(rating) {
   const value = Number(rating);
-  if (!Number.isFinite(value) || value <= 0) return "\u6682\u65E0";
+  if (!Number.isFinite(value) || value <= 0) return "暂无";
   const percent = value / 10;
-  if (percent >= 90) return `\u795E\u4F5C ${Math.round(percent)}%`;
-  if (percent >= 80) return `\u529B\u8350 ${Math.round(percent)}%`;
-  if (percent >= 70) return `\u597D\u8BC4 ${Math.round(percent)}%`;
-  return `${percent.toFixed(1)}\u5206`;
+  if (percent >= 90) return `神作 ${Math.round(percent)}%`;
+  if (percent >= 80) return `力荐 ${Math.round(percent)}%`;
+  if (percent >= 70) return `好评 ${Math.round(percent)}%`;
+  return `${percent.toFixed(1)}分`;
 }
 function truncate(text, maxLen = 200) {
   const value = String(text ?? "");
   if (!value) return "";
   if (value.length <= maxLen) return value;
-  return `${value.slice(0, maxLen)}\u2026`;
+  return `${value.slice(0, maxLen)}…`;
 }
 function makeDeepLink({ bookId, chapterUid = "", rangeStart = "", rangeEnd = "", userVid = "" } = {}) {
   const bid = String(bookId ?? "").trim();
@@ -171,15 +171,15 @@ var SEARCH_SCOPES = Object.freeze({
   article: 4
 });
 var SCOPE_LABEL = Object.freeze({
-  0: "\u5168\u90E8",
-  10: "\u7535\u5B50\u4E66",
-  16: "\u7F51\u6587\u5C0F\u8BF4",
-  14: "\u5FAE\u4FE1\u542C\u4E66",
-  6: "\u4F5C\u8005",
-  12: "\u5168\u6587",
-  13: "\u4E66\u5355",
-  2: "\u516C\u4F17\u53F7",
-  4: "\u6587\u7AE0"
+  0: "全部",
+  10: "电子书",
+  16: "网文小说",
+  14: "微信听书",
+  6: "作者",
+  12: "全文",
+  13: "书单",
+  2: "公众号",
+  4: "文章"
 });
 cli({
   site: "weread-official",

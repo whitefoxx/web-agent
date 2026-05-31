@@ -75,19 +75,19 @@ function mapCollectionItem(item, rank) {
     title = question.title || "";
     excerpt = stripHtml(content.content || "").substring(0, 150);
     url = content.url || `https://www.zhihu.com/question/${question.id}/answer/${content.id}`;
-    author = content.author?.name || "\u533F\u540D\u7528\u6237";
+    author = content.author?.name || "匿名用户";
     votes = content.voteup_count || 0;
   } else if (type === "article") {
     title = content.title || "";
     excerpt = stripHtml(content.content || "").substring(0, 150);
     url = content.url || `https://zhuanlan.zhihu.com/p/${content.id}`;
-    author = content.author?.name || "\u533F\u540D\u7528\u6237";
+    author = content.author?.name || "匿名用户";
     votes = content.voteup_count || 0;
   } else if (type === "pin") {
-    title = "\u60F3\u6CD5";
+    title = "想法";
     excerpt = stripHtml((content.content || []).map((c) => c.content || "").join(" ")).substring(0, 150);
     url = content.url || `https://www.zhihu.com/pin/${content.id}`;
-    author = content.author?.name || "\u533F\u540D\u7528\u6237";
+    author = content.author?.name || "匿名用户";
     votes = content.reaction_count || 0;
   }
   if (!String(title || "").trim() || !String(url || "").trim() || url.includes("undefined")) {
@@ -110,14 +110,14 @@ cli({
   site: "zhihu",
   name: "collection",
   access: "read",
-  description: "\u77E5\u4E4E\u6536\u85CF\u5939\u5185\u5BB9\u5217\u8868\uFF08\u9700\u8981\u767B\u5F55\uFF09",
+  description: "知乎收藏夹内容列表（需要登录）",
   domain: "www.zhihu.com",
   strategy: Strategy.COOKIE,
   browser: true,
   args: [
-    { name: "id", positional: true, required: true, help: "\u6536\u85CF\u5939 ID (\u6570\u5B57\uFF0C\u53EF\u4ECE\u6536\u85CF\u5939 URL \u4E2D\u83B7\u53D6)" },
-    { name: "offset", type: "int", default: 0, help: "\u8D77\u59CB\u504F\u79FB\u91CF\uFF08\u7528\u4E8E\u5206\u9875\uFF09" },
-    { name: "limit", type: "int", default: 20, help: "\u6BCF\u9875\u6570\u91CF\uFF08\u6700\u5927 20\uFF09" }
+    { name: "id", positional: true, required: true, help: "收藏夹 ID (数字，可从收藏夹 URL 中获取)" },
+    { name: "offset", type: "int", default: 0, help: "起始偏移量（用于分页）" },
+    { name: "limit", type: "int", default: 20, help: "每页数量（最大 20）" }
   ],
   columns: ["rank", "type", "title", "author", "votes", "excerpt", "url"],
   func: async (page, kwargs) => {
@@ -170,8 +170,8 @@ cli({
     const totalPages = Math.ceil(totals / pageLimit);
     const currentPage = Math.floor(pageOffset / pageLimit) + 1;
     if (totals > 0) {
-      log.info(`\u6536\u85CF\u5939\u5171\u6709 ${totals} \u6761\u5185\u5BB9\uFF0C\u5171 ${totalPages} \u9875`);
-      log.info(`\u5F53\u524D\u7B2C ${currentPage} \u9875\uFF0C\u663E\u793A\u7B2C ${pageOffset + 1} - ${Math.min(pageOffset + collected.length, totals)} \u6761`);
+      log.info(`收藏夹共有 ${totals} 条内容，共 ${totalPages} 页`);
+      log.info(`当前第 ${currentPage} 页，显示第 ${pageOffset + 1} - ${Math.min(pageOffset + collected.length, totals)} 条`);
     }
     if (collected.length === 0) {
       throw new EmptyResultError("zhihu collection", `No items found for collection ${collectionId}. The collection may be empty, private, or the offset may be out of range.`);

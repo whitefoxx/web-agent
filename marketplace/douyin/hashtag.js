@@ -93,14 +93,14 @@ function validateHashtagArgs(kwargs) {
   if (action === "search") {
     const keyword = String(kwargs.keyword ?? "").trim();
     if (!keyword) {
-      throw new ArgumentError("douyin hashtag search \u9700\u8981 --keyword <\u5173\u952E\u8BCD>", "\u793A\u4F8B: opencli douyin hashtag search --keyword \u7F8E\u98DF");
+      throw new ArgumentError("douyin hashtag search 需要 --keyword <关键词>", "示例: opencli douyin hashtag search --keyword 美食");
     }
     return;
   }
   if (action === "suggest") {
     const cover = String(kwargs.cover ?? "").trim();
     if (!cover) {
-      throw new ArgumentError("douyin hashtag suggest \u9700\u8981 --cover <cover_uri>", "suggest \u57FA\u4E8E\u5DF2\u4E0A\u4F20\u7684\u89C6\u9891\u5C01\u9762\u505A AI \u63A8\u8350, \u4E0D\u662F\u5173\u952E\u8BCD\u641C\u7D22. \u5173\u952E\u8BCD\u641C\u7D22\u8BF7\u7528 `douyin hashtag search --keyword <\u8BCD>`.");
+      throw new ArgumentError("douyin hashtag suggest 需要 --cover <cover_uri>", "suggest 基于已上传的视频封面做 AI 推荐, 不是关键词搜索. 关键词搜索请用 `douyin hashtag search --keyword <词>`.");
     }
   }
 }
@@ -108,13 +108,13 @@ cli({
   site: "douyin",
   name: "hashtag",
   access: "read",
-  description: "\u8BDD\u9898\u641C\u7D22 / AI\u63A8\u8350 / \u70ED\u70B9\u8BCD",
+  description: "话题搜索 / AI推荐 / 热点词",
   domain: "creator.douyin.com",
   strategy: Strategy.COOKIE,
   args: [
-    { name: "action", required: true, positional: true, choices: ["search", "suggest", "hot"], help: "search=\u5173\u952E\u8BCD\u641C\u7D22 (--keyword \u5FC5\u586B), suggest=AI\u63A8\u8350 (--cover \u5FC5\u586B), hot=\u70ED\u70B9\u8BCD (--keyword \u53EF\u9009)" },
-    { name: "keyword", default: "", help: "\u641C\u7D22\u5173\u952E\u8BCD. search \u5FC5\u586B; hot \u53EF\u9009; suggest \u4E0D\u4F7F\u7528 (\u4F20 --cover)" },
-    { name: "cover", default: "", help: "\u5C01\u9762 URI (cover_uri). suggest \u5FC5\u586B; \u5176\u5B83 action \u4E0D\u4F7F\u7528" },
+    { name: "action", required: true, positional: true, choices: ["search", "suggest", "hot"], help: "search=关键词搜索 (--keyword 必填), suggest=AI推荐 (--cover 必填), hot=热点词 (--keyword 可选)" },
+    { name: "keyword", default: "", help: "搜索关键词. search 必填; hot 可选; suggest 不使用 (传 --cover)" },
+    { name: "cover", default: "", help: "封面 URI (cover_uri). suggest 必填; 其它 action 不使用" },
     { name: "limit", type: "int", default: 10 }
   ],
   columns: ["name", "id", "view_count"],
@@ -174,6 +174,6 @@ cli({
         view_count: h?.hot_value ?? 0
       }));
     }
-    throw new ArgumentError(`\u672A\u77E5\u7684 action: ${action}`);
+    throw new ArgumentError(`未知的 action: ${action}`);
   }
 });

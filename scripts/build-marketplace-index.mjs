@@ -161,6 +161,11 @@ async function bundleAdapterSource(entryPath) {
     // raw source — which then errors at runtime with "getSelfUid is not
     // defined" because the relative-sibling imports never get inlined.
     external: ['@jackwener/opencli/*', 'node:*'],
+    // Keep CJK / non-ASCII as UTF-8 in bundled output. esbuild defaults to
+    // charset:'ascii' which escapes every Chinese char to `\uXXXX`, making the
+    // shipped adapter source unreadable when inspected (runtime-equivalent
+    // either way, but a real cost when humans read these files).
+    charset: 'utf8',
     logLevel: 'silent',
   });
   return result.outputFiles[0].text;

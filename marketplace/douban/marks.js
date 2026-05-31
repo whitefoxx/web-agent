@@ -13,12 +13,12 @@ async function getSelfUid(page) {
   await page.wait({ time: 2 });
   const uid = await page.evaluate(`
     (() => {
-      // \u65B9\u68481: \u5C1D\u8BD5\u4ECE\u5168\u5C40\u53D8\u91CF\u83B7\u53D6
+      // 方案1: 尝试从全局变量获取
       if (window.__DATA__ && window.__DATA__.uid) {
         return window.__DATA__.uid;
       }
       
-      // \u65B9\u68482: \u4ECE\u5BFC\u822A\u680F\u7528\u6237\u94FE\u63A5\u83B7\u53D6
+      // 方案2: 从导航栏用户链接获取
       const navUserLink = document.querySelector('.nav-user-account a');
       if (navUserLink) {
         const href = navUserLink.href || '';
@@ -26,7 +26,7 @@ async function getSelfUid(page) {
         if (match) return match[1];
       }
       
-      // \u65B9\u68483: \u4ECE\u9875\u9762\u4E2D\u7684\u4E2A\u4EBA\u4E3B\u9875\u94FE\u63A5\u83B7\u53D6
+      // 方案3: 从页面中的个人主页链接获取
       const profileLink = document.querySelector('a[href*="/people/"]');
       if (profileLink) {
         const href = profileLink.getAttribute('href') || profileLink.href || '';
@@ -34,7 +34,7 @@ async function getSelfUid(page) {
         if (match) return match[1];
       }
       
-      // \u65B9\u68484: \u4ECE\u5934\u90E8\u7528\u6237\u540D\u533A\u57DF\u83B7\u53D6
+      // 方案4: 从头部用户名区域获取
       const userLink = document.querySelector('.global-nav-items a[href*="/people/"]');
       if (userLink) {
         const href = userLink.getAttribute('href') || userLink.href || '';
@@ -56,7 +56,7 @@ cli({
   site: "douban",
   name: "marks",
   access: "read",
-  description: "\u5BFC\u51FA\u4E2A\u4EBA\u89C2\u5F71\u6807\u8BB0",
+  description: "导出个人观影标记",
   domain: "movie.douban.com",
   strategy: Strategy.COOKIE,
   args: [
@@ -64,10 +64,10 @@ cli({
       name: "status",
       default: "collect",
       choices: ["collect", "wish", "do", "all"],
-      help: "\u6807\u8BB0\u7C7B\u578B: collect(\u770B\u8FC7), wish(\u60F3\u770B), do(\u5728\u770B), all(\u5168\u90E8)"
+      help: "标记类型: collect(看过), wish(想看), do(在看), all(全部)"
     },
-    { name: "limit", type: "int", default: 50, help: "\u5BFC\u51FA\u6570\u91CF\uFF0C 0 \u8868\u793A\u5168\u90E8" },
-    { name: "uid", help: "\u7528\u6237ID\uFF0C\u4E0D\u586B\u5219\u4F7F\u7528\u5F53\u524D\u767B\u5F55\u8D26\u53F7" }
+    { name: "limit", type: "int", default: 50, help: "导出数量， 0 表示全部" },
+    { name: "uid", help: "用户ID，不填则使用当前登录账号" }
   ],
   columns: ["title", "year", "myRating", "myStatus", "myDate", "myComment", "url"],
   func: async (page, kwargs) => {

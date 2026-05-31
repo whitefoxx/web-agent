@@ -155,8 +155,8 @@ function getStateScript() {
         const href = node.getAttribute('href') || '';
         return text === 'sign in'
           || aria === 'sign in'
-          || text === '\u767B\u5F55'
-          || aria === '\u767B\u5F55'
+          || text === '登录'
+          || aria === '登录'
           || href.includes('accounts.google.com/ServiceLogin');
       });
 
@@ -183,8 +183,8 @@ function readGeminiSnapshotScript() {
         const aria = (node.getAttribute('aria-label') || '').trim().toLowerCase();
         return text === 'stop response'
           || aria === 'stop response'
-          || text === '\u505C\u6B62\u56DE\u7B54'
-          || aria === '\u505C\u6B62\u56DE\u7B54';
+          || text === '停止回答'
+          || aria === '停止回答';
       });
       const turns = ${getTurnsScript().trim()};
       const transcriptLines = ${getTranscriptLinesScript().trim()};
@@ -630,11 +630,11 @@ function exportGeminiDeepResearchReportScript(maxWaitMs) {
     (async () => {
       const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
       const labels = {
-        actionMenu: ['open menu for conversation actions', 'conversation actions', '\u4F1A\u8BDD\u64CD\u4F5C'],
-        share: ['share & export', 'share and export', 'share/export', '\u5206\u4EAB\u4E0E\u5BFC\u51FA', '\u5206\u4EAB\u548C\u5BFC\u51FA', '\u5206\u4EAB\u5E76\u5BFC\u51FA', '\u5171\u4EAB\u548C\u5BFC\u51FA'],
-        shareConversation: ['share conversation', '\u5206\u4EAB\u4F1A\u8BDD', '\u5206\u4EAB\u5BF9\u8BDD'],
-        export: ['export', '\u5BFC\u51FA'],
-        exportDocs: ['export to docs', 'export to google docs', 'export to doc', '\u5BFC\u51FA\u5230 docs', '\u5BFC\u51FA\u5230\u6587\u6863', '\u5BFC\u51FA\u5230 google docs'],
+        actionMenu: ['open menu for conversation actions', 'conversation actions', '会话操作'],
+        share: ['share & export', 'share and export', 'share/export', '分享与导出', '分享和导出', '分享并导出', '共享和导出'],
+        shareConversation: ['share conversation', '分享会话', '分享对话'],
+        export: ['export', '导出'],
+        exportDocs: ['export to docs', 'export to google docs', 'export to doc', '导出到 docs', '导出到文档', '导出到 google docs'],
       };
 
       const recorderKey = '__opencliGeminiExportUrls';
@@ -737,15 +737,15 @@ function exportGeminiDeepResearchReportScript(maxWaitMs) {
       };
       const isKindMatch = (kind, combined, targetLabels) => {
         if (includesAny(combined, targetLabels)) return true;
-        if (kind === 'share') return hasTokens(combined, ['share', 'export']) || hasTokens(combined, ['\u5206\u4EAB', '\u5BFC\u51FA']);
-        if (kind === 'export') return hasTokens(combined, ['export']) || hasTokens(combined, ['\u5BFC\u51FA']);
+        if (kind === 'share') return hasTokens(combined, ['share', 'export']) || hasTokens(combined, ['分享', '导出']);
+        if (kind === 'export') return hasTokens(combined, ['export']) || hasTokens(combined, ['导出']);
         if (kind === 'export-docs') {
           return hasTokens(combined, ['export', 'docs'])
-            || hasTokens(combined, ['\u5BFC\u51FA', '\u6587\u6863'])
-            || hasTokens(combined, ['\u5BFC\u51FA', 'docs']);
+            || hasTokens(combined, ['导出', '文档'])
+            || hasTokens(combined, ['导出', 'docs']);
         }
         if (kind === 'action-menu') {
-          return hasTokens(combined, ['conversation', 'action']) || hasTokens(combined, ['\u4F1A\u8BDD', '\u64CD\u4F5C']);
+          return hasTokens(combined, ['conversation', 'action']) || hasTokens(combined, ['会话', '操作']);
         }
         return false;
       };

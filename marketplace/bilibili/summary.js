@@ -289,7 +289,7 @@ var command = cli({
   site: "bilibili",
   name: "summary",
   access: "read",
-  description: "\u83B7\u53D6 B\u7AD9\u89C6\u9891\u7684\u5B98\u65B9 AI \u603B\u7ED3\uFF08\u89C6\u9891\u9875\u300CAI\u603B\u7ED3\u300D\u540C\u6B3E\uFF0C\u542B\u5206\u6BB5\u5927\u7EB2\u4E0E\u65F6\u95F4\u6233\uFF09",
+  description: "获取 B站视频的官方 AI 总结（视频页「AI总结」同款，含分段大纲与时间戳）",
   domain: "www.bilibili.com",
   strategy: Strategy.COOKIE,
   args: [

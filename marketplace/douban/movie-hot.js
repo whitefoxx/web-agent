@@ -17,7 +17,7 @@ async function ensureDoubanReady(page) {
     (() => {
       const title = (document.title || '').trim();
       const href = (location.href || '').trim();
-      const blocked = href.includes('sec.douban.com') || /\u767B\u5F55\u8DF3\u8F6C/.test(title) || /\u5F02\u5E38\u8BF7\u6C42/.test(document.body?.innerText || '');
+      const blocked = href.includes('sec.douban.com') || /登录跳转/.test(title) || /异常请求/.test(document.body?.innerText || '');
       return { blocked, title, href };
     })()
   `);
@@ -74,11 +74,11 @@ cli({
   site: "douban",
   name: "movie-hot",
   access: "read",
-  description: "\u8C46\u74E3\u7535\u5F71\u70ED\u95E8\u699C\u5355",
+  description: "豆瓣电影热门榜单",
   domain: "movie.douban.com",
   strategy: Strategy.COOKIE,
   args: [
-    { name: "limit", type: "int", default: 20, help: "\u8FD4\u56DE\u7684\u7535\u5F71\u6570\u91CF" }
+    { name: "limit", type: "int", default: 20, help: "返回的电影数量" }
   ],
   columns: ["rank", "id", "title", "rating", "votes", "year", "url"],
   func: async (page, args) => loadDoubanMovieHot(page, Number(args.limit) || 20)

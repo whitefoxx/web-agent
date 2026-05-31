@@ -43,7 +43,7 @@ cli({
   site: "zhihu",
   name: "question",
   access: "read",
-  description: "\u77E5\u4E4E\u95EE\u9898\u8BE6\u60C5\u548C\u56DE\u7B54",
+  description: "知乎问题详情和回答",
   domain: "www.zhihu.com",
   strategy: Strategy.COOKIE,
   args: [

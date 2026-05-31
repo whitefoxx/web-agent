@@ -18,7 +18,7 @@ async function ensureDoubanReady(page) {
     (() => {
       const title = (document.title || '').trim();
       const href = (location.href || '').trim();
-      const blocked = href.includes('sec.douban.com') || /\u767B\u5F55\u8DF3\u8F6C/.test(title) || /\u5F02\u5E38\u8BF7\u6C42/.test(document.body?.innerText || '');
+      const blocked = href.includes('sec.douban.com') || /登录跳转/.test(title) || /异常请求/.test(document.body?.innerText || '');
       return { blocked, title, href };
     })()
   `);
@@ -64,7 +64,7 @@ function inferDoubanSearchResultType(searchType, item = {}) {
     return "tvshow";
   }
   const labels = Array.isArray(item.labels) ? item.labels.map((label) => typeof label === "string" ? label.trim() : String(label?.text || "").trim()).filter(Boolean) : [];
-  return labels.includes("\u5267\u96C6") ? "tvshow" : fallbackType;
+  return labels.includes("剧集") ? "tvshow" : fallbackType;
 }
 async function searchDouban(page, type, keyword, limit) {
   const safeLimit = clampLimit(limit);
@@ -135,14 +135,14 @@ cli({
   site: "douban",
   name: "search",
   access: "read",
-  description: "\u641C\u7D22\u8C46\u74E3\u7535\u5F71\u3001\u56FE\u4E66\u6216\u97F3\u4E50",
+  description: "搜索豆瓣电影、图书或音乐",
   domain: "search.douban.com",
   strategy: Strategy.COOKIE,
   navigateBefore: false,
   args: [
-    { name: "type", default: "movie", choices: ["movie", "book", "music"], help: "\u641C\u7D22\u7C7B\u578B\uFF08movie=\u7535\u5F71, book=\u56FE\u4E66, music=\u97F3\u4E50\uFF09" },
-    { name: "keyword", required: true, positional: true, help: "\u641C\u7D22\u5173\u952E\u8BCD" },
-    { name: "limit", type: "int", default: 20, help: "\u8FD4\u56DE\u7ED3\u679C\u6570\u91CF" }
+    { name: "type", default: "movie", choices: ["movie", "book", "music"], help: "搜索类型（movie=电影, book=图书, music=音乐）" },
+    { name: "keyword", required: true, positional: true, help: "搜索关键词" },
+    { name: "limit", type: "int", default: 20, help: "返回结果数量" }
   ],
   columns: ["rank", "title", "rating", "abstract", "url"],
   func: async (page, args) => searchDouban(page, args.type, args.keyword, Number(args.limit) || 20)

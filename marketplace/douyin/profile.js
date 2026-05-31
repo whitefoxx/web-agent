@@ -78,7 +78,7 @@ cli({
   site: "douyin",
   name: "profile",
   access: "read",
-  description: "\u83B7\u53D6\u8D26\u53F7\u4FE1\u606F",
+  description: "获取账号信息",
   domain: "creator.douyin.com",
   strategy: Strategy.COOKIE,
   args: [],
@@ -88,7 +88,7 @@ cli({
     const res = await browserFetch(page, "GET", url);
     const u = res.user_info ?? res.user;
     if (!u)
-      throw new CommandExecutionError3("\u7528\u6237\u4FE1\u606F\u83B7\u53D6\u5931\u8D25\uFF0C\u8BF7\u786E\u8BA4\u5DF2\u767B\u5F55 creator.douyin.com");
+      throw new CommandExecutionError3("用户信息获取失败，请确认已登录 creator.douyin.com");
     return [
       {
         uid: u.uid,

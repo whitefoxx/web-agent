@@ -248,12 +248,12 @@ cli({
   site: "bilibili",
   name: "comments",
   access: "read",
-  description: "\u83B7\u53D6 B\u7AD9\u89C6\u9891\u8BC4\u8BBA\uFF08\u5B98\u65B9 API\uFF1B\u7528 --parent <rpid> \u8BFB\u53D6\u67D0\u6761\u8BC4\u8BBA\u4E0B\u7684\u300C\u697C\u4E2D\u697C\u300D\u56DE\u590D\uFF09",
+  description: "获取 B站视频评论（官方 API；用 --parent <rpid> 读取某条评论下的「楼中楼」回复）",
   domain: "www.bilibili.com",
   strategy: Strategy.COOKIE,
   args: [
     { name: "bvid", required: true, positional: true, help: "Video BV ID (e.g. BV1WtAGzYEBm)" },
-    { name: "parent", type: "int", help: "rpid of a comment \u2014 fetch the replies under it instead of top-level comments" },
+    { name: "parent", type: "int", help: "rpid of a comment — fetch the replies under it instead of top-level comments" },
     { name: "limit", type: "int", default: 20, help: "Number of comments (max 50)" }
   ],
   columns: ["rank", "rpid", "author", "text", "likes", "replies", "time"],

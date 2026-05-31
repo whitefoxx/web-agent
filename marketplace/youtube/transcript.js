@@ -403,7 +403,7 @@ cli({
       (async () => {
         const langPref = ${JSON.stringify(lang)};
         // Scope all timedtext URL matching to the current video. YouTube is an
-        // SPA, so watch\u2192watch navigations preserve performance.getEntriesByType
+        // SPA, so watch→watch navigations preserve performance.getEntriesByType
         // entries from prior videos. Without this check a stale same-language
         // URL can be picked up by the polling loop before the current video's
         // fetch hook fires, leaking the predecessor's captions.
@@ -689,7 +689,7 @@ cli({
     if (captionData?.error) {
       const msg = `${captionData.error}${captionData.available ? " (available: " + captionData.available.join(", ") + ")" : ""}`;
       if (captionData.error === "No captions available for this video") {
-        throw new EmptyResultError("youtube transcript", "\u8BE5\u89C6\u9891\u6CA1\u6709\u5B57\u5E55\uFF08\u4F5C\u8005\u672A\u5F00\u542F + \u65E0\u81EA\u52A8\u5B57\u5E55\uFF09\u3002");
+        throw new EmptyResultError("youtube transcript", "该视频没有字幕（作者未开启 + 无自动字幕）。");
       }
       throw new CommandExecutionError(msg);
     }

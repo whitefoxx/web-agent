@@ -53,9 +53,9 @@ function buildNoteUrl(input, options = {}) {
 var NOTE_EXTRACT_JS = `
       (() => {
         const bodyText = document.body?.innerText || ''
-        const loginWall = /\u767B\u5F55\u540E\u67E5\u770B|\u8BF7\u767B\u5F55/.test(bodyText)
-        const notFound = /\u9875\u9762\u4E0D\u89C1\u4E86|\u7B14\u8BB0\u4E0D\u5B58\u5728|\u65E0\u6CD5\u6D4F\u89C8/.test(bodyText)
-        const securityBlock = /\u5B89\u5168\u9650\u5236|\u8BBF\u95EE\u94FE\u63A5\u5F02\u5E38/.test(bodyText)
+        const loginWall = /登录后查看|请登录/.test(bodyText)
+        const notFound = /页面不见了|笔记不存在|无法浏览/.test(bodyText)
+        const securityBlock = /安全限制|访问链接异常/.test(bodyText)
           || /website-login\\/error|error_code=300017|error_code=300031/.test(location.href)
 
         const clean = (el) => (el?.textContent || '').replace(/\\s+/g, ' ').trim()
@@ -63,7 +63,7 @@ var NOTE_EXTRACT_JS = `
         const title = clean(document.querySelector('#detail-title, .title'))
         const desc = clean(document.querySelector('#detail-desc, .desc, .note-text'))
         const author = clean(document.querySelector('.username, .author-wrapper .name'))
-        // Scope to .interact-container \u2014 the post's main interaction bar.
+        // Scope to .interact-container — the post's main interaction bar.
         // Without scoping, .like-wrapper / .chat-wrapper also match each
         // comment's like/reply buttons in the comment section, and
         // querySelector returns the FIRST match (a comment's count, not the
@@ -86,7 +86,7 @@ var command = cli({
   site: "xiaohongshu",
   name: "note",
   access: "read",
-  description: "\u83B7\u53D6\u5C0F\u7EA2\u4E66\u7B14\u8BB0\u6B63\u6587\u548C\u4E92\u52A8\u6570\u636E",
+  description: "获取小红书笔记正文和互动数据",
   domain: "www.xiaohongshu.com",
   strategy: Strategy.COOKIE,
   navigateBefore: false,
@@ -111,7 +111,7 @@ var command = cli({
       throw new AuthRequiredError("www.xiaohongshu.com", "Note content requires login");
     }
     if (data.notFound) {
-      throw new EmptyResultError("xiaohongshu/note", `Note ${noteId} not found or unavailable \u2014 it may have been deleted or restricted`);
+      throw new EmptyResultError("xiaohongshu/note", `Note ${noteId} not found or unavailable — it may have been deleted or restricted`);
     }
     const d = data;
     const numOrZero = (v) => /^\d+/.test(v) ? v : "0";

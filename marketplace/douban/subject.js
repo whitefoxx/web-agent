@@ -78,7 +78,7 @@ async function ensureDoubanReady(page) {
     (() => {
       const title = (document.title || '').trim();
       const href = (location.href || '').trim();
-      const blocked = href.includes('sec.douban.com') || /\u767B\u5F55\u8DF3\u8F6C/.test(title) || /\u5F02\u5E38\u8BF7\u6C42/.test(document.body?.innerText || '');
+      const blocked = href.includes('sec.douban.com') || /登录跳转/.test(title) || /异常请求/.test(document.body?.innerText || '');
       return { blocked, title, href };
     })()
   `);
@@ -115,17 +115,17 @@ function normalizeDoubanSubjectId(subjectId) {
 function normalizeDoubanBookSubject(raw) {
   const info = parseDoubanBookInfoText(raw?.infoText);
   const title = firstNonEmpty([raw?.title]);
-  const subtitle = firstNonEmpty([raw?.subtitle, info["\u526F\u6807\u9898"]]);
-  const originalTitle = firstNonEmpty([raw?.originalTitle, info["\u539F\u4F5C\u540D"]]);
-  const authors = splitDoubanPeople(firstNonEmpty([info["\u4F5C\u8005"]]));
-  const translators = splitDoubanPeople(firstNonEmpty([info["\u8BD1\u8005"]]));
-  const publisher = firstNonEmpty([info["\u51FA\u7248\u793E"], info["\u51FA\u54C1\u65B9"]]);
-  const publishDate = firstNonEmpty([info["\u51FA\u7248\u5E74"]]);
+  const subtitle = firstNonEmpty([raw?.subtitle, info["副标题"]]);
+  const originalTitle = firstNonEmpty([raw?.originalTitle, info["原作名"]]);
+  const authors = splitDoubanPeople(firstNonEmpty([info["作者"]]));
+  const translators = splitDoubanPeople(firstNonEmpty([info["译者"]]));
+  const publisher = firstNonEmpty([info["出版社"], info["出品方"]]);
+  const publishDate = firstNonEmpty([info["出版年"]]);
   const publishYear = extractDoubanPublishYear(publishDate);
-  const pageCount = parseDoubanPageCount(info["\u9875\u6570"]);
-  const binding = firstNonEmpty([info["\u88C5\u5E27"]]);
-  const price = firstNonEmpty([info["\u5B9A\u4EF7"]]);
-  const series = firstNonEmpty([info["\u4E1B\u4E66"]]);
+  const pageCount = parseDoubanPageCount(info["页数"]);
+  const binding = firstNonEmpty([info["装帧"]]);
+  const price = firstNonEmpty([info["定价"]]);
+  const series = firstNonEmpty([info["丛书"]]);
   const isbnRaw = firstNonEmpty([info["ISBN"]]).replace(/[^\dxX]/g, "");
   const isbn10 = isbnRaw.length === 10 ? isbnRaw : "";
   const isbn13 = isbnRaw.length === 13 ? isbnRaw : "";
@@ -165,7 +165,7 @@ async function loadDoubanMovieSubject(page, subjectId) {
       const id = ${JSON.stringify(normalizedId)};
       const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim();
       const { title, originalTitle } = (${splitDoubanTitle.toString()})(normalize(document.querySelector('span[property="v:itemreviewed"]')?.textContent || ''));
-      const year = normalize(document.querySelector('.year')?.textContent).replace(/[()\uFF08\uFF09]/g, '');
+      const year = normalize(document.querySelector('.year')?.textContent).replace(/[()（）]/g, '');
       const rating = parseFloat(normalize(document.querySelector('strong[property="v:average"]')?.textContent || '0')) || 0;
       const ratingCount = parseInt(normalize(document.querySelector('span[property="v:votes"]')?.textContent || '0'), 10) || 0;
       const genres = Array.from(document.querySelectorAll('span[property="v:genre"]'))
@@ -182,7 +182,7 @@ async function loadDoubanMovieSubject(page, subjectId) {
         .filter(Boolean);
       const infoText = document.querySelector('#info')?.textContent || '';
       let country = [];
-      const countryMatch = infoText.match(/\u5236\u7247\u56FD\u5BB6\\/\u5730\u533A:\\s*([^\\n]+)/);
+      const countryMatch = infoText.match(/制片国家\\/地区:\\s*([^\\n]+)/);
       if (countryMatch) {
         country = countryMatch[1].trim().split(/\\s*\\/\\s*/).filter(Boolean);
       }
@@ -258,14 +258,14 @@ cli({
   site: "douban",
   name: "subject",
   access: "read",
-  description: "\u83B7\u53D6\u8C46\u74E3\u6761\u76EE\u8BE6\u60C5",
+  description: "获取豆瓣条目详情",
   domain: "movie.douban.com",
   strategy: Strategy.COOKIE,
   browser: true,
   navigateBefore: false,
   args: [
-    { name: "id", required: true, positional: true, help: "\u8C46\u74E3\u6761\u76EE ID" },
-    { name: "type", default: "movie", choices: ["movie", "book"], help: "\u6761\u76EE\u7C7B\u578B\uFF08movie=\u7535\u5F71, book=\u56FE\u4E66\uFF09" }
+    { name: "id", required: true, positional: true, help: "豆瓣条目 ID" },
+    { name: "type", default: "movie", choices: ["movie", "book"], help: "条目类型（movie=电影, book=图书）" }
   ],
   columns: [
     "id",

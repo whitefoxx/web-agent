@@ -144,7 +144,7 @@ cli({
   site: "bilibili",
   name: "favorite",
   access: "write",
-  description: "\u6211\u7684\u6536\u85CF\u5939",
+  description: "我的收藏夹",
   domain: "www.bilibili.com",
   strategy: Strategy.COOKIE,
   args: [

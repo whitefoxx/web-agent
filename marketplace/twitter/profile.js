@@ -194,7 +194,7 @@ cli({
   site: "twitter",
   name: "profile",
   access: "read",
-  description: "Fetch a Twitter user profile \u2014 bio, stats, etc. (defaults to the logged-in user when no username is given)",
+  description: "Fetch a Twitter user profile — bio, stats, etc. (defaults to the logged-in user when no username is given)",
   domain: "x.com",
   strategy: Strategy.COOKIE,
   browser: true,

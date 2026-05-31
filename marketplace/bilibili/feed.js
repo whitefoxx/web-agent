@@ -190,16 +190,16 @@ function parseItem(item) {
   }
   if (!title && major.draw) {
     const imgCount = major.draw.items?.length ?? 0;
-    title = imgCount > 0 ? `[\u56FE\u7247x${imgCount}]` : "[\u56FE\u6587\u52A8\u6001]";
+    title = imgCount > 0 ? `[图片x${imgCount}]` : "[图文动态]";
   }
   if (!title && item.basic?.is_only_fans) {
-    title = "[\u5145\u7535\u4E13\u5C5E]";
+    title = "[充电专属]";
   }
   if (!title && item.type === "DYNAMIC_TYPE_FORWARD") {
-    title = "[\u8F6C\u53D1\u52A8\u6001]";
+    title = "[转发动态]";
   }
   if (!title) {
-    title = `[${itemType || "\u52A8\u6001"}]`;
+    title = `[${itemType || "动态"}]`;
   }
   const time = authorModule.pub_time ?? "";
   const likes = stat.like?.count ?? 0;
@@ -210,11 +210,11 @@ cli({
   site: "bilibili",
   name: "feed",
   access: "read",
-  description: "\u52A8\u6001\u65F6\u95F4\u7EBF\uFF08\u4E0D\u4F20 uid \u67E5\u5173\u6CE8\u65F6\u95F4\u7EBF\uFF0C\u4F20 uid \u67E5\u6307\u5B9A\u7528\u6237\u52A8\u6001\uFF09",
+  description: "动态时间线（不传 uid 查关注时间线，传 uid 查指定用户动态）",
   domain: "www.bilibili.com",
   strategy: Strategy.COOKIE,
   args: [
-    { name: "uid", positional: true, required: false, help: "\u7528\u6237 UID \u6216\u7528\u6237\u540D\uFF08\u4E0D\u4F20\u5219\u663E\u793A\u5173\u6CE8\u65F6\u95F4\u7EBF\uFF09" },
+    { name: "uid", positional: true, required: false, help: "用户 UID 或用户名（不传则显示关注时间线）" },
     { name: "limit", type: "int", default: 20, help: "Max results to return" },
     { name: "type", default: "all", help: "Filter: all, video, article, draw, text" },
     { name: "pages", type: "int", default: 1, help: "Number of pages to fetch (each ~20 items)" }
@@ -271,11 +271,11 @@ cli({
   site: "bilibili",
   name: "feed-detail",
   access: "read",
-  description: "\u67E5\u770B Bilibili \u52A8\u6001\u8BE6\u60C5\uFF08\u652F\u6301\u5145\u7535\u4E13\u5C5E\u5185\u5BB9\uFF09",
+  description: "查看 Bilibili 动态详情（支持充电专属内容）",
   domain: "www.bilibili.com",
   strategy: Strategy.COOKIE,
   args: [
-    { name: "id", positional: true, required: true, help: "\u52A8\u6001 ID\uFF08\u4ECE feed \u547D\u4EE4\u7684 url \u4E2D\u83B7\u53D6\uFF09" }
+    { name: "id", positional: true, required: true, help: "动态 ID（从 feed 命令的 url 中获取）" }
   ],
   columns: ["field", "value"],
   func: async (page, kwargs) => {
@@ -287,7 +287,7 @@ cli({
     const data = payloadData(payload);
     const item = data?.item;
     if (!item) {
-      rows.push({ field: "error", value: "\u52A8\u6001\u4E0D\u5B58\u5728\u6216\u65E0\u6743\u67E5\u770B" });
+      rows.push({ field: "error", value: "动态不存在或无权查看" });
       return rows;
     }
     const modules = item.modules ?? {};

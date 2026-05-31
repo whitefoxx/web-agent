@@ -71,7 +71,7 @@ cli({
   site: "zhihu",
   name: "answer-detail",
   access: "read",
-  description: "\u77E5\u4E4E\u5355\u4E2A\u56DE\u7B54\u5B8C\u6574\u5185\u5BB9\uFF08\u6309 answer ID \u83B7\u53D6\uFF09",
+  description: "知乎单个回答完整内容（按 answer ID 获取）",
   domain: "www.zhihu.com",
   strategy: Strategy.COOKIE,
   args: [

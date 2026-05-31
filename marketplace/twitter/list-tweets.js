@@ -247,7 +247,7 @@ cli({
   args: [
     { name: "listId", positional: true, type: "string", required: true, help: "Numeric ID of a Twitter/X list (e.g. from `opencli twitter lists`)" },
     { name: "limit", type: "int", default: 50 },
-    { name: "top-by-engagement", type: "int", default: 0, help: "When set to N>0, re-rank the list timeline by weighted engagement (likes\xD71 + retweets\xD73 + replies\xD72 + bookmarks\xD75 + log10(views+1)\xD70.5) and return the top N. Default 0 keeps the list's native (recency) ordering." }
+    { name: "top-by-engagement", type: "int", default: 0, help: "When set to N>0, re-rank the list timeline by weighted engagement (likes×1 + retweets×3 + replies×2 + bookmarks×5 + log10(views+1)×0.5) and return the top N. Default 0 keeps the list's native (recency) ordering." }
   ],
   columns: ["id", "author", "bio", "text", "likes", "retweets", "replies", "created_at", "url", "has_media", "media_urls", "card", "quoted_tweet"],
   func: async (page, kwargs) => {

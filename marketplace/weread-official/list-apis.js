@@ -78,7 +78,7 @@ async function callGateway(apiName, params = {}, { timeoutMs = DEFAULT_TIMEOUT_M
     const required = info?.required_version ?? info?.version ?? "unknown";
     const message = info?.message ?? "WeRead skill version is outdated";
     throw new CommandExecutionError(
-      `WeRead skill \u9700\u5347\u7EA7: ${message}. Required skill_version=${required}, current=${SKILL_VERSION}`,
+      `WeRead skill 需升级: ${message}. Required skill_version=${required}, current=${SKILL_VERSION}`,
       "Pull the latest weread-skills.zip and bump SKILL_VERSION in clis/weread-official/utils.js."
     );
   }

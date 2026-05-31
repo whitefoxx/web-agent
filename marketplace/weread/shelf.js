@@ -55,7 +55,7 @@ function buildShelfSnapshotPollScript(storageKeys, requireTrustedIndexes) {
         ? Array.from(new Set(items.map((item) => String(item?.bookId || '').trim()).filter(Boolean)))
         : [];
 
-      // Mirror of getTrustedIndexedBookIds in Node.js \u2014 keep in sync
+      // Mirror of getTrustedIndexedBookIds in Node.js — keep in sync
       const hasTrustedIndexes = (rawBooks, shelfIndexes) => {
         const rawBookIds = collectBookIds(rawBooks);
         if (rawBookIds.length === 0) return false;

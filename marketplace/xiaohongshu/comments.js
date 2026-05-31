@@ -71,7 +71,7 @@ function parseXhsLikeCountText(value) {
   if (!Number.isFinite(numeric))
     return 0;
   const unit = short[2].toLowerCase();
-  const multiplier = unit === "w" || unit === "\u4E07" ? 1e4 : 1e3;
+  const multiplier = unit === "w" || unit === "万" ? 1e4 : 1e3;
   return Math.round(numeric * multiplier);
 }
 function buildCommentsExtractJs(withReplies) {
@@ -83,8 +83,8 @@ function buildCommentsExtractJs(withReplies) {
 
         // Check login state
         const bodyText = document.body?.innerText || ''
-        const loginWall = /\u767B\u5F55\u540E\u67E5\u770B|\u8BF7\u767B\u5F55/.test(bodyText)
-        const securityBlock = /\u5B89\u5168\u9650\u5236|\u8BBF\u95EE\u94FE\u63A5\u5F02\u5E38/.test(bodyText)
+        const loginWall = /登录后查看|请登录/.test(bodyText)
+        const securityBlock = /安全限制|访问链接异常/.test(bodyText)
           || /website-login\\/error|error_code=300017|error_code=300031/.test(location.href)
 
         // Scroll the note container to trigger comment loading
@@ -112,7 +112,7 @@ function buildCommentsExtractJs(withReplies) {
               if (!(el instanceof HTMLElement)) return false
               const text = clean(el)
               if (!text || text.length > 24) return false
-              if (!/(\u5C55\u5F00|\u66F4\u591A\u56DE\u590D|\u5168\u90E8\u56DE\u590D|\u67E5\u770B.*\u56DE\u590D|\u5171\\d+\u6761\u56DE\u590D)/.test(text)) return false
+              if (!/(展开|更多回复|全部回复|查看.*回复|共\\d+条回复)/.test(text)) return false
               if (clickedTexts.has(text)) return false
               return true
             })
@@ -140,7 +140,7 @@ function buildCommentsExtractJs(withReplies) {
           if (!text) continue
           results.push({ author, text, likes, time, is_reply: false, reply_to: '' })
 
-          // Extract nested replies (\u697C\u4E2D\u697C)
+          // Extract nested replies (楼中楼)
           if (withReplies) {
             await expandReplyThreads(p)
             p.querySelectorAll('.reply-container .comment-item-sub, .sub-comment-list .comment-item').forEach(sub => {
@@ -162,14 +162,14 @@ var command = cli({
   site: "xiaohongshu",
   name: "comments",
   access: "read",
-  description: "\u83B7\u53D6\u5C0F\u7EA2\u4E66\u7B14\u8BB0\u8BC4\u8BBA\uFF08\u652F\u6301\u697C\u4E2D\u697C\u5B50\u56DE\u590D\uFF09",
+  description: "获取小红书笔记评论（支持楼中楼子回复）",
   domain: "www.xiaohongshu.com",
   strategy: Strategy.COOKIE,
   navigateBefore: false,
   args: [
     { name: "note-id", required: true, positional: true, help: "Full Xiaohongshu note URL with xsec_token" },
     { name: "limit", type: "int", default: 20, help: "Number of top-level comments (max 50)" },
-    { name: "with-replies", type: "boolean", default: false, help: "Include nested replies (\u697C\u4E2D\u697C)" }
+    { name: "with-replies", type: "boolean", default: false, help: "Include nested replies (楼中楼)" }
   ],
   columns: ["rank", "author", "text", "likes", "time", "is_reply", "reply_to"],
   func: async (page, kwargs) => {

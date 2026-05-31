@@ -78,7 +78,7 @@ async function callGateway(apiName, params = {}, { timeoutMs = DEFAULT_TIMEOUT_M
     const required = info?.required_version ?? info?.version ?? "unknown";
     const message = info?.message ?? "WeRead skill version is outdated";
     throw new CommandExecutionError(
-      `WeRead skill \u9700\u5347\u7EA7: ${message}. Required skill_version=${required}, current=${SKILL_VERSION}`,
+      `WeRead skill 需升级: ${message}. Required skill_version=${required}, current=${SKILL_VERSION}`,
       "Pull the latest weread-skills.zip and bump SKILL_VERSION in clis/weread-official/utils.js."
     );
   }
@@ -115,23 +115,23 @@ function formatDuration(secs) {
   const seconds = Math.floor(total);
   const hours = Math.floor(seconds / 3600);
   const minutes = Math.floor(seconds % 3600 / 60);
-  if (hours > 0) return `${hours}\u5C0F\u65F6${minutes}\u5206\u949F`;
-  return `${minutes}\u5206\u949F`;
+  if (hours > 0) return `${hours}小时${minutes}分钟`;
+  return `${minutes}分钟`;
 }
 function formatRating(rating) {
   const value = Number(rating);
-  if (!Number.isFinite(value) || value <= 0) return "\u6682\u65E0";
+  if (!Number.isFinite(value) || value <= 0) return "暂无";
   const percent = value / 10;
-  if (percent >= 90) return `\u795E\u4F5C ${Math.round(percent)}%`;
-  if (percent >= 80) return `\u529B\u8350 ${Math.round(percent)}%`;
-  if (percent >= 70) return `\u597D\u8BC4 ${Math.round(percent)}%`;
-  return `${percent.toFixed(1)}\u5206`;
+  if (percent >= 90) return `神作 ${Math.round(percent)}%`;
+  if (percent >= 80) return `力荐 ${Math.round(percent)}%`;
+  if (percent >= 70) return `好评 ${Math.round(percent)}%`;
+  return `${percent.toFixed(1)}分`;
 }
 function truncate(text, maxLen = 200) {
   const value = String(text ?? "");
   if (!value) return "";
   if (value.length <= maxLen) return value;
-  return `${value.slice(0, maxLen)}\u2026`;
+  return `${value.slice(0, maxLen)}…`;
 }
 function makeDeepLink({ bookId, chapterUid = "", rangeStart = "", rangeEnd = "", userVid = "" } = {}) {
   const bid = String(bookId ?? "").trim();
@@ -230,13 +230,13 @@ cli({
         const wordCount = Number(ch?.wordCount ?? 0);
         const paid = Number(ch?.paid ?? 0) === 1;
         const price = Number(ch?.price ?? 0);
-        const meta = [`${wordCount}\u5B57`];
-        if (price > 0) meta.push(paid ? "\u5DF2\u8D2D\u4E70" : `${price}\u5143`);
+        const meta = [`${wordCount}字`];
+        if (price > 0) meta.push(paid ? "已购买" : `${price}元`);
         rows.push({
           section: "chapter",
           idx: Number(ch?.chapterIdx ?? i + 1),
           key: chapterUid,
-          value: `${title}  (${meta.join(" \xB7 ")})`,
+          value: `${title}  (${meta.join(" · ")})`,
           link: chapterUid ? makeDeepLink({ bookId, chapterUid }) : ""
         });
       });

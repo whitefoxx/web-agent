@@ -145,7 +145,7 @@ var command = cli({
       previousCount = nextResults.length;
     }
     if (results.length === 0) {
-      throw new EmptyResultError("xiaohongshu user", "\u8BE5\u7528\u6237\u6CA1\u6709\u516C\u5F00\u7B14\u8BB0\uFF08\u53EF\u80FD\u9500\u53F7 / \u79C1\u5BC6 / \u5168\u90E8\u5220\u9664\uFF09\u3002");
+      throw new EmptyResultError("xiaohongshu user", "该用户没有公开笔记（可能销号 / 私密 / 全部删除）。");
     }
     return results.slice(0, limit);
   }

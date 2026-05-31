@@ -138,7 +138,7 @@ function pairsToMedia(items) {
   for (let i = 0; i < lines.length; i += 2) {
     const title = lines[i] || "";
     const description = lines[i + 1] || "";
-    if (title) pairs.push(description ? `${title} \u2014 ${description}` : title);
+    if (title) pairs.push(description ? `${title} — ${description}` : title);
   }
   return pairs;
 }

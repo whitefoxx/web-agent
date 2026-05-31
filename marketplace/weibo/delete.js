@@ -158,7 +158,7 @@ cli({
       })()
     `)), "weibo delete");
     if (result.error === "auth") {
-      throw new AuthRequiredError2("weibo.com", "Cookie \u5DF2\u8FC7\u671F\uFF01\u8BF7\u5728\u5F53\u524D Chrome \u6D4F\u89C8\u5668\u4E2D\u91CD\u65B0\u767B\u5F55 Weibo\u3002");
+      throw new AuthRequiredError2("weibo.com", "Cookie 已过期！请在当前 Chrome 浏览器中重新登录 Weibo。");
     }
     if (result.error === "not_found") {
       throw new EmptyResultError("weibo delete", `Post not found for id "${String(result.input ?? raw)}". Verify the post still exists and belongs to the logged-in account.`);

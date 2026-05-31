@@ -54,7 +54,7 @@ function buildShelfSnapshotPollScript(storageKeys, requireTrustedIndexes) {
         ? Array.from(new Set(items.map((item) => String(item?.bookId || '').trim()).filter(Boolean)))
         : [];
 
-      // Mirror of getTrustedIndexedBookIds in Node.js \u2014 keep in sync
+      // Mirror of getTrustedIndexedBookIds in Node.js — keep in sync
       const hasTrustedIndexes = (rawBooks, shelfIndexes) => {
         const rawBookIds = collectBookIds(rawBooks);
         if (rawBookIds.length === 0) return false;
@@ -278,7 +278,7 @@ function countSearchIdentities(entries) {
   return counts;
 }
 function strictTitleFromWereadDocumentTitle(rawTitle) {
-  const suffix = " - \u5FAE\u4FE1\u8BFB\u4E66";
+  const suffix = " - 微信读书";
   const normalized = String(rawTitle || "").trim();
   if (!normalized.endsWith(suffix))
     return "";
@@ -302,7 +302,7 @@ function extractReaderFallbackMetadata(doc) {
   };
   const extractPublisher = () => {
     const direct = text(doc.querySelector(".introDialog_content_pub_line"));
-    return direct.startsWith("\u51FA\u7248\u793E") ? direct.replace(/^出版社\s*/, "").trim() : "";
+    return direct.startsWith("出版社") ? direct.replace(/^出版社\s*/, "").trim() : "";
   };
   const extractIntro = () => {
     const selectors = [

@@ -17,7 +17,7 @@ async function ensureDoubanReady(page) {
     (() => {
       const title = (document.title || '').trim();
       const href = (location.href || '').trim();
-      const blocked = href.includes('sec.douban.com') || /\u767B\u5F55\u8DF3\u8F6C/.test(title) || /\u5F02\u5E38\u8BF7\u6C42/.test(document.body?.innerText || '');
+      const blocked = href.includes('sec.douban.com') || /登录跳转/.test(title) || /异常请求/.test(document.body?.innerText || '');
       return { blocked, title, href };
     })()
   `);
@@ -56,9 +56,9 @@ async function loadDoubanBookHot(page, limit) {
             rating: parseFloat(ratingText) || 0,
             quote,
             author: infoParts[0] || '',
-            publisher: infoParts.find((part) => /\u51FA\u7248\u793E|\u51FA\u7248\u516C\u53F8|Press/i.test(part)) || infoParts[2] || '',
+            publisher: infoParts.find((part) => /出版社|出版公司|Press/i.test(part)) || infoParts[2] || '',
             year: infoParts.find((part) => /\\d{4}(?:-\\d{1,2})?/.test(part))?.match(/\\d{4}/)?.[0] || '',
-            price: infoParts.find((part) => /\u5143|USD|\\$|\uFFE5/.test(part)) || '',
+            price: infoParts.find((part) => /元|USD|\\$|￥/.test(part)) || '',
             url,
             cover: el.querySelector('img')?.getAttribute('src') || '',
           });
@@ -75,11 +75,11 @@ cli({
   site: "douban",
   name: "book-hot",
   access: "read",
-  description: "\u8C46\u74E3\u56FE\u4E66\u70ED\u95E8\u699C\u5355",
+  description: "豆瓣图书热门榜单",
   domain: "book.douban.com",
   strategy: Strategy.COOKIE,
   args: [
-    { name: "limit", type: "int", default: 20, help: "\u8FD4\u56DE\u7684\u56FE\u4E66\u6570\u91CF" }
+    { name: "limit", type: "int", default: 20, help: "返回的图书数量" }
   ],
   columns: ["rank", "title", "rating", "quote", "author", "publisher", "year", "url"],
   func: async (page, args) => loadDoubanBookHot(page, Number(args.limit) || 20)

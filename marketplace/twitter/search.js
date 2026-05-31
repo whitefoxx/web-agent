@@ -436,9 +436,9 @@ cli({
     { name: "product", type: "string", choices: PRODUCT_CHOICES, help: "Which X search tab to read: top (default), live (Latest), photos, videos. Maps to the f= URL param." },
     { name: "from", type: "string", help: "Restrict to tweets authored by <user>. Leading @ is stripped. Equivalent to appending `from:<user>` to the query." },
     { name: "has", type: "string", choices: HAS_CHOICES, help: "Restrict to tweets that have media|images|videos|links|replies. Maps to X's `filter:<has>` operator." },
-    { name: "exclude", type: "string", choices: EXCLUDE_CHOICES, help: "Exclude tweets matching <type>: replies|retweets|media|links. Maps to X's `-filter:<x>` operator (retweets \u2192 -filter:nativeretweets)." },
+    { name: "exclude", type: "string", choices: EXCLUDE_CHOICES, help: "Exclude tweets matching <type>: replies|retweets|media|links. Maps to X's `-filter:<x>` operator (retweets → -filter:nativeretweets)." },
     { name: "limit", type: "int", default: 15, help: "Maximum number of tweets to return (default 15). Result count after server-side filtering." },
-    { name: "top-by-engagement", type: "int", default: 0, help: "When set to N>0, re-rank the results by weighted engagement (likes\xD71 + retweets\xD73 + replies\xD72 + bookmarks\xD75 + log10(views+1)\xD70.5) and return the top N. Default 0 keeps X's native ordering." }
+    { name: "top-by-engagement", type: "int", default: 0, help: "When set to N>0, re-rank the results by weighted engagement (likes×1 + retweets×3 + replies×2 + bookmarks×5 + log10(views+1)×0.5) and return the top N. Default 0 keeps X's native ordering." }
   ],
   columns: ["id", "author", "bio", "text", "created_at", "likes", "views", "url", "has_media", "media_urls", "card", "quoted_tweet"],
   func: async (page, kwargs) => {
@@ -482,7 +482,7 @@ cli({
         return r.ok ? await r.json() : { error: r.status };
       }`));
       if (data?.error) {
-        if (results.length === 0) throw new CommandExecutionError(`HTTP ${data.error}: SearchTimeline fetch failed \u2014 queryId may have expired`);
+        if (results.length === 0) throw new CommandExecutionError(`HTTP ${data.error}: SearchTimeline fetch failed — queryId may have expired`);
         break;
       }
       const { rows, nextCursor } = parseSearchTimeline(data, seen);

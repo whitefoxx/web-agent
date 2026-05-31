@@ -83,7 +83,7 @@ cli({
         try {
             ${buildTwitterArticleScopeSource(target.id)}
             // Poll for the tweet to render. We scope state probes to the
-            // article matching the requested status id \u2014 on conversation
+            // article matching the requested status id — on conversation
             // pages multiple articles render and a bare querySelector would
             // grab the first one (silent: like the wrong tweet).
             let attempts = 0;

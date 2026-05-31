@@ -394,8 +394,8 @@ async function getNotebooklmPageState(page) {
     const loginRequired = textNodes.some(text =>
       text.includes('sign in') ||
       text.includes('log in') ||
-      text.includes('\u767B\u5F55') ||
-      text.includes('\u767B\u5165')
+      text.includes('登录') ||
+      text.includes('登入')
     );
 
     const notebookCount = Array.from(document.querySelectorAll('a[href*="/notebook/"]'))
@@ -436,7 +436,7 @@ async function requireNotebooklmSession(page) {
 
 // ../browser-agent/opencli/clis/notebooklm/create.js
 var NOTEBOOKLM_CREATE_PROJECT_RPC_ID = "CCqFvf";
-var DEFAULT_EMOJI = "\u{1F4D2}";
+var DEFAULT_EMOJI = "📒";
 var MAX_TITLE_LEN = 200;
 var NOTEBOOK_UUID_RE = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 function parseCreateTitle(value) {

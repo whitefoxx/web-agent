@@ -111,14 +111,14 @@ function parseCompanyLine(companyLine) {
   const parts = splitLinkedInDotLine(companyLine);
   return {
     company: parts[0] || normalizeWhitespace(companyLine),
-    employment_type: parts.slice(1).join(" \xB7 ")
+    employment_type: parts.slice(1).join(" · ")
   };
 }
 function parseLocationLine(locationLine) {
   const parts = splitLinkedInDotLine(locationLine);
   return {
     location: parts[0] || normalizeWhitespace(locationLine),
-    location_type: parts.slice(1).join(" \xB7 ")
+    location_type: parts.slice(1).join(" · ")
   };
 }
 function parseExperienceText(rawText, profileUrl, index, totalCount = 0) {

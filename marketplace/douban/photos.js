@@ -19,7 +19,7 @@ async function ensureDoubanReady(page) {
     (() => {
       const title = (document.title || '').trim();
       const href = (location.href || '').trim();
-      const blocked = href.includes('sec.douban.com') || /\u767B\u5F55\u8DF3\u8F6C/.test(title) || /\u5F02\u5E38\u8BF7\u6C42/.test(document.body?.innerText || '');
+      const blocked = href.includes('sec.douban.com') || /登录跳转/.test(title) || /异常请求/.test(document.body?.innerText || '');
       return { blocked, title, href };
     })()
   `);
@@ -95,7 +95,7 @@ async function loadDoubanSubjectPhotos(page, subjectId, options = {}) {
       const getTitle = (doc) => {
         const raw = normalize(doc.querySelector('#content h1')?.textContent)
           || normalize(doc.querySelector('title')?.textContent);
-        return raw.replace(/\\s*\\(\u8C46\u74E3\\)\\s*$/, '');
+        return raw.replace(/\\s*\\(豆瓣\\)\\s*$/, '');
       };
       const extractPhotos = (doc, pageNumber) => {
         const nodes = Array.from(doc.querySelectorAll('.poster-col3 li, .poster-col3l li, .article li'));
@@ -193,13 +193,13 @@ cli({
   site: "douban",
   name: "photos",
   access: "read",
-  description: "\u83B7\u53D6\u7535\u5F71\u6D77\u62A5/\u5267\u7167\u56FE\u7247\u5217\u8868",
+  description: "获取电影海报/剧照图片列表",
   domain: "movie.douban.com",
   strategy: Strategy.COOKIE,
   args: [
-    { name: "id", positional: true, required: true, help: "\u7535\u5F71 subject ID" },
-    { name: "type", default: "Rb", help: "\u8C46\u74E3 photos \u7684 type \u53C2\u6570\uFF0C\u9ED8\u8BA4 Rb\uFF08\u6D77\u62A5\uFF09" },
-    { name: "limit", type: "int", default: 120, help: "\u6700\u591A\u8FD4\u56DE\u591A\u5C11\u5F20\u56FE\u7247" }
+    { name: "id", positional: true, required: true, help: "电影 subject ID" },
+    { name: "type", default: "Rb", help: "豆瓣 photos 的 type 参数，默认 Rb（海报）" },
+    { name: "limit", type: "int", default: 120, help: "最多返回多少张图片" }
   ],
   columns: ["index", "photo_id", "subject_id", "title", "image_url", "detail_url"],
   func: async (page, kwargs) => {

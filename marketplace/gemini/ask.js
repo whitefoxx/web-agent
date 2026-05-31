@@ -12,7 +12,7 @@ var GEMINI_RESPONSE_NOISE_PATTERNS = [
   /Google Privacy Policy/gi,
   /Opens in a new window/gi
 ];
-var GEMINI_TRANSCRIPT_CHROME_MARKERS = ["gemini", "\u6211\u7684\u5185\u5BB9", "\u5BF9\u8BDD", "google terms", "google privacy policy"];
+var GEMINI_TRANSCRIPT_CHROME_MARKERS = ["gemini", "我的内容", "对话", "google terms", "google privacy policy"];
 var GEMINI_COMPOSER_SELECTORS = [
   '.ql-editor[contenteditable="true"]',
   '.ql-editor[role="textbox"]',
@@ -163,8 +163,8 @@ function readGeminiSnapshotScript() {
         const aria = (node.getAttribute('aria-label') || '').trim().toLowerCase();
         return text === 'stop response'
           || aria === 'stop response'
-          || text === '\u505C\u6B62\u56DE\u7B54'
-          || aria === '\u505C\u6B62\u56DE\u7B54';
+          || text === '停止回答'
+          || aria === '停止回答';
       });
       const turns = ${getTurnsScript().trim()};
       const transcriptLines = ${getTranscriptLinesScript().trim()};
@@ -446,8 +446,8 @@ function submitComposerScript() {
         });
       }
 
-      const excludedPattern = /main menu|\u4E3B\u83DC\u5355|microphone|\u9EA6\u514B\u98CE|upload|\u4E0A\u4F20|mode|\u6A21\u5F0F|tools|\u5DE5\u5177|settings|\u4E34\u65F6\u5BF9\u8BDD|new chat|\u65B0\u5BF9\u8BDD/i;
-      const submitPattern = /send|\u53D1\u9001|submit|\u63D0\u4EA4/i;
+      const excludedPattern = /main menu|主菜单|microphone|麦克风|upload|上传|mode|模式|tools|工具|settings|临时对话|new chat|新对话/i;
+      const submitPattern = /send|发送|submit|提交/i;
       let bestButton = null;
       let bestScore = -1;
 
@@ -518,10 +518,10 @@ function clickNewChatScript() {
         return isVisible(node) && (
           text === 'new chat'
           || aria === 'new chat'
-          || text === '\u53D1\u8D77\u65B0\u5BF9\u8BDD'
-          || aria === '\u53D1\u8D77\u65B0\u5BF9\u8BDD'
-          || text === '\u65B0\u5BF9\u8BDD'
-          || aria === '\u65B0\u5BF9\u8BDD'
+          || text === '发起新对话'
+          || aria === '发起新对话'
+          || text === '新对话'
+          || aria === '新对话'
         );
       });
 
@@ -761,14 +761,14 @@ var askCommand = cli({
     const submissionStartedAt = Date.now();
     const submitted = await waitForGeminiSubmission(page, before, timeout);
     if (!submitted) {
-      return [{ response: `\u{1F4AC} ${NO_RESPONSE_PREFIX} No Gemini response within ${timeout}s.` }];
+      return [{ response: `💬 ${NO_RESPONSE_PREFIX} No Gemini response within ${timeout}s.` }];
     }
     const remainingTimeoutSeconds = Math.max(0, timeout - Math.ceil((Date.now() - submissionStartedAt) / 1e3));
     const response = await waitForGeminiResponse(page, submitted, prompt, remainingTimeoutSeconds);
     if (!response) {
-      return [{ response: `\u{1F4AC} ${NO_RESPONSE_PREFIX} No Gemini response within ${timeout}s.` }];
+      return [{ response: `💬 ${NO_RESPONSE_PREFIX} No Gemini response within ${timeout}s.` }];
     }
-    return [{ response: `\u{1F4AC} ${response}` }];
+    return [{ response: `💬 ${response}` }];
   }
 });
 export {

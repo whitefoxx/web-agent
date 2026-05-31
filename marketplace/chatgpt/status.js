@@ -8,9 +8,9 @@ var CHATGPT_DOMAIN = "chatgpt.com";
 var CHATGPT_URL = "https://chatgpt.com";
 var COMPOSER_SELECTORS = [
   '[aria-label="Chat with ChatGPT"]',
-  '[aria-label="\u4E0E ChatGPT \u804A\u5929"]',
+  '[aria-label="与 ChatGPT 聊天"]',
   '[placeholder="Ask anything"]',
-  '[placeholder="\u6709\u95EE\u9898\uFF0C\u5C3D\u7BA1\u95EE"]',
+  '[placeholder="有问题，尽管问"]',
   "#prompt-textarea",
   '[data-testid="prompt-textarea"]',
   '[contenteditable="true"][role="textbox"]'

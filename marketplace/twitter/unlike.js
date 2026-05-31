@@ -82,7 +82,7 @@ cli({
         try {
             ${buildTwitterArticleScopeSource(target.id)}
             // Poll for the tweet to render. State probes scoped to the article
-            // matching the requested status id \u2014 bare querySelector on a
+            // matching the requested status id — bare querySelector on a
             // conversation page would silently grab the first article (e.g.
             // the parent tweet) and unlike the wrong one.
             let attempts = 0;

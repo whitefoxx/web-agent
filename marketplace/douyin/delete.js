@@ -129,7 +129,7 @@ async function deleteViaCreatorManage(page, workId) {
         const candidates = Array.from(document.querySelectorAll('[class*="video-card"]'))
           .filter((element) => {
             const text = normalize(textOf(element));
-            return text.includes('\u5220\u9664\u4F5C\u54C1') && text.includes('\u7EE7\u7EED\u7F16\u8F91');
+            return text.includes('删除作品') && text.includes('继续编辑');
           });
         return candidates.filter((candidate) => !candidates.some((other) => other !== candidate && other.contains(candidate)));
       }
@@ -138,7 +138,7 @@ async function deleteViaCreatorManage(page, workId) {
       if (!target.ok) return target;
 
       const allTab = Array.from(document.querySelectorAll('button,[role="button"],span,div'))
-        .find((element) => /^\u5168\u90E8\u4F5C\u54C1$/.test(normalize(textOf(element))));
+        .find((element) => /^全部作品$/.test(normalize(textOf(element))));
       allTab?.click();
       await sleep(1000);
       for (let attempt = 0; attempt < 20; attempt += 1) {
@@ -146,12 +146,12 @@ async function deleteViaCreatorManage(page, workId) {
         if (cards.length >= target.listCount && cards[target.index]) {
           const card = cards[target.index];
           const deleteButton = Array.from(card.querySelectorAll('button,[role="button"],span,div'))
-            .find((element) => /^\u5220\u9664\u4F5C\u54C1$/.test(normalize(textOf(element))));
+            .find((element) => /^删除作品$/.test(normalize(textOf(element))));
           if (!deleteButton) return { ok: false, reason: 'delete_button_not_found', aweme_id: target.item.aweme_id, item_id: target.item.item_id, index: target.index, cardCount: cards.length };
           deleteButton.click();
           await sleep(800);
           const confirmButton = Array.from(document.querySelectorAll('button,[role="button"]'))
-            .find((element) => ['\u786E\u5B9A', '\u786E\u8BA4', '\u5220\u9664'].includes(normalize(textOf(element))));
+            .find((element) => ['确定', '确认', '删除'].includes(normalize(textOf(element))));
           if (!confirmButton) return { ok: false, reason: 'confirm_button_not_found', aweme_id: target.item.aweme_id, item_id: target.item.item_id };
           confirmButton.click();
           for (let wait = 0; wait < 20; wait += 1) {
@@ -167,9 +167,9 @@ async function deleteViaCreatorManage(page, workId) {
       }
       return { ok: false, reason: 'card_not_found', aweme_id: target.item.aweme_id, item_id: target.item.item_id, index: target.index, listCount: target.listCount };
     })()
-  `), "\u6296\u97F3\u540E\u53F0\u7BA1\u7406\u5220\u9664\u54CD\u5E94\u5F02\u5E38");
+  `), "抖音后台管理删除响应异常");
   if (!result?.ok) {
-    throw new CommandExecutionError3(`\u6296\u97F3\u540E\u53F0\u7BA1\u7406\u5220\u9664\u5931\u8D25: ${JSON.stringify(result)}`);
+    throw new CommandExecutionError3(`抖音后台管理删除失败: ${JSON.stringify(result)}`);
   }
   return result;
 }
@@ -177,7 +177,7 @@ async function findWorkListItem(page, workId) {
   const data = await browserFetch(page, "GET", `https://creator.douyin.com${WORK_LIST_URL}`, { timeoutMs: 8e3 });
   const list = data.data?.work_list ?? data.aweme_list ?? data.work_list ?? [];
   if (!Array.isArray(list)) {
-    throw new CommandExecutionError3("\u6296\u97F3\u4F5C\u54C1\u5217\u8868\u54CD\u5E94\u7F3A\u5C11 work_list/aweme_list");
+    throw new CommandExecutionError3("抖音作品列表响应缺少 work_list/aweme_list");
   }
   return list.find((entry) => String(entry.aweme_id || "") === workId || String(entry.item_id || "") === workId) || null;
 }
@@ -185,19 +185,19 @@ cli({
   site: "douyin",
   name: "delete",
   access: "write",
-  description: "\u5220\u9664\u4F5C\u54C1\uFF08\u4F18\u5148\u4F7F\u7528\u521B\u4F5C\u8005\u540E\u53F0\u4F5C\u54C1\u7BA1\u7406\uFF1B\u627E\u4E0D\u5230\u65F6\u56DE\u9000\u5230\u65E7\u5220\u9664\u63A5\u53E3\uFF09",
+  description: "删除作品（优先使用创作者后台作品管理；找不到时回退到旧删除接口）",
   domain: "creator.douyin.com",
   strategy: Strategy.COOKIE,
   siteSession: "persistent",
   args: [
-    { name: "aweme_id", required: true, positional: true, help: "\u4F5C\u54C1 ID / item_id" }
+    { name: "aweme_id", required: true, positional: true, help: "作品 ID / item_id" }
   ],
   columns: ["status"],
   func: async (page, kwargs) => {
     const awemeId = readAwemeId(kwargs.aweme_id);
     try {
       const deleted = await deleteViaCreatorManage(page, awemeId);
-      return [{ status: `\u2705 \u5DF2\u901A\u8FC7\u540E\u53F0\u7BA1\u7406\u5220\u9664 ${deleted.aweme_id || awemeId}` }];
+      return [{ status: `✅ 已通过后台管理删除 ${deleted.aweme_id || awemeId}` }];
     } catch (fallbackError) {
       const fallbackMessage = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
       if (!fallbackMessage.includes('"reason":"not_found"')) {
@@ -206,7 +206,7 @@ cli({
     }
     const before = await findWorkListItem(page, awemeId);
     if (!before) {
-      throw new CommandExecutionError3(`\u6296\u97F3\u4F5C\u54C1 ${awemeId} \u672A\u5728\u4F5C\u54C1\u5217\u8868\u4E2D\u627E\u5230\uFF0C\u672A\u6267\u884C\u5220\u9664`);
+      throw new CommandExecutionError3(`抖音作品 ${awemeId} 未在作品列表中找到，未执行删除`);
     }
     const url = "https://creator.douyin.com/web/api/media/aweme/delete/?aid=1128";
     await browserFetch(page, "POST", url, { body: { aweme_id: awemeId }, timeoutMs: 8e3 });
@@ -215,9 +215,9 @@ cli({
       await sleep(500);
       const after = await findWorkListItem(page, awemeId);
       if (!after) {
-        return [{ status: `\u2705 \u5DF2\u5220\u9664 ${awemeId}` }];
+        return [{ status: `✅ 已删除 ${awemeId}` }];
       }
     }
-    throw new CommandExecutionError3(`\u6296\u97F3\u4F5C\u54C1 ${awemeId} \u5220\u9664\u540E\u4ECD\u5728\u4F5C\u54C1\u5217\u8868\u4E2D\uFF0C\u5220\u9664\u672A\u786E\u8BA4`);
+    throw new CommandExecutionError3(`抖音作品 ${awemeId} 删除后仍在作品列表中，删除未确认`);
   }
 });

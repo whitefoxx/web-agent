@@ -146,7 +146,7 @@ cli({
     }
     const results = [];
     for (const [chapter, rows] of grouped) {
-      const lines = [`\u{1F4D6} ${chapter}`];
+      const lines = [`📖 ${chapter}`];
       for (const row of rows) {
         const indent = "  ".repeat(row.level - 2);
         const prefix = row.level === 2 ? `${row.idx}. ` : `${row.idx} `;

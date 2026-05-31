@@ -77,7 +77,7 @@ cli({
   site: "douyin",
   name: "activities",
   access: "read",
-  description: "\u5B98\u65B9\u6D3B\u52A8\u5217\u8868",
+  description: "官方活动列表",
   domain: "creator.douyin.com",
   strategy: Strategy.COOKIE,
   args: [],

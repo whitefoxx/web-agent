@@ -22,7 +22,7 @@ function formatPostTime(ts) {
     return "";
   const date = new Date(ts + 8 * 36e5);
   const pad = (value) => String(value).padStart(2, "0");
-  return `${date.getUTCFullYear()}\u5E74${pad(date.getUTCMonth() + 1)}\u6708${pad(date.getUTCDate())}\u65E5 ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}`;
+  return `${date.getUTCFullYear()}年${pad(date.getUTCMonth() + 1)}月${pad(date.getUTCDate())}日 ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}`;
 }
 function parseCreatorNotesText(bodyText) {
   const lines = bodyText.split("\n").map((line) => line.trim()).filter(Boolean);
@@ -376,7 +376,7 @@ async function fetchCreatorNotes(page, limit) {
           const id = impression.match(noteIdRe)?.[1] || '';
           const title = (card.querySelector('.title, .raw')?.innerText || '').trim();
           const dateText = (card.querySelector('.time_status, .time')?.innerText || '').trim();
-          const date = dateText.replace(/^\u53D1\u5E03\u4E8E\\s*/, '');
+          const date = dateText.replace(/^发布于\\s*/, '');
           const metrics = Array.from(card.querySelectorAll('.icon_list .icon'))
             .map((el) => parseInt((el.innerText || '').trim(), 10))
             .filter((value) => Number.isFinite(value));
@@ -414,7 +414,7 @@ cli({
   site: "xiaohongshu",
   name: "creator-notes",
   access: "read",
-  description: "\u5C0F\u7EA2\u4E66\u521B\u4F5C\u8005\u7B14\u8BB0\u5217\u8868 + \u6BCF\u7BC7\u6570\u636E (\u6807\u9898/\u65E5\u671F/\u89C2\u770B/\u70B9\u8D5E/\u6536\u85CF/\u8BC4\u8BBA)",
+  description: "小红书创作者笔记列表 + 每篇数据 (标题/日期/观看/点赞/收藏/评论)",
   domain: "creator.xiaohongshu.com",
   strategy: Strategy.COOKIE,
   browser: true,
@@ -448,34 +448,34 @@ import { cli as cli2, Strategy as Strategy2 } from "@jackwener/opencli/registry"
 import { CommandExecutionError as CommandExecutionError2, EmptyResultError as EmptyResultError2 } from "@jackwener/opencli/errors";
 var NOTE_DETAIL_DATETIME_RE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/;
 var NOTE_DETAIL_METRICS = [
-  { label: "\u66DD\u5149\u6570", section: "\u57FA\u7840\u6570\u636E" },
-  { label: "\u89C2\u770B\u6570", section: "\u57FA\u7840\u6570\u636E" },
-  { label: "\u5C01\u9762\u70B9\u51FB\u7387", section: "\u57FA\u7840\u6570\u636E" },
-  { label: "\u5E73\u5747\u89C2\u770B\u65F6\u957F", section: "\u57FA\u7840\u6570\u636E" },
-  { label: "\u6DA8\u7C89\u6570", section: "\u57FA\u7840\u6570\u636E" },
-  { label: "\u70B9\u8D5E\u6570", section: "\u4E92\u52A8\u6570\u636E" },
-  { label: "\u8BC4\u8BBA\u6570", section: "\u4E92\u52A8\u6570\u636E" },
-  { label: "\u6536\u85CF\u6570", section: "\u4E92\u52A8\u6570\u636E" },
-  { label: "\u5206\u4EAB\u6570", section: "\u4E92\u52A8\u6570\u636E" }
+  { label: "曝光数", section: "基础数据" },
+  { label: "观看数", section: "基础数据" },
+  { label: "封面点击率", section: "基础数据" },
+  { label: "平均观看时长", section: "基础数据" },
+  { label: "涨粉数", section: "基础数据" },
+  { label: "点赞数", section: "互动数据" },
+  { label: "评论数", section: "互动数据" },
+  { label: "收藏数", section: "互动数据" },
+  { label: "分享数", section: "互动数据" }
 ];
 var NOTE_DETAIL_METRIC_LABELS = new Set(NOTE_DETAIL_METRICS.map((metric) => metric.label));
 var NOTE_DETAIL_SECTIONS = new Set(NOTE_DETAIL_METRICS.map((metric) => metric.section));
 var NOTE_DETAIL_NOISE_LINES = /* @__PURE__ */ new Set([
-  "\u5207\u6362\u7B14\u8BB0",
-  "\u7B14\u8BB0\u8BCA\u65AD",
-  "\u6838\u5FC3\u6570\u636E",
-  "\u89C2\u770B\u6765\u6E90",
-  "\u89C2\u4F17\u753B\u50CF",
-  "\u63D0\u5347\u5EFA\u8BAE",
-  "\u57FA\u7840\u6570\u636E",
-  "\u4E92\u52A8\u6570\u636E",
-  "\u5BFC\u51FA\u6570\u636E",
-  "\u5B9E\u65F6",
-  "\u6309\u5C0F\u65F6",
-  "\u6309\u5929"
+  "切换笔记",
+  "笔记诊断",
+  "核心数据",
+  "观看来源",
+  "观众画像",
+  "提升建议",
+  "基础数据",
+  "互动数据",
+  "导出数据",
+  "实时",
+  "按小时",
+  "按天"
 ]);
 function findNoteTitle(lines) {
-  const detailIndex = lines.indexOf("\u7B14\u8BB0\u6570\u636E\u8BE6\u60C5");
+  const detailIndex = lines.indexOf("笔记数据详情");
   if (detailIndex < 0)
     return "";
   for (let i = detailIndex + 1; i < lines.length; i++) {
@@ -497,17 +497,17 @@ function findMetricValue(lines, startIndex) {
       continue;
     if (NOTE_DETAIL_METRIC_LABELS.has(line))
       break;
-    if (NOTE_DETAIL_NOISE_LINES.has(line) || line.startsWith("\u6570\u636E\u66F4\u65B0\u81F3") || line.startsWith("\u90E8\u5206\u6570\u636E\u7EDF\u8BA1\u4E2D"))
+    if (NOTE_DETAIL_NOISE_LINES.has(line) || line.startsWith("数据更新至") || line.startsWith("部分数据统计中"))
       continue;
     if (!value) {
       value = line;
       continue;
     }
-    if (!extra && line.startsWith("\u7C89\u4E1D")) {
+    if (!extra && line.startsWith("粉丝")) {
       extra = line;
       break;
     }
-    if (line === "0" || /^\d/.test(line) || line.endsWith("%") || line.endsWith("\u79D2")) {
+    if (line === "0" || /^\d/.test(line) || line.endsWith("%") || line.endsWith("秒")) {
       break;
     }
   }
@@ -522,9 +522,9 @@ function parseCreatorNoteDetailText(bodyText, noteId) {
   const title = findNoteTitle(lines);
   const publishedAt = lines.find((line) => NOTE_DETAIL_DATETIME_RE.test(line)) ?? "";
   const rows = [
-    { section: "\u7B14\u8BB0\u4FE1\u606F", metric: "note_id", value: noteId, extra: "" },
-    { section: "\u7B14\u8BB0\u4FE1\u606F", metric: "title", value: title, extra: "" },
-    { section: "\u7B14\u8BB0\u4FE1\u606F", metric: "published_at", value: publishedAt, extra: "" }
+    { section: "笔记信息", metric: "note_id", value: noteId, extra: "" },
+    { section: "笔记信息", metric: "title", value: title, extra: "" },
+    { section: "笔记信息", metric: "published_at", value: publishedAt, extra: "" }
   ];
   for (const metric of NOTE_DETAIL_METRICS) {
     const index = lines.indexOf(metric.label);
@@ -547,9 +547,9 @@ function parseCreatorNoteDetailDomData(dom, noteId) {
   const infoText = typeof dom.infoText === "string" ? dom.infoText : "";
   const sections = Array.isArray(dom.sections) ? dom.sections : [];
   const rows = [
-    { section: "\u7B14\u8BB0\u4FE1\u606F", metric: "note_id", value: noteId, extra: "" },
-    { section: "\u7B14\u8BB0\u4FE1\u606F", metric: "title", value: title, extra: "" },
-    { section: "\u7B14\u8BB0\u4FE1\u606F", metric: "published_at", value: findPublishedAt(infoText), extra: "" }
+    { section: "笔记信息", metric: "note_id", value: noteId, extra: "" },
+    { section: "笔记信息", metric: "title", value: title, extra: "" },
+    { section: "笔记信息", metric: "published_at", value: findPublishedAt(infoText), extra: "" }
   ];
   for (const section of sections) {
     if (!NOTE_DETAIL_SECTIONS.has(section.title))
@@ -565,7 +565,7 @@ function parseCreatorNoteDetailDomData(dom, noteId) {
       });
     }
   }
-  const hasMetric = rows.some((row) => row.section !== "\u7B14\u8BB0\u4FE1\u606F" && row.value);
+  const hasMetric = rows.some((row) => row.section !== "笔记信息" && row.value);
   return hasMetric ? rows : [];
 }
 function toPercentString(value) {
@@ -578,16 +578,16 @@ function appendAudienceSourceRows(rows, payload) {
       continue;
     const extras = [];
     if (item.info?.imp_count != null)
-      extras.push(`\u66DD\u5149 ${item.info.imp_count}`);
+      extras.push(`曝光 ${item.info.imp_count}`);
     if (item.info?.view_count != null)
-      extras.push(`\u89C2\u770B ${item.info.view_count}`);
+      extras.push(`观看 ${item.info.view_count}`);
     if (item.info?.interaction_count != null)
-      extras.push(`\u4E92\u52A8 ${item.info.interaction_count}`);
+      extras.push(`互动 ${item.info.interaction_count}`);
     rows.push({
-      section: "\u89C2\u770B\u6765\u6E90",
+      section: "观看来源",
       metric: item.title,
       value: toPercentString(item.value_with_double),
-      extra: extras.join(" \xB7 ")
+      extra: extras.join(" · ")
     });
   }
   return rows;
@@ -597,7 +597,7 @@ function appendAudiencePortraitGroup(rows, groupLabel, items) {
     if (!item.title)
       continue;
     rows.push({
-      section: "\u89C2\u4F17\u753B\u50CF",
+      section: "观众画像",
       metric: `${groupLabel}/${item.title}`,
       value: toPercentString(item.value),
       extra: ""
@@ -607,10 +607,10 @@ function appendAudiencePortraitGroup(rows, groupLabel, items) {
 }
 function appendAudienceRows(rows, payload) {
   appendAudienceSourceRows(rows, payload);
-  appendAudiencePortraitGroup(rows, "\u6027\u522B", payload?.audienceSourceDetail?.gender);
-  appendAudiencePortraitGroup(rows, "\u5E74\u9F84", payload?.audienceSourceDetail?.age);
-  appendAudiencePortraitGroup(rows, "\u57CE\u5E02", payload?.audienceSourceDetail?.city);
-  appendAudiencePortraitGroup(rows, "\u5174\u8DA3", payload?.audienceSourceDetail?.interest);
+  appendAudiencePortraitGroup(rows, "性别", payload?.audienceSourceDetail?.gender);
+  appendAudiencePortraitGroup(rows, "年龄", payload?.audienceSourceDetail?.age);
+  appendAudiencePortraitGroup(rows, "城市", payload?.audienceSourceDetail?.city);
+  appendAudiencePortraitGroup(rows, "兴趣", payload?.audienceSourceDetail?.interest);
   return rows;
 }
 function formatTrendTimestamp(ts, granularity) {
@@ -634,27 +634,27 @@ function formatTrendSeries(points, granularity) {
   }).filter(Boolean).join(" | ");
 }
 var TREND_SERIES_CONFIG = [
-  { key: "imp_list", label: "\u66DD\u5149\u6570" },
-  { key: "view_list", label: "\u89C2\u770B\u6570" },
-  { key: "view_time_list", label: "\u5E73\u5747\u89C2\u770B\u65F6\u957F" },
-  { key: "like_list", label: "\u70B9\u8D5E\u6570" },
-  { key: "comment_list", label: "\u8BC4\u8BBA\u6570" },
-  { key: "collect_list", label: "\u6536\u85CF\u6570" },
-  { key: "share_list", label: "\u5206\u4EAB\u6570" },
-  { key: "rise_fans_list", label: "\u6DA8\u7C89\u6570" }
+  { key: "imp_list", label: "曝光数" },
+  { key: "view_list", label: "观看数" },
+  { key: "view_time_list", label: "平均观看时长" },
+  { key: "like_list", label: "点赞数" },
+  { key: "comment_list", label: "评论数" },
+  { key: "collect_list", label: "收藏数" },
+  { key: "share_list", label: "分享数" },
+  { key: "rise_fans_list", label: "涨粉数" }
 ];
 function appendTrendRows(rows, payload) {
   if (payload?.audienceTrend?.no_data_tip_msg) {
     rows.push({
-      section: "\u8D8B\u52BF\u8BF4\u660E",
-      metric: "\u89C2\u4F17\u8D8B\u52BF",
-      value: payload.audienceTrend.no_data ? "\u6682\u4E0D\u53EF\u7528" : "\u53EF\u7528",
+      section: "趋势说明",
+      metric: "观众趋势",
+      value: payload.audienceTrend.no_data ? "暂不可用" : "可用",
       extra: payload.audienceTrend.no_data_tip_msg
     });
   }
   const buckets = [
-    { label: "\u6309\u5C0F\u65F6", granularity: "hour", data: payload?.noteBase?.hour },
-    { label: "\u6309\u5929", granularity: "day", data: payload?.noteBase?.day }
+    { label: "按小时", granularity: "hour", data: payload?.noteBase?.hour },
+    { label: "按天", granularity: "day", data: payload?.noteBase?.day }
   ];
   for (const bucket of buckets) {
     for (const series of TREND_SERIES_CONFIG) {
@@ -663,7 +663,7 @@ function appendTrendRows(rows, payload) {
       if (!formatted)
         continue;
       rows.push({
-        section: "\u8D8B\u52BF\u6570\u636E",
+        section: "趋势数据",
         metric: `${bucket.label}/${series.label}`,
         value: `${points.length} points`,
         extra: formatted
@@ -838,10 +838,10 @@ async function captureNoteDetailDomData(page) {
     const norm = (value) => (value || '').trim();
     const sections = Array.from(document.querySelectorAll('.shell-container')).map((container) => {
       const containerText = norm(container.innerText);
-      const title = containerText.startsWith('\u4E92\u52A8\u6570\u636E')
-        ? '\u4E92\u52A8\u6570\u636E'
-        : containerText.includes('\u57FA\u7840\u6570\u636E')
-          ? '\u57FA\u7840\u6570\u636E'
+      const title = containerText.startsWith('互动数据')
+        ? '互动数据'
+        : containerText.includes('基础数据')
+          ? '基础数据'
           : '';
       const metrics = Array.from(container.querySelectorAll('.block-container.block')).map((block) => ({
         label: norm(block.querySelector('.des')?.innerText),
@@ -878,7 +878,7 @@ cli2({
   site: "xiaohongshu",
   name: "creator-note-detail",
   access: "read",
-  description: "\u5C0F\u7EA2\u4E66\u5355\u7BC7\u7B14\u8BB0\u8BE6\u60C5\u9875\u6570\u636E (\u7B14\u8BB0\u4FE1\u606F + \u6838\u5FC3/\u4E92\u52A8\u6570\u636E + \u89C2\u770B\u6765\u6E90 + \u89C2\u4F17\u753B\u50CF + \u8D8B\u52BF\u6570\u636E)",
+  description: "小红书单篇笔记详情页数据 (笔记信息 + 核心/互动数据 + 观看来源 + 观众画像 + 趋势数据)",
   domain: "creator.xiaohongshu.com",
   strategy: Strategy2.COOKIE,
   browser: true,
@@ -890,7 +890,7 @@ cli2({
   func: async (page, kwargs) => {
     const noteId = kwargs["note-id"];
     const rows = await fetchCreatorNoteDetailRows(page, noteId);
-    const hasCoreMetric = rows.some((row) => row.section !== "\u7B14\u8BB0\u4FE1\u606F" && row.value);
+    const hasCoreMetric = rows.some((row) => row.section !== "笔记信息" && row.value);
     if (!hasCoreMetric) {
       throw new EmptyResultError2("xiaohongshu creator-note-detail", "No note detail data found. Check note_id and login status for creator.xiaohongshu.com.");
     }
@@ -914,20 +914,20 @@ function findTopBySectionPrefix(rows, section, prefix) {
   };
 }
 function summarizeCreatorNote(note, rows, rank) {
-  const topSource = findTopBySectionPrefix(rows, "\u89C2\u770B\u6765\u6E90", "");
-  const topInterest = findTopBySectionPrefix(rows, "\u89C2\u4F17\u753B\u50CF", "\u5174\u8DA3/");
+  const topSource = findTopBySectionPrefix(rows, "观看来源", "");
+  const topInterest = findTopBySectionPrefix(rows, "观众画像", "兴趣/");
   return {
     rank,
     id: note.id,
     title: note.title,
     published_at: findDetailValue(rows, "published_at") || note.date,
-    views: findDetailValue(rows, "\u89C2\u770B\u6570") || String(note.views),
-    likes: findDetailValue(rows, "\u70B9\u8D5E\u6570") || String(note.likes),
-    collects: findDetailValue(rows, "\u6536\u85CF\u6570") || String(note.collects),
-    comments: findDetailValue(rows, "\u8BC4\u8BBA\u6570") || String(note.comments),
-    shares: findDetailValue(rows, "\u5206\u4EAB\u6570"),
-    avg_view_time: findDetailValue(rows, "\u5E73\u5747\u89C2\u770B\u65F6\u957F"),
-    rise_fans: findDetailValue(rows, "\u6DA8\u7C89\u6570"),
+    views: findDetailValue(rows, "观看数") || String(note.views),
+    likes: findDetailValue(rows, "点赞数") || String(note.likes),
+    collects: findDetailValue(rows, "收藏数") || String(note.collects),
+    comments: findDetailValue(rows, "评论数") || String(note.comments),
+    shares: findDetailValue(rows, "分享数"),
+    avg_view_time: findDetailValue(rows, "平均观看时长"),
+    rise_fans: findDetailValue(rows, "涨粉数"),
     top_source: topSource.label,
     top_source_pct: topSource.value,
     top_interest: topInterest.label,
@@ -939,7 +939,7 @@ cli3({
   site: "xiaohongshu",
   name: "creator-notes-summary",
   access: "read",
-  description: "\u5C0F\u7EA2\u4E66\u6700\u8FD1\u7B14\u8BB0\u6279\u91CF\u6458\u8981 (\u5217\u8868 + \u5355\u7BC7\u5173\u952E\u6570\u636E\u6C47\u603B)",
+  description: "小红书最近笔记批量摘要 (列表 + 单篇关键数据汇总)",
   domain: "creator.xiaohongshu.com",
   strategy: Strategy3.COOKIE,
   browser: true,

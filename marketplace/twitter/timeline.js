@@ -369,7 +369,7 @@ cli({
       help: "Which home-timeline feed to read. Default for-you (algorithmic). Use following for the chronological feed of accounts you follow."
     },
     { name: "limit", type: "int", default: 20, help: "Maximum number of tweets to return (default 20)." },
-    { name: "top-by-engagement", type: "int", default: 0, help: "When set to N>0, re-rank the timeline by weighted engagement (likes\xD71 + retweets\xD73 + replies\xD72 + bookmarks\xD75 + log10(views+1)\xD70.5) and return the top N. Default 0 keeps X's native ordering." }
+    { name: "top-by-engagement", type: "int", default: 0, help: "When set to N>0, re-rank the timeline by weighted engagement (likes×1 + retweets×3 + replies×2 + bookmarks×5 + log10(views+1)×0.5) and return the top N. Default 0 keeps X's native ordering." }
   ],
   columns: ["id", "author", "bio", "text", "likes", "retweets", "replies", "views", "created_at", "url", "has_media", "media_urls", "card", "quoted_tweet"],
   func: async (page, kwargs) => {

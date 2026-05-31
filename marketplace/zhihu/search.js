@@ -130,7 +130,7 @@ cli({
   site: "zhihu",
   name: "search",
   access: "read",
-  description: "\u77E5\u4E4E\u641C\u7D22",
+  description: "知乎搜索",
   domain: "www.zhihu.com",
   strategy: Strategy.COOKIE,
   args: [

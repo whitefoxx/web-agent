@@ -70,12 +70,12 @@ function parseFavoriteCard(card, favUrl) {
   let reposts = "0";
   for (const line of lines) {
     const t = line.trim();
-    if (!t || t === "\u6DFB\u52A0") continue;
+    if (!t || t === "添加") continue;
     if (!time && /\d+小时前|\d+分钟前|\d+秒前|昨天|前天|\d{1,2}:\d{2}/.test(t)) {
       time = t;
       continue;
     }
-    if (t.startsWith("\u6765\u81EA")) {
+    if (t.startsWith("来自")) {
       source = t;
       continue;
     }
@@ -127,11 +127,11 @@ cli({
   site: "weibo",
   name: "favorites",
   access: "read",
-  description: "\u6211\u7684\u5FAE\u535A\u6536\u85CF\u5217\u8868",
+  description: "我的微博收藏列表",
   domain: "weibo.com",
   strategy: Strategy.COOKIE,
   args: [
-    { name: "limit", type: "int", default: 20, help: "\u6570\u91CF\uFF08\u6700\u591A50\uFF09" }
+    { name: "limit", type: "int", default: 20, help: "数量（最多50）" }
   ],
   columns: ["author", "text", "time", "source", "likes", "comments", "reposts", "url"],
   func: async (page, kwargs) => {

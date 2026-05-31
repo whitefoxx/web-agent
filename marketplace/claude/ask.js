@@ -222,8 +222,8 @@ async function waitForResponse(page, baselineCount, prompt, timeoutMs) {
                 var texts = Array.from(bubbles).map(function(b) {
                     var raw = (b.innerText || '').trim();
                     // Drop leading paragraphs that are widget labels:
-                    //   "Thought process" / "Thought for Xs" \u2014 Adaptive thinking expand widget
-                    //   "View uploaded image" / "View attachment" \u2014 file thumbnail label
+                    //   "Thought process" / "Thought for Xs" — Adaptive thinking expand widget
+                    //   "View uploaded image" / "View attachment" — file thumbnail label
                     // These render twice (collapsed + expanded) and are followed by a blank line.
                     var parts = raw.split(/\\n\\n+/);
                     while (parts.length > 1 && /^(Thought|View)\\b/i.test(parts[0])) parts.shift();

@@ -331,7 +331,7 @@ function fatalGraphqlErrors(errors) {
 function buildListAddMemberRow({ addResult, memberCountBefore, listId, username, userId }) {
   if (!addResult?.httpOk) {
     throw new CommandExecutionError2(
-      `Failed to add @${username} to list ${listId}: HTTP ${addResult?.status ?? 0}${addResult?.fetchError ? " (" + addResult.fetchError + ")" : ""}${addResult?.raw ? " \u2014 " + addResult.raw : ""}`
+      `Failed to add @${username} to list ${listId}: HTTP ${addResult?.status ?? 0}${addResult?.fetchError ? " (" + addResult.fetchError + ")" : ""}${addResult?.raw ? " — " + addResult.raw : ""}`
     );
   }
   const hasMemberCount = addResult.mc !== null && addResult.mc !== void 0;
@@ -349,17 +349,17 @@ function buildListAddMemberRow({ addResult, memberCountBefore, listId, username,
   }
   if (memberCountAfter < memberCountBefore) {
     throw new CommandExecutionError2(
-      `Failed to add @${username} to list ${listId}: member_count decreased unexpectedly (${memberCountBefore} \u2192 ${memberCountAfter})`
+      `Failed to add @${username} to list ${listId}: member_count decreased unexpectedly (${memberCountBefore} → ${memberCountAfter})`
     );
   }
   const countIncreased = memberCountAfter > memberCountBefore;
   if (!countIncreased && addResult.isMember !== true) {
     throw new CommandExecutionError2(
-      `Failed to add @${username} to list ${listId}: member_count unchanged (${memberCountBefore} \u2192 ${memberCountAfter}) and response did not confirm membership`
+      `Failed to add @${username} to list ${listId}: member_count unchanged (${memberCountBefore} → ${memberCountAfter}) and response did not confirm membership`
     );
   }
   const noop = !countIncreased;
-  const verifiedBy = `member_count ${memberCountBefore} \u2192 ${memberCountAfter}`;
+  const verifiedBy = `member_count ${memberCountBefore} → ${memberCountAfter}`;
   return {
     listId,
     username,

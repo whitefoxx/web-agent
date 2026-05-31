@@ -176,12 +176,12 @@ cli({
   site: "bilibili",
   name: "subtitle",
   access: "read",
-  description: "\u83B7\u53D6 Bilibili \u89C6\u9891\u7684\u5B57\u5E55",
+  description: "获取 Bilibili 视频的字幕",
   domain: "www.bilibili.com",
   strategy: Strategy.COOKIE,
   args: [
-    { name: "bvid", required: true, positional: true, help: "Bilibili \u89C6\u9891 BV ID\uFF08\u5982 BV1xx411c7mD\uFF09\uFF0C\u6216\u89C6\u9891 URL / b23.tv \u77ED\u94FE" },
-    { name: "lang", required: false, help: "\u5B57\u5E55\u8BED\u8A00\u4EE3\u7801 (\u5982 zh-CN, en-US, ai-zh)\uFF0C\u9ED8\u8BA4\u53D6\u7B2C\u4E00\u4E2A" }
+    { name: "bvid", required: true, positional: true, help: "Bilibili 视频 BV ID（如 BV1xx411c7mD），或视频 URL / b23.tv 短链" },
+    { name: "lang", required: false, help: "字幕语言代码 (如 zh-CN, en-US, ai-zh)，默认取第一个" }
   ],
   columns: ["index", "from", "to", "content"],
   func: async (page, kwargs) => {
@@ -192,14 +192,14 @@ cli({
     try {
       view = await apiGet(page, "/x/web-interface/view", { params: { bvid } });
     } catch (err) {
-      throw new CommandExecutionError2(`\u83B7\u53D6\u89C6\u9891\u4FE1\u606F\u5931\u8D25: ${err?.message || err}`);
+      throw new CommandExecutionError2(`获取视频信息失败: ${err?.message || err}`);
     }
     if (view?.code !== 0) {
-      throw new CommandExecutionError2(`\u83B7\u53D6\u89C6\u9891\u4FE1\u606F\u5931\u8D25: ${view?.message ?? "unknown"} (${view?.code})`);
+      throw new CommandExecutionError2(`获取视频信息失败: ${view?.message ?? "unknown"} (${view?.code})`);
     }
     const cid = view?.data?.cid;
     if (!cid) {
-      throw new CommandExecutionError2(`\u65E0\u6CD5\u4ECE view API \u62FF\u5230 cid (bvid=${bvid})`);
+      throw new CommandExecutionError2(`无法从 view API 拿到 cid (bvid=${bvid})`);
     }
     let payload;
     try {
@@ -208,36 +208,36 @@ cli({
         signed: true
       });
     } catch (err) {
-      throw new CommandExecutionError2(`\u83B7\u53D6\u89C6\u9891\u64AD\u653E\u4FE1\u606F\u5931\u8D25: ${err?.message || err}`);
+      throw new CommandExecutionError2(`获取视频播放信息失败: ${err?.message || err}`);
     }
     if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-      throw new CommandExecutionError2("\u83B7\u53D6\u5230\u7684\u89C6\u9891\u64AD\u653E\u4FE1\u606F\u5BF9\u8C61\u4E0D\u7B26\u5408\u9884\u671F\u683C\u5F0F");
+      throw new CommandExecutionError2("获取到的视频播放信息对象不符合预期格式");
     }
     if (payload.code !== 0) {
-      throw new CommandExecutionError2(`\u83B7\u53D6\u89C6\u9891\u64AD\u653E\u4FE1\u606F\u5931\u8D25: ${payload.message} (${payload.code})`);
+      throw new CommandExecutionError2(`获取视频播放信息失败: ${payload.message} (${payload.code})`);
     }
     const needLoginSubtitle = payload.data?.need_login_subtitle === true;
     const subtitles = payload.data?.subtitle?.subtitles;
     if (!Array.isArray(subtitles)) {
-      throw new CommandExecutionError2("\u83B7\u53D6\u5230\u7684\u5B57\u5E55\u5217\u8868\u5BF9\u8C61\u4E0D\u7B26\u5408\u6570\u7EC4\u683C\u5F0F");
+      throw new CommandExecutionError2("获取到的字幕列表对象不符合数组格式");
     }
     if (subtitles.length === 0) {
       if (needLoginSubtitle) {
         throw new AuthRequiredError2("bilibili.com", "Bilibili subtitles are hidden behind login for this video. Please log in to bilibili.com in Chrome and retry.");
       }
-      throw new EmptyResultError2("bilibili subtitle", "\u6B64\u89C6\u9891\u6CA1\u6709\u53D1\u73B0\u5916\u6302\u6216\u667A\u80FD\u5B57\u5E55\u3002");
+      throw new EmptyResultError2("bilibili subtitle", "此视频没有发现外挂或智能字幕。");
     }
     const target = kwargs.lang ? subtitles.find((s) => s.lan === kwargs.lang) || subtitles[0] : subtitles[0];
     if (!target || typeof target !== "object" || !Object.hasOwn(target, "subtitle_url")) {
-      throw new CommandExecutionError2("\u5B57\u5E55\u6761\u76EE\u7F3A\u5C11 subtitle_url \u5B57\u6BB5");
+      throw new CommandExecutionError2("字幕条目缺少 subtitle_url 字段");
     }
     const targetSubUrl = typeof target.subtitle_url === "string" ? target.subtitle_url.trim() : "";
     if (!targetSubUrl) {
-      throw new AuthRequiredError2("bilibili.com", "[\u98CE\u63A7\u62E6\u622A/\u672A\u767B\u5F55] \u83B7\u53D6\u5230\u7684 subtitle_url \u4E3A\u7A7A\uFF01\u8BF7\u786E\u4FDD CLI \u5DF2\u6210\u529F\u767B\u5F55\u4E14\u98CE\u63A7\u672A\u5C01\u9501\u6B64\u8D26\u53F7\u3002");
+      throw new AuthRequiredError2("bilibili.com", "[风控拦截/未登录] 获取到的 subtitle_url 为空！请确保 CLI 已成功登录且风控未封锁此账号。");
     }
     const finalUrl = targetSubUrl.startsWith("//") ? "https:" + targetSubUrl : targetSubUrl;
     if (!/^https?:\/\//i.test(finalUrl)) {
-      throw new CommandExecutionError2(`\u5B57\u5E55 URL \u975E\u6CD5: ${finalUrl}`);
+      throw new CommandExecutionError2(`字幕 URL 非法: ${finalUrl}`);
     }
     const fetchJs = `
       (async () => {
@@ -251,7 +251,7 @@ cli({
 
          try {
              const subJson = JSON.parse(text);
-             // B\u7AD9\u771F\u5B9E\u8FD4\u56DE\u683C\u5F0F\u662F { font_size: 0.4, font_color: "#FFFFFF", background_alpha: 0.5, background_color: "#9C27B0", Stroke: "none", type: "json" , body: [{from: 0, to: 0, content: ""}] }
+             // B站真实返回格式是 { font_size: 0.4, font_color: "#FFFFFF", background_alpha: 0.5, background_color: "#9C27B0", Stroke: "none", type: "json" , body: [{from: 0, to: 0, content: ""}] }
              if (Array.isArray(subJson?.body)) return { success: true, data: subJson.body };
              if (Array.isArray(subJson)) return { success: true, data: subJson };
              return { error: 'UNKNOWN_JSON', data: subJson };
@@ -264,26 +264,26 @@ cli({
     try {
       items = await page.evaluate(fetchJs);
     } catch (err) {
-      throw new CommandExecutionError2(`\u5B57\u5E55\u83B7\u53D6\u5931\u8D25: ${err?.message || err}`);
+      throw new CommandExecutionError2(`字幕获取失败: ${err?.message || err}`);
     }
     if (items?.error) {
-      throw new CommandExecutionError2(`\u5B57\u5E55\u83B7\u53D6\u5931\u8D25: ${items.error}${items.text ? " \u2014 " + items.text : ""}`);
+      throw new CommandExecutionError2(`字幕获取失败: ${items.error}${items.text ? " — " + items.text : ""}`);
     }
     if (!items || typeof items !== "object" || items.success !== true) {
-      throw new CommandExecutionError2("\u5B57\u5E55\u83B7\u53D6\u7ED3\u679C\u5BF9\u8C61\u4E0D\u7B26\u5408\u9884\u671F\u683C\u5F0F");
+      throw new CommandExecutionError2("字幕获取结果对象不符合预期格式");
     }
     const finalItems = items.data;
     if (!Array.isArray(finalItems)) {
-      throw new CommandExecutionError2("\u89E3\u6790\u5230\u7684\u5B57\u5E55\u5217\u8868\u5BF9\u8C61\u4E0D\u7B26\u5408\u6570\u7EC4\u683C\u5F0F");
+      throw new CommandExecutionError2("解析到的字幕列表对象不符合数组格式");
     }
     if (finalItems.length === 0) {
-      throw new EmptyResultError2("bilibili subtitle", "\u5B57\u5E55\u6587\u4EF6\u4E2D\u6CA1\u6709\u5B57\u5E55\u7247\u6BB5\u3002");
+      throw new EmptyResultError2("bilibili subtitle", "字幕文件中没有字幕片段。");
     }
     return finalItems.map((item, idx) => {
       const from = Number(item?.from);
       const to = Number(item?.to);
       if (!item || typeof item !== "object" || !Number.isFinite(from) || !Number.isFinite(to)) {
-        throw new CommandExecutionError2("\u5B57\u5E55\u7247\u6BB5\u7F3A\u5C11\u6709\u6548 from/to \u65F6\u95F4\u6233");
+        throw new CommandExecutionError2("字幕片段缺少有效 from/to 时间戳");
       }
       return {
         index: idx + 1,

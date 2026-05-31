@@ -77,7 +77,7 @@ cli({
   site: "douyin",
   name: "collections",
   access: "read",
-  description: "\u5408\u96C6\u5217\u8868",
+  description: "合集列表",
   domain: "creator.douyin.com",
   strategy: Strategy.COOKIE,
   args: [

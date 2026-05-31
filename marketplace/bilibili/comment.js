@@ -249,7 +249,7 @@ cli({
   site: "bilibili",
   name: "comment",
   access: "write",
-  description: "\u5728 B\u7AD9\u89C6\u9891\u4E0B\u53D1\u8868\u8BC4\u8BBA\u6216\u56DE\u590D\uFF08\u5B98\u65B9 API\uFF0C\u9700\u767B\u5F55\uFF1B\u6D88\u606F\u91CC\u7684 @\u7528\u6237 \u4F1A\u88AB\u89E3\u6790\u4E3A\u771F\u5B9E\u63D0\u53CA\uFF09",
+  description: "在 B站视频下发表评论或回复（官方 API，需登录；消息里的 @用户 会被解析为真实提及）",
   domain: "www.bilibili.com",
   strategy: Strategy.COOKIE,
   args: [

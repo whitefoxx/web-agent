@@ -84,7 +84,7 @@ cli({
             const visible = (el) => !!el && (el.offsetParent !== null || el.getClientRects().length > 0);
             // Locate the article matching the requested status id, then find
             // its More menu. Without article scoping we'd grab whatever the
-            // first "More" button on the page is \u2014 usually the parent tweet
+            // first "More" button on the page is — usually the parent tweet
             // (silent: hide the wrong reply, or fail silently if the parent
             // is not a reply you authored).
             let attempts = 0;
@@ -113,7 +113,7 @@ cli({
             await new Promise(r => setTimeout(r, 1000));
 
             // Look for the "Hide reply" menu item. Menu items render at the
-            // document root, not inside the article \u2014 scope is the open menu.
+            // document root, not inside the article — scope is the open menu.
             const items = document.querySelectorAll('[role="menuitem"]');
             let hideItem = null;
             for (const item of items) {

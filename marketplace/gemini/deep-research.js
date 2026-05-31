@@ -6,7 +6,7 @@ import { ArgumentError } from "@jackwener/opencli/errors";
 import { CommandExecutionError } from "@jackwener/opencli/errors";
 var GEMINI_DOMAIN = "gemini.google.com";
 var GEMINI_APP_URL = "https://gemini.google.com/app";
-var GEMINI_DEEP_RESEARCH_DEFAULT_TOOL_LABELS = ["Deep Research", "Deep research", "\u6DF1\u5EA6\u7814\u7A76"];
+var GEMINI_DEEP_RESEARCH_DEFAULT_TOOL_LABELS = ["Deep Research", "Deep research", "深度研究"];
 var GEMINI_DEEP_RESEARCH_DEFAULT_CONFIRM_LABELS = [
   "Start research",
   "Start Research",
@@ -16,11 +16,11 @@ var GEMINI_DEEP_RESEARCH_DEFAULT_CONFIRM_LABELS = [
   "Generate Research Plan",
   "Generate deep research plan",
   "Generate Deep Research Plan",
-  "\u5F00\u59CB\u7814\u7A76",
-  "\u5F00\u59CB\u6DF1\u5EA6\u7814\u7A76",
-  "\u5F00\u59CB\u8C03\u7814",
-  "\u751F\u6210\u7814\u7A76\u8BA1\u5212",
-  "\u751F\u6210\u8C03\u7814\u8BA1\u5212"
+  "开始研究",
+  "开始深度研究",
+  "开始调研",
+  "生成研究计划",
+  "生成调研计划"
 ];
 var GEMINI_RESPONSE_NOISE_PATTERNS = [
   /Gemini can make mistakes\.?/gi,
@@ -158,8 +158,8 @@ function readGeminiSnapshotScript() {
         const aria = (node.getAttribute('aria-label') || '').trim().toLowerCase();
         return text === 'stop response'
           || aria === 'stop response'
-          || text === '\u505C\u6B62\u56DE\u7B54'
-          || aria === '\u505C\u6B62\u56DE\u7B54';
+          || text === '停止回答'
+          || aria === '停止回答';
       });
       const turns = ${getTurnsScript().trim()};
       const transcriptLines = ${getTranscriptLinesScript().trim()};
@@ -441,8 +441,8 @@ function submitComposerScript() {
         });
       }
 
-      const excludedPattern = /main menu|\u4E3B\u83DC\u5355|microphone|\u9EA6\u514B\u98CE|upload|\u4E0A\u4F20|mode|\u6A21\u5F0F|tools|\u5DE5\u5177|settings|\u4E34\u65F6\u5BF9\u8BDD|new chat|\u65B0\u5BF9\u8BDD/i;
-      const submitPattern = /send|\u53D1\u9001|submit|\u63D0\u4EA4/i;
+      const excludedPattern = /main menu|主菜单|microphone|麦克风|upload|上传|mode|模式|tools|工具|settings|临时对话|new chat|新对话/i;
+      const submitPattern = /send|发送|submit|提交/i;
       let bestButton = null;
       let bestScore = -1;
 
@@ -513,10 +513,10 @@ function clickNewChatScript() {
         return isVisible(node) && (
           text === 'new chat'
           || aria === 'new chat'
-          || text === '\u53D1\u8D77\u65B0\u5BF9\u8BDD'
-          || aria === '\u53D1\u8D77\u65B0\u5BF9\u8BDD'
-          || text === '\u65B0\u5BF9\u8BDD'
-          || aria === '\u65B0\u5BF9\u8BDD'
+          || text === '发起新对话'
+          || aria === '发起新对话'
+          || text === '新对话'
+          || aria === '新对话'
         );
       });
 
@@ -532,7 +532,7 @@ function clickNewChatScript() {
 function openGeminiToolsMenuScript() {
   return `
     (() => {
-      const labels = ['tools', 'tool', 'mode', '\u7814\u7A76', 'deep research', 'deep-research', '\u5DE5\u5177'];
+      const labels = ['tools', 'tool', 'mode', '研究', 'deep research', 'deep-research', '工具'];
       const normalize = (value) => (value || '').replace(/\\s+/g, ' ').trim().toLowerCase();
       const matchesLabel = (value) => {
         const text = normalize(value);

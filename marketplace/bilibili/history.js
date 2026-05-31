@@ -137,7 +137,7 @@ cli({
   site: "bilibili",
   name: "history",
   access: "read",
-  description: "\u6211\u7684\u89C2\u770B\u5386\u53F2",
+  description: "我的观看历史",
   domain: "www.bilibili.com",
   strategy: Strategy.COOKIE,
   args: [
@@ -155,7 +155,7 @@ cli({
       const duration = item.duration ?? 0;
       let progressStr;
       if (progress < 0 || progress >= duration) {
-        progressStr = "\u5DF2\u770B\u5B8C";
+        progressStr = "已看完";
       } else {
         const pct = duration > 0 ? Math.round(progress / duration * 100) : 0;
         progressStr = `${formatDuration(progress)}/${formatDuration(duration)} (${pct}%)`;

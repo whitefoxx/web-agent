@@ -471,7 +471,7 @@ cli({
   args: [
     { name: "username", type: "string", positional: true, help: "Twitter screen name (with or without @). Defaults to the logged-in user when omitted." },
     { name: "limit", type: "int", default: 20, help: "Max tweets to return" },
-    { name: "top-by-engagement", type: "int", default: 0, help: "When set to N>0, re-rank the tweets by weighted engagement (likes\xD71 + retweets\xD73 + replies\xD72 + bookmarks\xD75 + log10(views+1)\xD70.5) and return the top N. Default 0 keeps the chronological ordering." }
+    { name: "top-by-engagement", type: "int", default: 0, help: "When set to N>0, re-rank the tweets by weighted engagement (likes×1 + retweets×3 + replies×2 + bookmarks×5 + log10(views+1)×0.5) and return the top N. Default 0 keeps the chronological ordering." }
   ],
   columns: ["id", "author", "created_at", "is_retweet", "text", "likes", "retweets", "replies", "views", "url", "has_media", "media_urls", "quoted_tweet"],
   func: async (page, kwargs) => {
@@ -525,7 +525,7 @@ cli({
         return r.ok ? await r.json() : { error: r.status };
       }`));
       if (data?.error) {
-        if (all.length === 0) throw new CommandExecutionError(`HTTP ${data.error}: UserTweets fetch failed \u2014 queryId may have expired`);
+        if (all.length === 0) throw new CommandExecutionError(`HTTP ${data.error}: UserTweets fetch failed — queryId may have expired`);
         break;
       }
       const { tweets, nextCursor } = parseUserTweets(data, seen);

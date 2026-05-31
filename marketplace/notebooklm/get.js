@@ -283,8 +283,8 @@ async function getNotebooklmPageState(page) {
     const loginRequired = textNodes.some(text =>
       text.includes('sign in') ||
       text.includes('log in') ||
-      text.includes('\u767B\u5F55') ||
-      text.includes('\u767B\u5165')
+      text.includes('登录') ||
+      text.includes('登入')
     );
 
     const notebookCount = Array.from(document.querySelectorAll('a[href*="/notebook/"]'))

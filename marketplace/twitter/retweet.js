@@ -82,7 +82,7 @@ cli({
         try {
             ${buildTwitterArticleScopeSource(target.id)}
             // Poll for the tweet to render. State probes scoped to the article
-            // matching the requested status id \u2014 bare querySelector on a
+            // matching the requested status id — bare querySelector on a
             // conversation page would silently grab the first article (e.g.
             // the parent tweet) and retweet the wrong one.
             let attempts = 0;
@@ -110,7 +110,7 @@ cli({
                 return { ok: false, message: 'Could not find the Retweet button on this tweet after waiting 10 seconds. Are you logged in?' };
             }
 
-            // Step 1: click Retweet button \u2192 opens menu
+            // Step 1: click Retweet button → opens menu
             retweetBtn.click();
 
             // Step 2: wait for and click the confirm menu item. The confirm

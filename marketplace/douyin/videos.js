@@ -94,12 +94,12 @@ cli({
   site: "douyin",
   name: "videos",
   access: "read",
-  description: "\u83B7\u53D6\u4F5C\u54C1\u5217\u8868",
+  description: "获取作品列表",
   domain: "creator.douyin.com",
   strategy: Strategy.COOKIE,
   args: [
-    { name: "limit", type: "int", default: 20, help: "\u6BCF\u9875\u6570\u91CF" },
-    { name: "page", type: "int", default: 1, help: "\u9875\u7801" },
+    { name: "limit", type: "int", default: 20, help: "每页数量" },
+    { name: "page", type: "int", default: 1, help: "页码" },
     { name: "status", default: "all", choices: ["all", "published", "reviewing", "scheduled"] }
   ],
   columns: ["aweme_id", "title", "status", "play_count", "digg_count", "create_time"],

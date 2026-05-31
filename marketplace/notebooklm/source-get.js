@@ -360,8 +360,8 @@ async function getNotebooklmPageState(page) {
     const loginRequired = textNodes.some(text =>
       text.includes('sign in') ||
       text.includes('log in') ||
-      text.includes('\u767B\u5F55') ||
-      text.includes('\u767B\u5165')
+      text.includes('登录') ||
+      text.includes('登入')
     );
 
     const notebookCount = Array.from(document.querySelectorAll('a[href*="/notebook/"]'))
@@ -396,32 +396,32 @@ async function listNotebooklmSourcesFromPage(page) {
     if (!notebookId) return [];
 
     const skip = new Set([
-      '\u9009\u62E9\u6240\u6709\u6765\u6E90',
-      '\u6DFB\u52A0\u6765\u6E90',
-      '\u6536\u8D77\u6765\u6E90\u9762\u677F',
-      '\u66F4\u591A',
+      '选择所有来源',
+      '添加来源',
+      '收起来源面板',
+      '更多',
       'Web',
       'Fast Research',
-      '\u63D0\u4EA4',
-      '\u521B\u5EFA\u7B14\u8BB0\u672C',
-      '\u5206\u4EAB\u7B14\u8BB0\u672C',
-      '\u8BBE\u7F6E',
-      '\u5BF9\u8BDD\u9009\u9879',
-      '\u914D\u7F6E\u7B14\u8BB0\u672C',
-      '\u97F3\u9891\u6982\u89C8',
-      '\u6F14\u793A\u6587\u7A3F',
-      '\u89C6\u9891\u6982\u89C8',
-      '\u601D\u7EF4\u5BFC\u56FE',
-      '\u62A5\u544A',
-      '\u95EA\u5361',
-      '\u6D4B\u9A8C',
-      '\u4FE1\u606F\u56FE',
-      '\u6570\u636E\u8868\u683C',
-      '\u6DFB\u52A0\u7B14\u8BB0',
-      '\u4FDD\u5B58\u5230\u7B14\u8BB0',
-      '\u590D\u5236\u6458\u8981',
-      '\u6458\u8981\u5F88\u68D2',
-      '\u6458\u8981\u6B20\u4F73',
+      '提交',
+      '创建笔记本',
+      '分享笔记本',
+      '设置',
+      '对话选项',
+      '配置笔记本',
+      '音频概览',
+      '演示文稿',
+      '视频概览',
+      '思维导图',
+      '报告',
+      '闪卡',
+      '测验',
+      '信息图',
+      '数据表格',
+      '添加笔记',
+      '保存到笔记',
+      '复制摘要',
+      '摘要很棒',
+      '摘要欠佳',
     ]);
 
     const rows = [];
@@ -429,7 +429,7 @@ async function listNotebooklmSourcesFromPage(page) {
     for (const node of Array.from(document.querySelectorAll('button, [role="button"], input[type="checkbox"]'))) {
       const text = (node.getAttribute?.('aria-label') || node.textContent || '').trim();
       if (!text || skip.has(text) || seen.has(text)) continue;
-      if (text.includes('\u4E2A\u6765\u6E90') || text.includes('\u6765\u6E90') && text.length < 5) continue;
+      if (text.includes('个来源') || text.includes('来源') && text.length < 5) continue;
       seen.add(text);
       rows.push({
         id: text,

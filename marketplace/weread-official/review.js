@@ -79,7 +79,7 @@ async function callGateway(apiName, params = {}, { timeoutMs = DEFAULT_TIMEOUT_M
     const required = info?.required_version ?? info?.version ?? "unknown";
     const message = info?.message ?? "WeRead skill version is outdated";
     throw new CommandExecutionError(
-      `WeRead skill \u9700\u5347\u7EA7: ${message}. Required skill_version=${required}, current=${SKILL_VERSION}`,
+      `WeRead skill 需升级: ${message}. Required skill_version=${required}, current=${SKILL_VERSION}`,
       "Pull the latest weread-skills.zip and bump SKILL_VERSION in clis/weread-official/utils.js."
     );
   }
@@ -111,16 +111,16 @@ function formatDate(ts) {
 }
 function formatStar(star) {
   const value = Number(star);
-  if (!Number.isFinite(value) || value <= 0) return "\u65E0\u8BC4\u5206";
+  if (!Number.isFinite(value) || value <= 0) return "无评分";
   const count = Math.min(5, Math.floor(value / 20));
-  if (count <= 0) return "\u65E0\u8BC4\u5206";
-  return "\u2B50".repeat(count);
+  if (count <= 0) return "无评分";
+  return "⭐".repeat(count);
 }
 function truncate(text, maxLen = 200) {
   const value = String(text ?? "");
   if (!value) return "";
   if (value.length <= maxLen) return value;
-  return `${value.slice(0, maxLen)}\u2026`;
+  return `${value.slice(0, maxLen)}…`;
 }
 function makeDeepLink({ bookId, chapterUid = "", rangeStart = "", rangeEnd = "", userVid = "" } = {}) {
   const bid = String(bookId ?? "").trim();
@@ -193,7 +193,7 @@ cli({
     { name: "bookId", positional: true, required: true, help: "WeRead bookId (from `weread-official search`)" },
     { name: "type", default: "all", choices: Object.keys(TYPE_ALIASES), help: "Review filter (all/recommend/thumbs-down/newest/neutral)" },
     { name: "count", type: "int", default: 20, help: "Page size (1-100, default 20)" },
-    { name: "max-idx", type: "int", default: 0, help: "Pagination cursor \u2014 pass idx from last row of previous page" },
+    { name: "max-idx", type: "int", default: 0, help: "Pagination cursor — pass idx from last row of previous page" },
     { name: "synckey", type: "int", help: "Sync cursor returned by previous response" }
   ],
   columns: ["rank", "idx", "reviewId", "star", "starLabel", "author", "isFinish", "chapter", "content", "createTime", "link"],

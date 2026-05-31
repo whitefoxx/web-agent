@@ -100,7 +100,7 @@ async function extractVisiblePosts(page) {
       return el ? el.getAttribute(attr) : '';
     }
     function cleanTimestamp(value) {
-      return normalize(String(value || '').replace(/[\u2022.]/g, ' '));
+      return normalize(String(value || '').replace(/[•.]/g, ' '));
     }
     function parseMetric(value) {
       var raw = normalize(value).toLowerCase();
@@ -138,11 +138,11 @@ async function extractVisiblePosts(page) {
     }
     function looksLikeTimestamp(value) {
       var lower = String(value || '').toLowerCase();
-      return /^\\d+\\s*(s|m|h|d|w|mo|yr|min)(\\s*[\u2022.])?$/i.test(lower);
+      return /^\\d+\\s*(s|m|h|d|w|mo|yr|min)(\\s*[•.])?$/i.test(lower);
     }
     function looksLikeBadge(value) {
       var lower = String(value || '').toLowerCase();
-      return String(value || '').indexOf('\u2022') === 0
+      return String(value || '').indexOf('•') === 0
         || lower === '1st'
         || lower === '2nd'
         || lower === '3rd'
@@ -239,8 +239,8 @@ async function extractVisiblePosts(page) {
       } else {
         rest = text;
       }
-      rest = normalize(rest.replace(/^[\u2022\xB7]\\s*(1st|2nd|3rd\\+?|3rd|degree connection)/i, ''));
-      match = rest.match(/(\\d+\\s*(?:s|m|h|d|w|mo|yr|min))\\s*[\u2022\xB7]?$/i);
+      rest = normalize(rest.replace(/^[•·]\\s*(1st|2nd|3rd\\+?|3rd|degree connection)/i, ''));
+      match = rest.match(/(\\d+\\s*(?:s|m|h|d|w|mo|yr|min))\\s*[•·]?$/i);
       if (match) {
         postedAt = cleanTimestamp(match[1]);
         headline = normalize(rest.slice(0, rest.length - match[0].length));
@@ -257,7 +257,7 @@ async function extractVisiblePosts(page) {
         .replace(/\\s+[A-Z][^\\n]+\\s+and\\s+\\d[\\d,]*\\s+others\\s+reacted[\\s\\S]*$/i, '')
         .replace(/\\s+Like\\s+Comment\\s+Repost\\s+Send[\\s\\S]*$/i, '')
         .replace(/\\s+Reaction button state:[\\s\\S]*$/i, '')
-        .replace(/^\\d+\\s*(?:s|m|h|d|w|mo|yr|min)\\s*[\u2022.]?\\s*Follow\\s+/i, '')
+        .replace(/^\\d+\\s*(?:s|m|h|d|w|mo|yr|min)\\s*[•.]?\\s*Follow\\s+/i, '')
       );
     }
     function parseActorMeta(root) {
@@ -268,13 +268,13 @@ async function extractVisiblePosts(page) {
       var postedAt = '';
       var match;
       if (actorText) {
-        match = actorText.match(/^(.+?)\\s+[\u2022\xB7]\\s+(1st|2nd|3rd\\+?|3rd|degree connection)(.*)$/i);
+        match = actorText.match(/^(.+?)\\s+[•·]\\s+(1st|2nd|3rd\\+?|3rd|degree connection)(.*)$/i);
         if (match) {
           author = normalize(match[1]);
           actorText = normalize(match[3]);
         }
       }
-      match = actorText.match(/(.+?)\\s+(\\d+\\s*(?:s|m|h|d|w|mo|yr|min))\\s*[\u2022\xB7]?$/i);
+      match = actorText.match(/(.+?)\\s+(\\d+\\s*(?:s|m|h|d|w|mo|yr|min))\\s*[•·]?$/i);
       if (match) {
         headline = normalize(match[1]);
         postedAt = cleanTimestamp(match[2]);

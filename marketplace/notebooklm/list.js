@@ -312,8 +312,8 @@ async function getNotebooklmPageState(page) {
     const loginRequired = textNodes.some(text =>
       text.includes('sign in') ||
       text.includes('log in') ||
-      text.includes('\u767B\u5F55') ||
-      text.includes('\u767B\u5165')
+      text.includes('登录') ||
+      text.includes('登入')
     );
 
     const notebookCount = Array.from(document.querySelectorAll('a[href*="/notebook/"]'))
@@ -395,7 +395,7 @@ async function listNotebooklmLinks(page) {
         titleNode?.textContent ||
         node.getAttribute('aria-label') ||
         node.getAttribute('title') ||
-        parentLines.find((line) => !line.includes('\u4E2A\u6765\u6E90') && !line.includes('sources') && !line.includes('more_vert')) ||
+        parentLines.find((line) => !line.includes('个来源') && !line.includes('sources') && !line.includes('more_vert')) ||
         node.textContent ||
         ''
       ).trim();
