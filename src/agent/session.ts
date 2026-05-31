@@ -80,6 +80,12 @@ export interface SessionState {
    * injection; only incremented on continuation turns that just got a
    * lightweight reminder. */
   turnsSinceFullPrompt: number;
+  /** Snapshot of `getRegistryVersion()` taken the last time we built a full
+   * first-turn prompt for the chatbot. On the next continuation turn, if the
+   * version has moved (= an adapter was installed/uninstalled/enabled since
+   * we anchored), force a re-anchor so the chatbot sees the new catalog
+   * within the SAME conversation instead of having to start a fresh one. */
+  lastSeenRegistryVersion?: number;
   status: SessionStatus;
   iterations: number;
   history: Turn[];

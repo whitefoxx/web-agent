@@ -73,14 +73,31 @@ import type {
   WriteConfirmResp,
 } from '../connectors/messages';
 
-// Side-effect imports: each adapter file's top-level cli({...}) registers it
-// with the global registry that openAiToolsFromRegistry / lookupAdapter read.
-import '../tools/xiaohongshu/_all';
+// Side-effect import: registers site-independent web-operation adapters
+// (open_url, get_page_text, screenshot, scroll, click, type, …) which the
+// agent uses to navigate / scrape arbitrary pages without a site adapter.
+// Per-site adapters (xiaohongshu, twitter, …) are now installed from the
+// marketplace at runtime — no built-in site directories.
 import '../tools/generic/_all';
-// Unmodified opencli adapter, byte-imported via scripts/import-adapter.mjs.
-// Its `@jackwener/opencli/*` imports resolve through the Vite alias to our
-// shims — proof of source-level opencli compatibility.
-import '../tools/hackernews/_all';
+
+// Runtime-installed adapters (hot-plug): registered from IndexedDB on boot,
+// and installed/uninstalled at runtime via the message router below.
+import {
+  installFromCaptured,
+  loadInstalledOnBoot,
+  uninstall as uninstallAdapter,
+  setEnabled as setAdapterEnabled,
+  listInstalledAdapters,
+} from '../adapters/install-manager';
+import { configureWebchatWorld, handleRunnerPortConnect } from '../userscript/sw-runner';
+import type {
+  InstallAdapterReq,
+  UninstallAdapterReq,
+  SetAdapterEnabledReq,
+  ListInstalledResp,
+  InstalledAdapterSummary,
+  AdaptersChangedEvt,
+} from '../connectors/messages';
 
 const SCOPE = 'sw';
 
@@ -132,6 +149,14 @@ const keepaliveConnections = new Set<chrome.runtime.Port>();
 
 log(SCOPE, 'service worker booting');
 void recoverInterruptedSessionsOnBoot();
+// Restore runtime-installed adapters into the live registry. Fire-and-forget:
+// boot shouldn't block on IDB, and a brand-new install has nothing to restore.
+void loadInstalledOnBoot().catch((e) => warn(SCOPE, 'loadInstalledOnBoot failed', e));
+// Phase B: set up the USER_SCRIPT-world we inject installed func adapters
+// into. configureWorld is idempotent; we still call it eagerly so the first
+// adapter invocation doesn't pay the cost (and so failures — most likely
+// "Allow user scripts" disabled — surface in logs at boot, not on first call).
+void configureWebchatWorld();
 
 chrome.runtime.onInstalled.addListener(() => {
   log(SCOPE, 'onInstalled');
@@ -143,14 +168,35 @@ chrome.runtime.onInstalled.addListener(() => {
 chrome.runtime.onStartup.addListener(() => log(SCOPE, 'onStartup'));
 
 chrome.runtime.onConnect.addListener((port) => {
-  if (port.name !== 'webchat-keepalive') return;
-  keepaliveConnections.add(port);
-  log(SCOPE, `keepalive port connected (total=${keepaliveConnections.size})`);
-  port.onDisconnect.addListener(() => {
-    keepaliveConnections.delete(port);
-    log(SCOPE, `keepalive port disconnected (remaining=${keepaliveConnections.size})`);
-  });
+  if (port.name === 'webchat-keepalive') {
+    keepaliveConnections.add(port);
+    log(SCOPE, `keepalive port connected (total=${keepaliveConnections.size})`);
+    port.onDisconnect.addListener(() => {
+      keepaliveConnections.delete(port);
+      log(SCOPE, `keepalive port disconnected (remaining=${keepaliveConnections.size})`);
+    });
+    return;
+  }
+  // Fallback (content-scripts / extension pages with custom names): future-
+  // proof a bit, but right now keepalive is the only non-user-script port.
+  log(SCOPE, `unexpected onConnect port name=${port.name} — ignored`);
 });
+
+// USER_SCRIPT-world (Phase B runner) ports come through a SEPARATE event —
+// chrome.runtime.onUserScriptConnect — NOT onConnect. The userScripts API
+// deliberately isolates user-script messaging so an extension can't
+// accidentally cross-talk between its content-script port set and its
+// user-script port set. Symptom of getting this wrong: runner connects
+// successfully (its DOM marker says status='connected'), but the SW's
+// onConnect listener never fires → 60s timeout, "no active session" warn
+// never appears either. Use the dedicated event.
+if (chrome.runtime.onUserScriptConnect) {
+  chrome.runtime.onUserScriptConnect.addListener((port) => {
+    handleRunnerPortConnect(port);
+  });
+} else {
+  warn(SCOPE, 'chrome.runtime.onUserScriptConnect not available — Phase B func adapters will not receive port connections');
+}
 
 /** On boot, find any persisted session whose status was 'running' at the
  * moment the prior SW instance died and mark it as 'error'. Its in-
@@ -331,6 +377,34 @@ chrome.runtime.onMessage.addListener((msg: unknown, sender, sendResponse): boole
     case 'LOG_ENTRY': {
       ingestEntry((m as LogEntryEvt).entry);
       return false;
+    }
+    case 'INSTALL_ADAPTER': {
+      void handleInstallAdapter(m as InstallAdapterReq).then(
+        (resp) => sendResponse(resp),
+        (e) => sendResponse({ type: 'INSTALL_ADAPTER_RESP', ok: false, error: msgOf(e) }),
+      );
+      return true; // async sendResponse
+    }
+    case 'UNINSTALL_ADAPTER': {
+      void handleUninstallAdapter(m as UninstallAdapterReq).then(
+        () => sendResponse({ ok: true }),
+        (e) => sendResponse({ ok: false, error: msgOf(e) }),
+      );
+      return true;
+    }
+    case 'SET_ADAPTER_ENABLED': {
+      void handleSetAdapterEnabled(m as SetAdapterEnabledReq).then(
+        () => sendResponse({ ok: true }),
+        (e) => sendResponse({ ok: false, error: msgOf(e) }),
+      );
+      return true;
+    }
+    case 'LIST_INSTALLED': {
+      void handleListInstalled().then(
+        (resp) => sendResponse(resp),
+        (e) => sendResponse({ ok: false, error: msgOf(e) }),
+      );
+      return true;
     }
     default:
       return;
@@ -640,6 +714,59 @@ async function handleEnsureTab(_m: EnsureChatbotTabReq): Promise<ChatbotTabStatu
 
 function handleRequestLogs(_m: RequestLogsReq): LogsResponse {
   return { type: 'LOGS_RESPONSE', entries: getLocalBuffer() };
+}
+
+/* ───────── runtime adapter install / marketplace ───────── */
+
+/** Persist + register an adapter the SidePanel's sandbox already eval'd into
+ * captured defs. The SW never evals — it only consumes serializable data. */
+async function handleInstallAdapter(m: InstallAdapterReq) {
+  const r = await installFromCaptured(
+    { source: m.source, defs: m.defs, origin: m.origin },
+    Date.now(),
+  );
+  if (r.ok) broadcastAdaptersChanged();
+  return {
+    type: 'INSTALL_ADAPTER_RESP' as const,
+    ok: r.ok,
+    id: r.id,
+    title: r.title,
+    registered: r.registered,
+    deferredFunc: r.deferredFunc,
+    deferredUnsupported: r.deferredUnsupported,
+    error: r.error,
+  };
+}
+
+async function handleUninstallAdapter(m: UninstallAdapterReq): Promise<void> {
+  await uninstallAdapter(m.id);
+  broadcastAdaptersChanged();
+}
+
+async function handleSetAdapterEnabled(m: SetAdapterEnabledReq): Promise<void> {
+  await setAdapterEnabled(m.id, m.enabled);
+  broadcastAdaptersChanged();
+}
+
+async function handleListInstalled(): Promise<ListInstalledResp> {
+  const rows = await listInstalledAdapters();
+  const adapters: InstalledAdapterSummary[] = rows.map((r) => ({
+    id: r.id,
+    title: r.title,
+    kind: r.kind,
+    enabled: r.enabled,
+    commandCount: r.defs.length,
+    installedAt: r.installedAt,
+    origin: r.origin,
+  }));
+  return { type: 'LIST_INSTALLED_RESP', adapters };
+}
+
+/** Tell the SidePanel the installed set changed so it refreshes its lists.
+ * (The agent's tool whitelist is read live from the registry, so no extra
+ * push is needed there.) */
+function broadcastAdaptersChanged(): void {
+  sendToSidepanel({ type: 'ADAPTERS_CHANGED' } satisfies AdaptersChangedEvt);
 }
 
 async function handleListSessions(m: ListSessionsReq): Promise<ListSessionsResp> {

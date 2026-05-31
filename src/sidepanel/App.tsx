@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { Markdown } from './Markdown';
+import { AdaptersSection } from './Adapters';
 import type { UiTurn } from './types';
 import {
   type AbortSessionReq,
@@ -858,10 +859,17 @@ function ToolTraceCard({ trace }: { trace: ToolTrace }) {
   );
 }
 
+// Mirror the LLM-input cap in src/agent/{api-engine,system-prompt}.ts so the
+// SidePanel shows ≥ what the model actually received. Keep in sync if either
+// engine bumps its `MAX_TOOL_RESULT_CHARS`.
+const PREVIEW_MAX_CHARS = 64_000;
+
 function previewResult(r: unknown): string {
   try {
     const s = typeof r === 'string' ? r : JSON.stringify(r, null, 2);
-    return s.length > 4000 ? s.slice(0, 4000) + `\n…[truncated ${s.length - 4000}]` : s;
+    return s.length > PREVIEW_MAX_CHARS
+      ? s.slice(0, PREVIEW_MAX_CHARS) + `\n…[truncated ${s.length - PREVIEW_MAX_CHARS}]`
+      : s;
   } catch {
     return String(r);
   }
@@ -887,6 +895,26 @@ function LlmBackendSection({
     config.mode === 'api' ? config.model : (providerById('deepseek')?.defaultModel ?? ''),
   );
   const [saved, setSaved] = useState(false);
+
+  // Re-sync local state when the saved config arrives (or changes externally).
+  // useState initializers fire ONCE at mount; the parent's loadLlmConfig() is
+  // async, so on first mount `config` is still DEFAULT_CONFIG and the api-key
+  // / model / baseUrl fields end up empty. Without this effect, the saved key
+  // never makes it back into the form — looked like persistence was broken.
+  // Safe against clobbering user edits: the parent only updates `config` after
+  // save (when local state already matches the new config → effect is a no-op),
+  // or on the initial load.
+  useEffect(() => {
+    setMode(config.mode);
+    if (config.mode === 'connector') {
+      setChatbot(config.chatbot);
+    } else {
+      setProvider(config.provider);
+      setBaseUrl(config.baseUrl);
+      setApiKey(config.apiKey);
+      setModel(config.model);
+    }
+  }, [config]);
 
   function pickProvider(id: string): void {
     setProvider(id);
@@ -1061,6 +1089,7 @@ function SettingsDrawer(props: {
         </button>
         </div>
       )}
+      <AdaptersSection />
       <HistorySection
         currentSessionId={props.currentSessionId}
         onResume={props.onResumeFromHistory}

@@ -36,6 +36,16 @@ export const Strategy = Object.freeze({
 
 const _registry = [];
 
+/** Monotonically increasing counter bumped on every successful
+ * registration / unregistration. Engines compare a per-session snapshot to
+ * this to detect "the tool catalog changed since I last anchored my prompt /
+ * pulled my tools array", so the user sees newly installed adapters in their
+ * IN-PROGRESS session without having to start a new conversation. */
+let _version = 0;
+export function getRegistryVersion() {
+  return _version;
+}
+
 /** Recognized opencli command fields, copied through verbatim so the stored
  * definition is a faithful superset. Anything not listed is still tolerated
  * (we spread the original first), this list just documents intent. */
@@ -48,11 +58,12 @@ export function cli(def) {
       `cli() definition missing site/name: ${JSON.stringify({ site: def.site, name: def.name })}`,
     );
   }
-  // opencli permits func-less commands (pipeline-only). In the extension a
-  // command with no func can't execute, so warn loudly but don't throw —
-  // registration shouldn't crash side-panel boot.
-  if (typeof def.func !== 'function') {
-    console.warn(`[registry] ${def.site}/${def.name} registered without a func — it cannot execute.`);
+  // opencli permits func-less commands whose logic lives in a declarative
+  // `pipeline` (these run via runtime/opencli/pipeline.ts). Only warn when a
+  // command has NEITHER a func NOR a pipeline — then it genuinely can't run.
+  const hasPipeline = Array.isArray(def.pipeline) && def.pipeline.length > 0;
+  if (typeof def.func !== 'function' && !hasPipeline) {
+    console.warn(`[registry] ${def.site}/${def.name} registered with neither func nor pipeline — it cannot execute.`);
   }
   // De-dupe on (site, name) so re-importing an adapter (HMR / double _all)
   // doesn't double-register. Last write wins, matching opencli's Map.put.
@@ -61,6 +72,7 @@ export function cli(def) {
   const stored = { access: 'read', ...def };
   if (existingIdx >= 0) _registry[existingIdx] = stored;
   else _registry.push(stored);
+  _version++;
   return stored;
 }
 
@@ -70,6 +82,20 @@ export function getRegistry() {
 
 export function findAdapter(site, name) {
   return _registry.find((d) => d.site === site && d.name === name);
+}
+
+/**
+ * Remove a registered adapter by (site, name). Used when a runtime-installed
+ * adapter is uninstalled or disabled. Returns true if something was removed.
+ * Built-in adapters can be removed too (caller's responsibility not to), so
+ * the install manager only ever unregisters ones it marked `_installed`.
+ */
+export function unregister(site, name) {
+  const idx = _registry.findIndex((d) => d.site === site && d.name === name);
+  if (idx < 0) return false;
+  _registry.splice(idx, 1);
+  _version++;
+  return true;
 }
 
 /** opencli compat: `${site}/${name}`. Some adapters import this helper. */

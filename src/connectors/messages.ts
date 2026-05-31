@@ -321,6 +321,94 @@ export interface PongConnectorEvt {
   type: 'PONG_CONNECTOR';
 }
 
+/* ───────── Adapter install / marketplace (SidePanel ↔ SW) ─────────
+ *
+ * Runtime adapter hot-plug. The SidePanel hosts the sandboxed iframe that
+ * evals untrusted adapter source (the SW can't eval under MV3 CSP), so the
+ * flow is: SidePanel evals → sends captured defs to SW → SW persists +
+ * registers. List/uninstall/enable are pure SW operations.
+ */
+
+/** A captured, serializable adapter definition (mirror of sandbox
+ * CapturedAdapter / installed-store CapturedDef; redeclared here so the
+ * message module stays dependency-free). */
+export interface InstalledAdapterDef {
+  site: string;
+  name: string;
+  access?: 'read' | 'write';
+  description?: string;
+  domain?: string;
+  strategy?: string;
+  args?: unknown[];
+  columns?: string[];
+  pipeline?: unknown[];
+  navigateBefore?: unknown;
+  siteSession?: string;
+  kind: 'pipeline' | 'func' | 'unknown';
+  hasFunc: boolean;
+}
+
+/** SidePanel → SW: persist + register an adapter the sandbox already eval'd. */
+export interface InstallAdapterReq {
+  type: 'INSTALL_ADAPTER';
+  source: string;
+  defs: InstalledAdapterDef[];
+  origin: { type: 'marketplace' | 'manual'; url?: string };
+}
+
+export interface InstallAdapterResp {
+  type: 'INSTALL_ADAPTER_RESP';
+  ok: boolean;
+  id?: string;
+  title?: string;
+  /** Number of captured defs successfully registered into the live tool
+   * registry (= runnable now). */
+  registered?: number;
+  /** Captured defs that classified as `func` — persisted but Phase B (no
+   * runner). */
+  deferredFunc?: number;
+  /** Captured defs that classified as `pipeline` but use a step type the
+   * engine doesn't support (e.g. `wait`/`click`/`fill`). Persisted but not
+   * runnable. */
+  deferredUnsupported?: number;
+  error?: string;
+}
+
+export interface UninstallAdapterReq {
+  type: 'UNINSTALL_ADAPTER';
+  id: string;
+}
+
+export interface SetAdapterEnabledReq {
+  type: 'SET_ADAPTER_ENABLED';
+  id: string;
+  enabled: boolean;
+}
+
+export interface ListInstalledReq {
+  type: 'LIST_INSTALLED';
+}
+
+export interface InstalledAdapterSummary {
+  id: string;
+  title: string;
+  kind: 'pipeline' | 'func' | 'mixed' | 'unknown';
+  enabled: boolean;
+  commandCount: number;
+  installedAt: number;
+  origin: { type: 'marketplace' | 'manual'; url?: string };
+}
+
+export interface ListInstalledResp {
+  type: 'LIST_INSTALLED_RESP';
+  adapters: InstalledAdapterSummary[];
+}
+
+/** SW → SidePanel: installed-set changed; refresh lists + tool whitelist. */
+export interface AdaptersChangedEvt {
+  type: 'ADAPTERS_CHANGED';
+}
+
 /* ───────── Aggregate ───────── */
 
 export type Message =
@@ -355,7 +443,14 @@ export type Message =
   | ChatbotBusyEvt
   | ChatbotErrorEvt
   | ConnectorReadyEvt
-  | PongConnectorEvt;
+  | PongConnectorEvt
+  | InstallAdapterReq
+  | InstallAdapterResp
+  | UninstallAdapterReq
+  | SetAdapterEnabledReq
+  | ListInstalledReq
+  | ListInstalledResp
+  | AdaptersChangedEvt;
 
 export function isMessage(v: unknown): v is Message {
   return !!v && typeof v === 'object' && typeof (v as { type?: unknown }).type === 'string';

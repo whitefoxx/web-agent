@@ -30,6 +30,7 @@ import {
 } from './system-prompt';
 import { log, warn, error as logError } from '../runtime/log';
 import { appendTurn, type SessionState, newIterationId, saveSession } from './session';
+import { getRegistryVersion } from '../runtime/registry.js';
 import type { ParsedCommand, ToolTrace } from '../connectors/messages';
 
 export interface ChatbotResponse {
@@ -187,13 +188,30 @@ export async function runSession(opts: RunOptions): Promise<void> {
     // re-anchor with the full prompt; in between, send a short reminder
     // tacked onto the user's message. Increment-then-check semantics so
     // that with INTERVAL=N the Nth follow-up turn is the re-anchor.
+    //
+    // Adapter hot-plug: if the tool registry changed since our last anchor
+    // (user installed/uninstalled an adapter mid-conversation), force a
+    // re-anchor on THIS turn even if we haven't hit the interval — so the
+    // newly installed tool shows up in the chatbot's catalog without the
+    // user having to start a fresh conversation.
     session.turnsSinceFullPrompt += 1;
-    if (session.turnsSinceFullPrompt >= FULL_PROMPT_REFRESH_INTERVAL) {
+    const curVer = getRegistryVersion();
+    // Only fire drift if we have a baseline to compare against; sessions
+    // created before this field existed have `undefined` and shouldn't be
+    // force-anchored on their first continuation (no genuine signal of change).
+    const registryDrift =
+      session.lastSeenRegistryVersion !== undefined &&
+      session.lastSeenRegistryVersion !== curVer;
+    const intervalDue = session.turnsSinceFullPrompt >= FULL_PROMPT_REFRESH_INTERVAL;
+    if (intervalDue || registryDrift) {
       nextPrompt = buildFirstTurnPrompt({ userText, showAllTools: opts.showAllTools });
       session.turnsSinceFullPrompt = 0;
+      session.lastSeenRegistryVersion = curVer;
       log(
         'loop',
-        `continuation re-anchoring with full prompt (every ${FULL_PROMPT_REFRESH_INTERVAL} turns)`,
+        registryDrift && !intervalDue
+          ? `continuation re-anchoring (registry changed since last anchor — adapter installed/removed)`
+          : `continuation re-anchoring with full prompt (every ${FULL_PROMPT_REFRESH_INTERVAL} turns)`,
       );
     } else {
       nextPrompt = buildContinuationReminder(userText);
@@ -206,6 +224,7 @@ export async function runSession(opts: RunOptions): Promise<void> {
     // Brand-new conversation: inject the full first-turn prompt.
     nextPrompt = buildFirstTurnPrompt({ userText, showAllTools: opts.showAllTools });
     session.turnsSinceFullPrompt = 0;
+    session.lastSeenRegistryVersion = getRegistryVersion();
   }
 
   for (; session.iterations < maxIter; session.iterations++) {

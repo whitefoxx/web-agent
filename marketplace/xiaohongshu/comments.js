@@ -1,0 +1,213 @@
+// ../browser-agent/opencli/clis/xiaohongshu/comments.js
+import { cli, Strategy } from "@jackwener/opencli/registry";
+import { AuthRequiredError, CliError, EmptyResultError } from "@jackwener/opencli/errors";
+
+// ../browser-agent/opencli/clis/xiaohongshu/note-helpers.js
+import { ArgumentError } from "@jackwener/opencli/errors";
+function parseNoteId(input) {
+  const trimmed = input.trim();
+  const match = trimmed.match(/\/(?:explore|note|search_result|discovery\/item)\/([a-f0-9]+)|\/user\/profile\/[^/?#]+\/([a-f0-9]+)/i);
+  return match ? match[1] || match[2] : trimmed;
+}
+var XHS_SIGNED_URL_HINT = "Pass a full Xiaohongshu note URL with xsec_token from search results or user/profile context.";
+function isShortLink(input) {
+  return /^https?:\/\/xhslink\.com\//i.test(input);
+}
+function isHostMatch(hostname, cookieRoot) {
+  const normalized = hostname.toLowerCase();
+  return normalized === cookieRoot || normalized.endsWith("." + cookieRoot);
+}
+function isSupportedNotePath(pathname) {
+  return /^\/(?:explore|note|search_result|discovery\/item)\/[a-f0-9]+(?:[/?#]|$)/i.test(pathname) || /^\/user\/profile\/[^/?#]+\/[a-f0-9]+(?:[/?#]|$)/i.test(pathname);
+}
+function buildNoteUrl(input, options = {}) {
+  const {
+    allowShortLink = false,
+    commandName = "xiaohongshu note",
+    cookieRoot = "xiaohongshu.com",
+    signedUrlHint = XHS_SIGNED_URL_HINT
+  } = options;
+  const trimmed = input.trim();
+  const message = `${commandName} now requires a full signed URL`;
+  const hint = allowShortLink ? `${signedUrlHint} For downloads, xhslink short links are also supported.` : signedUrlHint;
+  if (/^https?:\/\//.test(trimmed)) {
+    if (isShortLink(trimmed)) {
+      if (allowShortLink)
+        return trimmed;
+      throw new ArgumentError(message, hint);
+    }
+    try {
+      const url = new URL(trimmed);
+      const xsecToken = url.searchParams.get("xsec_token")?.trim();
+      if (isHostMatch(url.hostname, cookieRoot) && isSupportedNotePath(url.pathname) && xsecToken) {
+        return trimmed;
+      }
+    } catch {
+    }
+    throw new ArgumentError(message, hint);
+  }
+  throw new ArgumentError(message, hint);
+}
+
+// ../browser-agent/opencli/clis/xiaohongshu/comments.js
+function parseCommentLimit(raw, fallback = 20) {
+  const n = Number(raw);
+  if (!Number.isFinite(n))
+    return fallback;
+  return Math.max(1, Math.min(Math.floor(n), 50));
+}
+function parseXhsLikeCountText(value) {
+  const integerRe = /^(?:\d+|\d{1,3}(?:[,，]\d{3})+)\+?$/u;
+  const shortformRe = /^((?:\d+|\d{1,3}(?:[,，]\d{3})+)(?:\.\d+)?)([wWkK万千])\+?$/u;
+  const raw = String(value ?? "").replace(/\s+/g, "");
+  if (!raw)
+    return 0;
+  if (integerRe.test(raw))
+    return Number(raw.replace(/[,+，]/g, ""));
+  const short = raw.match(shortformRe);
+  if (!short)
+    return 0;
+  const numeric = Number(short[1].replace(/[,，]/g, ""));
+  if (!Number.isFinite(numeric))
+    return 0;
+  const unit = short[2].toLowerCase();
+  const multiplier = unit === "w" || unit === "\u4E07" ? 1e4 : 1e3;
+  return Math.round(numeric * multiplier);
+}
+function buildCommentsExtractJs(withReplies) {
+  const parseLikeCountText = parseXhsLikeCountText.toString();
+  return `
+      (async () => {
+        const wait = (ms) => new Promise(r => setTimeout(r, ms))
+        const withReplies = ${withReplies}
+
+        // Check login state
+        const bodyText = document.body?.innerText || ''
+        const loginWall = /\u767B\u5F55\u540E\u67E5\u770B|\u8BF7\u767B\u5F55/.test(bodyText)
+        const securityBlock = /\u5B89\u5168\u9650\u5236|\u8BBF\u95EE\u94FE\u63A5\u5F02\u5E38/.test(bodyText)
+          || /website-login\\/error|error_code=300017|error_code=300031/.test(location.href)
+
+        // Scroll the note container to trigger comment loading
+        const scroller = document.querySelector('.note-scroller') || document.querySelector('.container')
+        if (scroller) {
+          for (let i = 0; i < 3; i++) {
+            const beforeCount = scroller.querySelectorAll('.parent-comment').length
+            scroller.scrollTo(0, scroller.scrollHeight)
+            await wait(800 + Math.random() * 1200)
+            const afterCount = scroller.querySelectorAll('.parent-comment').length
+            if (afterCount <= beforeCount) break
+          }
+        }
+
+        const clean = (el) => (el?.textContent || '').replace(/\\s+/g, ' ').trim()
+        const parseLikeCountText = ${parseLikeCountText}
+        const parseLikes = (el) => {
+          return parseLikeCountText(clean(el))
+        }
+        const expandReplyThreads = async (root) => {
+          if (!withReplies || !root) return
+          const clickedTexts = new Set()
+          for (let round = 0; round < 3; round++) {
+            const expanders = Array.from(root.querySelectorAll('button, [role="button"], span, div')).filter(el => {
+              if (!(el instanceof HTMLElement)) return false
+              const text = clean(el)
+              if (!text || text.length > 24) return false
+              if (!/(\u5C55\u5F00|\u66F4\u591A\u56DE\u590D|\u5168\u90E8\u56DE\u590D|\u67E5\u770B.*\u56DE\u590D|\u5171\\d+\u6761\u56DE\u590D)/.test(text)) return false
+              if (clickedTexts.has(text)) return false
+              return true
+            })
+            if (!expanders.length) break
+            for (const el of expanders) {
+              const text = clean(el)
+              el.click()
+              clickedTexts.add(text)
+              await wait(200 + Math.random() * 300)
+            }
+          }
+        }
+
+        const results = []
+        const parents = document.querySelectorAll('.parent-comment')
+        for (const p of parents) {
+          const item = p.querySelector('.comment-item')
+          if (!item) continue
+
+          const author = clean(item.querySelector('.author-wrapper .name, .user-name'))
+          const text = clean(item.querySelector('.content, .note-text'))
+          const likes = parseLikes(item.querySelector('.count'))
+          const time = clean(item.querySelector('.date, .time'))
+
+          if (!text) continue
+          results.push({ author, text, likes, time, is_reply: false, reply_to: '' })
+
+          // Extract nested replies (\u697C\u4E2D\u697C)
+          if (withReplies) {
+            await expandReplyThreads(p)
+            p.querySelectorAll('.reply-container .comment-item-sub, .sub-comment-list .comment-item').forEach(sub => {
+              const sAuthor = clean(sub.querySelector('.name, .user-name'))
+              const sText = clean(sub.querySelector('.content, .note-text'))
+              const sLikes = parseLikes(sub.querySelector('.count'))
+              const sTime = clean(sub.querySelector('.date, .time'))
+              if (!sText) return
+              results.push({ author: sAuthor, text: sText, likes: sLikes, time: sTime, is_reply: true, reply_to: author })
+            })
+          }
+        }
+
+        return { pageUrl: location.href, securityBlock, loginWall, results }
+      })()
+    `;
+}
+var command = cli({
+  site: "xiaohongshu",
+  name: "comments",
+  access: "read",
+  description: "\u83B7\u53D6\u5C0F\u7EA2\u4E66\u7B14\u8BB0\u8BC4\u8BBA\uFF08\u652F\u6301\u697C\u4E2D\u697C\u5B50\u56DE\u590D\uFF09",
+  domain: "www.xiaohongshu.com",
+  strategy: Strategy.COOKIE,
+  navigateBefore: false,
+  args: [
+    { name: "note-id", required: true, positional: true, help: "Full Xiaohongshu note URL with xsec_token" },
+    { name: "limit", type: "int", default: 20, help: "Number of top-level comments (max 50)" },
+    { name: "with-replies", type: "boolean", default: false, help: "Include nested replies (\u697C\u4E2D\u697C)" }
+  ],
+  columns: ["rank", "author", "text", "likes", "time", "is_reply", "reply_to"],
+  func: async (page, kwargs) => {
+    const limit = parseCommentLimit(kwargs.limit);
+    const withReplies = Boolean(kwargs["with-replies"]);
+    const raw = String(kwargs["note-id"]);
+    const noteId = parseNoteId(raw);
+    await page.goto(buildNoteUrl(raw, { commandName: "xiaohongshu comments" }));
+    await page.wait({ time: 2 + Math.random() * 3 });
+    const data = await page.evaluate(buildCommentsExtractJs(withReplies));
+    if (!data || typeof data !== "object") {
+      throw new EmptyResultError("xiaohongshu/comments", "Unexpected evaluate response");
+    }
+    if (data.securityBlock) {
+      throw new CliError("SECURITY_BLOCK", "Xiaohongshu security block: the note detail page was blocked by risk control.", /^https?:\/\//.test(raw) ? "The page may be temporarily restricted. Try again later or from a different session." : "Try using a full URL from search results (with xsec_token) instead of a bare note ID.");
+    }
+    if (data.loginWall) {
+      throw new AuthRequiredError("www.xiaohongshu.com", "Note comments require login");
+    }
+    const all = data.results ?? [];
+    if (withReplies) {
+      const limited = [];
+      let topCount = 0;
+      for (const c of all) {
+        if (!c.is_reply)
+          topCount++;
+        if (topCount > limit)
+          break;
+        limited.push(c);
+      }
+      return limited.map((c, i) => ({ rank: i + 1, ...c }));
+    }
+    return all.slice(0, limit).map((c, i) => ({ rank: i + 1, ...c }));
+  }
+});
+export {
+  buildCommentsExtractJs,
+  command,
+  parseCommentLimit,
+  parseXhsLikeCountText
+};
