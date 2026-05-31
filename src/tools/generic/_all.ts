@@ -6,12 +6,12 @@ import './open-url';
 import './get-page-text';
 import './screenshot';
 // Primitives for compositional workflows: open_url → scroll_page →
-// get_text_from_tab → close_tab. Lets the chatbot scrape feed-style
+// get_text_from_tab → close_tab. Lets the model scrape feed-style
 // pages that need scrolling to load more content.
 import './scroll-page';
 import './get-text-from-tab';
 import './close-tab';
-// Generic interaction primitives — give the chatbot a way to navigate
+// Generic interaction primitives — give the model a way to navigate
 // arbitrary sites (click, type, fill forms) without a per-site adapter.
 // get_interactives is the perception entry point; click / click_by_text /
 // type_into are the action verbs. Compose like:

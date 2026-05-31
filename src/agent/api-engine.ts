@@ -1,27 +1,27 @@
 /**
  * API engine — drives a session via an OpenAI-compatible chat-completions
- * endpoint with native function-calling. The counterpart to the connector
- * (chatbot-hijack) engine in orchestrator.ts.
+ * endpoint with native function-calling.
  *
- * Unlike the connector engine it needs NO chatbot tab: tool calls are native
- * `tool_calls`, executed through the shared dispatcher (ctx.executeTool), which
- * resolves its own per-site tabs, paces calls, and gates writes. The engine
- * maps onto the SAME OrchEvent UI stream (assistant_turn + tool_trace +
- * session_done) so the SidePanel renders API-mode sessions identically to
- * connector-mode ones.
+ * No chatbot tab needed: tool calls are native `tool_calls`, executed through
+ * the shared dispatcher (ctx.executeTool), which resolves its own per-site
+ * tabs, paces calls, and gates writes. Emits the standard OrchEvent UI stream
+ * (assistant_turn + tool_trace + session_done) to the SidePanel.
  *
  * The running OpenAI message array is persisted on the session
  * (`session.apiMessages`) so follow-up turns keep full native context
  * (assistant tool_calls paired 1:1 with tool results).
+ *
+ * Pre-history: a sibling connector engine (chatbot-tab hijack, text-based
+ * `<agent-command>` protocol) used to live in orchestrator.ts. It was
+ * removed when the "zero API key" mode was dropped.
  */
 
 import { openAiToolsFromRegistry } from '../tools/manifest';
 import { systemPromptApi } from './api-system-prompt';
 import { loadLlmConfig } from '../config/llm-config';
 import { appendTurn, saveSession } from './session';
-import type { AgentEngine, EngineContext } from './engine';
+import type { AgentEngine, EngineContext, SessionDoneReason } from './engine';
 import type { ApiMessage, ToolCall } from './api-types';
-import type { SessionDoneReason } from './orchestrator';
 import { log, warn, error as logError } from '../runtime/log';
 
 const DEFAULT_MAX_ITERATIONS = 12;
@@ -100,17 +100,12 @@ export const apiEngine: AgentEngine = {
 
     function finish(reason: SessionDoneReason, err?: string): void {
       session.status = reason === 'error' ? 'error' : reason === 'user_abort' ? 'aborted' : 'idle';
-      session.pendingPrompt = null;
       void saveSession(session);
       ctx.emit({ type: 'session_done', reason, error: err });
       log('api', `session=${session.id} done`, { reason, err });
     }
 
     const cfg = await loadLlmConfig();
-    if (cfg.mode !== 'api') {
-      finish('error', 'api-engine 被调用，但当前配置不是 api 模式');
-      return;
-    }
     if (!cfg.apiKey) {
       finish('error', '未配置 API Key。请在设置里填入 API Key 后再试。');
       return;
@@ -121,7 +116,6 @@ export const apiEngine: AgentEngine = {
     }
 
     session.status = 'running';
-    session.pauseReason = null;
     session.iterations = 0;
 
     const maxIter = DEFAULT_MAX_ITERATIONS;
@@ -129,7 +123,10 @@ export const apiEngine: AgentEngine = {
     // Persist the user turn for the history drawer, and seed the OpenAI message
     // array (continuing prior turns if any).
     appendTurn(session, { role: 'user', text: ctx.userText, ts: Date.now() });
-    const messages: ApiMessage[] = [...(session.apiMessages ?? []), { role: 'user', content: ctx.userText }];
+    const messages: ApiMessage[] = [
+      ...(session.apiMessages ?? []),
+      { role: 'user', content: ctx.userText },
+    ];
     await saveSession(session);
 
     log('api', `session=${session.id} run() begin`, {
@@ -157,7 +154,10 @@ export const apiEngine: AgentEngine = {
 
         const tools = openAiToolsFromRegistry();
         if (tools.length !== lastToolsCount) {
-          log('api', `tools refreshed: ${tools.length} available (was ${lastToolsCount === -1 ? 'initial' : lastToolsCount})`);
+          log(
+            'api',
+            `tools refreshed: ${tools.length} available (was ${lastToolsCount === -1 ? 'initial' : lastToolsCount})`,
+          );
           lastToolsCount = tools.length;
         }
 
@@ -233,11 +233,23 @@ export const apiEngine: AgentEngine = {
           const traceId = `t_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
           ctx.emit({
             type: 'tool_trace',
-            trace: { id: traceId, action: 'execute_tool', tool: call.function.name, args, status: 'started' },
+            trace: {
+              id: traceId,
+              action: 'execute_tool',
+              tool: call.function.name,
+              args,
+              status: 'started',
+            },
           });
           appendTurn(session, {
             role: 'tool_trace',
-            trace: { id: traceId, action: 'execute_tool', tool: call.function.name, args, status: 'started' },
+            trace: {
+              id: traceId,
+              action: 'execute_tool',
+              tool: call.function.name,
+              args,
+              status: 'started',
+            },
             ts: Date.now(),
           });
 

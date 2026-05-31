@@ -29,7 +29,7 @@ import {
   type MarketIndex,
   type MarketAdapter,
 } from './marketplace';
-import type { InstalledAdapterSummary } from '../connectors/messages';
+import type { InstalledAdapterSummary } from '../messages';
 
 type Tab = 'installed' | 'market';
 type TypeFilter = 'all' | 'pipeline' | 'func';

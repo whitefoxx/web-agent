@@ -10,7 +10,7 @@
  * Differences from opencli's registry that are intentional:
  *   - getRegistry() returns an ARRAY (opencli returns a Map). Nothing in our
  *     codebase or in adapter `func` bodies calls getRegistry(); it's read only
- *     by our host code (manifest.ts / system-prompt.ts), which expects an
+ *     by our host code (manifest.ts / api-system-prompt.ts), which expects an
  *     array. Adapters that somehow iterate it still work (arrays are iterable).
  *   - We don't run opencli's normalizeCommand() strategy→browser/navigateBefore
  *     decoding; the extension dispatcher derives tab handling from `site`

@@ -15,7 +15,7 @@ import type {
   ListInstalledReq,
   ListInstalledResp,
   InstalledAdapterSummary,
-} from '../connectors/messages';
+} from '../messages';
 
 export interface InstallOutcome {
   ok: boolean;
@@ -76,7 +76,10 @@ export async function listInstalled(): Promise<InstalledAdapterSummary[]> {
 
 export async function uninstallAdapter(id: string): Promise<void> {
   try {
-    await chrome.runtime.sendMessage({ type: 'UNINSTALL_ADAPTER', id } satisfies UninstallAdapterReq);
+    await chrome.runtime.sendMessage({
+      type: 'UNINSTALL_ADAPTER',
+      id,
+    } satisfies UninstallAdapterReq);
   } catch {
     /* best effort */
   }

@@ -1,9 +1,9 @@
 import { cli } from '../../runtime/registry.js';
 import { assertTabId } from './_helpers';
 
-/** Cap on items returned per category — keeps the chatbot's prompt size
+/** Cap on items returned per category — keeps the model's prompt size
  * sane on dense pages (a Twitter feed has hundreds of clickable elements
- * but the chatbot only needs the top of the viewport). */
+ * but the model only needs the top of the viewport). */
 const MAX_PER_CATEGORY = 60;
 
 cli({

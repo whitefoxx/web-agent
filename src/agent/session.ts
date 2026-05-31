@@ -1,15 +1,14 @@
 /**
  * Session state — one per active conversation in the SidePanel. Persisted to
- * chrome.storage.session so the SidePanel can recover after SW restarts.
+ * IndexedDB so the SidePanel can recover after SW restarts.
  *
- * The "conversation" tracked here is the user-facing one in the SidePanel,
- * not the underlying DeepSeek tab conversation. Each turn the user sends
- * triggers a fresh DeepSeek conversation (click "New chat" first), keeps
- * one DeepSeek conversation per WebChat-Agent turn round, so DeepSeek's
- * context isn't polluted across separate user requests.
+ * Pre-history: when the connector mode existed, this also tracked the bound
+ * chatbot tab id, conversation UUID, pause-on-tab-loss machinery, and a
+ * pendingPrompt for resume. All of that is gone — api-engine sessions only
+ * need turn history + an OpenAI message array.
  */
 
-import type { ParsedCommand } from '../connectors/messages';
+import type { ParsedCommand } from '../messages';
 import type { ApiMessage } from './api-types';
 import { log } from '../runtime/log';
 import {
@@ -52,92 +51,29 @@ export interface ToolTraceTurn {
 
 export type Turn = UserTurn | AssistantTurn | ToolTraceTurn;
 
-export type SessionStatus = 'idle' | 'running' | 'paused' | 'aborted' | 'error';
+export type SessionStatus = 'idle' | 'running' | 'aborted' | 'error';
 
 export interface SessionState {
   id: string;
   createdAt: number;
   updatedAt: number;
-  chatbot: 'deepseek';
-  chatbotTabId: number | null;
-  /** DeepSeek conversation UUID (from /a/chat/s/<uuid>). Null until first
-   * response is received. */
-  conversationId: string | null;
-  /** Full deepseek URL captured at last successful response — used as the
-   * landing URL when Resume opens a fresh tab. */
-  conversationUrl: string | null;
-  /** Prompt that was queued for the next iteration but hasn't been
-   * successfully delivered + answered yet. Resume re-injects this. Cleared
-   * once a response arrives. */
-  pendingPrompt: string | null;
-  /** Reason last pause happened, if status='paused'. */
-  pauseReason: 'tab_closed' | 'tab_navigated_away' | 'conv_mismatch' | 'tab_not_ready' | null;
-  /** How many user-initiated turns have happened since we last re-injected
-   * the full system prompt. After ~N follow-up turns the chatbot tends to
-   * drift back to its default behaviour (using its own knowledge / built-in
-   * search instead of agent-command tools), so the orchestrator periodically
-   * refreshes the prompt to anchor it. Reset to 0 on every full-prompt
-   * injection; only incremented on continuation turns that just got a
-   * lightweight reminder. */
-  turnsSinceFullPrompt: number;
-  /** Snapshot of `getRegistryVersion()` taken the last time we built a full
-   * first-turn prompt for the chatbot. On the next continuation turn, if the
-   * version has moved (= an adapter was installed/uninstalled/enabled since
-   * we anchored), force a re-anchor so the chatbot sees the new catalog
-   * within the SAME conversation instead of having to start a fresh one. */
-  lastSeenRegistryVersion?: number;
   status: SessionStatus;
   iterations: number;
   history: Turn[];
-  /** API-mode (api-engine) running OpenAI message array, persisted across
-   * follow-up turns so native tool_calls / tool results stay paired 1:1.
-   * Unused in connector mode. */
+  /** API engine's running OpenAI message array, persisted across follow-up
+   * turns so native tool_calls / tool results stay paired 1:1. */
   apiMessages?: ApiMessage[];
 }
-
-/* Persistent storage is delegated to session-store.ts (IndexedDB). The
- * helpers below preserve the previous chrome.storage.session API so
- * orchestrator / service-worker call sites don't change. */
 
 export function makeSession(id: string): SessionState {
   return {
     id,
     createdAt: Date.now(),
     updatedAt: Date.now(),
-    chatbot: 'deepseek',
-    chatbotTabId: null,
-    conversationId: null,
-    conversationUrl: null,
-    pendingPrompt: null,
-    pauseReason: null,
-    turnsSinceFullPrompt: 0,
     status: 'idle',
     iterations: 0,
     history: [],
   };
-}
-
-/** Parse the DeepSeek conversation UUID out of a tab URL.
- * Example: https://chat.deepseek.com/a/chat/s/b939e551-c798-4fc9-baef-29ac5282237b
- * → "b939e551-c798-4fc9-baef-29ac5282237b". Returns null for the
- * homepage (`/`) or any other URL. */
-export function parseConversationUrl(
-  url: string | undefined | null,
-): { conversationId: string; conversationUrl: string } | null {
-  if (!url) return null;
-  const m = url.match(/https:\/\/chat\.deepseek\.com\/a\/chat\/s\/([0-9a-fA-F-]{16,})/);
-  if (!m) return null;
-  return { conversationId: m[1], conversationUrl: url };
-}
-
-/** Strip the conversation suffix back to the DeepSeek base URL — handy for
- * recognising an "idle" tab that can be claimed by a new session. */
-export function isDeepseekIdleUrl(url: string | undefined | null): boolean {
-  if (!url) return false;
-  // Treat the homepage and any not-yet-started chat as idle. We DON'T treat
-  // /a/chat/s/<uuid> as idle (that tab is already running a conversation).
-  if (!url.startsWith('https://chat.deepseek.com')) return false;
-  return !/\/a\/chat\/s\//.test(url);
 }
 
 export function appendTurn(s: SessionState, t: Turn): void {

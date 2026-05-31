@@ -1,4 +1,4 @@
-import type { ParsedCommand, ToolTrace } from '../connectors/messages';
+import type { ParsedCommand, ToolTrace } from '../messages';
 
 export interface UiUserTurn {
   role: 'user';

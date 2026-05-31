@@ -21,21 +21,6 @@
   "side_panel": {
     "default_path": "src/sidepanel/index.html"
   },
-  "content_scripts": [
-    {
-      "matches": ["https://chat.deepseek.com/*"],
-      "js": ["src/connectors/deepseek/clipboard-tap.ts"],
-      "run_at": "document_start",
-      "world": "MAIN",
-      "all_frames": false
-    },
-    {
-      "matches": ["https://chat.deepseek.com/*"],
-      "js": ["src/connectors/deepseek/content.ts"],
-      "run_at": "document_idle",
-      "all_frames": false
-    }
-  ],
   "action": {
     "default_title": "WebChat Agent"
   },

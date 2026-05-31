@@ -3,8 +3,8 @@
  * target tab exists for the adapter's site, attaches CDP via PageShim, runs
  * the adapter, then detaches.
  *
- * Lives in the service worker. The orchestrator calls into this via the
- * `Driver.executeTool` interface.
+ * Lives in the service worker. The api-engine calls into this via the
+ * `EngineContext.executeTool` interface.
  */
 
 import { lookupAdapter, type AdapterDef } from './manifest';
@@ -75,10 +75,10 @@ export async function executeAdapter(opts: {
   }
 
   // Validate args BEFORE we burn a tab/CDP attach on a guaranteed-broken
-  // call. Chatbots periodically guess arg names from URL patterns or help
+  // call. Models periodically guess arg names from URL patterns or help
   // text (e.g. sending `keyword` when the schema wants `query`); when that
   // happens we want a fast, structured "wrong arg names" error so the
-  // chatbot self-corrects on its next iteration.
+  // model self-corrects on its next iteration.
   const argError = validateArgs(adapter, opts.args ?? {});
   if (argError) {
     return failed(t0, argError, 'generic');
@@ -345,12 +345,12 @@ function withArgDefaults(
   return { ...out, ...args };
 }
 
-/** Check the chatbot's `args` against the adapter's declared schema.
+/** Check the model's `args` against the adapter's declared schema.
  *
  * Strict on missing required args (the call would fail anyway — fail fast
  * with a clear message). Lenient on unknown extras: we keep them out of
  * the way (adapters ignore properties they don't read) but call them out
- * in the error message so the chatbot notices it likely misnamed a
+ * in the error message so the model notices it likely misnamed a
  * required field.
  *
  * Returns null if validation passes, otherwise a multi-line error string
@@ -365,7 +365,7 @@ function validateArgs(adapter: AdapterDef, args: Record<string, unknown>): strin
   if (missing.length === 0 && unknown.length === 0) return null;
   // Unknown-only (no missing required) is tolerable — just warn in logs
   // and let the adapter handle it. The user-visible bug in question is
-  // "missing required because chatbot used wrong name", so we focus on
+  // "missing required because model used wrong name", so we focus on
   // that case.
   if (missing.length === 0) {
     warn('dispatcher', `${adapter.site}__${adapter.name} got unknown args (ignored)`, {

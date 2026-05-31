@@ -45,7 +45,7 @@ export function assertHttpUrl(url: unknown, paramName = 'url'): string {
 }
 
 /** Validate that `tab_id` references a tab that still exists, returning the
- * chrome.tabs.Tab. Throws with a chatbot-readable error otherwise. */
+ * chrome.tabs.Tab. Throws with a model-readable error otherwise. */
 export async function assertTabId(tabId: unknown, paramName = 'tab_id'): Promise<chrome.tabs.Tab> {
   const n = Number(tabId);
   if (!Number.isFinite(n) || Math.trunc(n) !== n || n < 0) {

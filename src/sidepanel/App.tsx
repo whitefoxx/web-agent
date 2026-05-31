@@ -19,12 +19,7 @@ import type { UiTurn } from './types';
 import {
   type AbortSessionReq,
   type AssistantTurnEvt,
-  type ChatbotBusyEvt,
-  type ChatbotStreamingEvt,
-  type ChatbotTabStatusEvt,
   type DeleteSessionReq,
-  type DiscardSessionReq,
-  type EnsureChatbotTabReq,
   type GetSessionReq,
   type GetSessionResp,
   type IterationProgressEvt,
@@ -34,45 +29,32 @@ import {
   type LogsResponse,
   type Message,
   type RequestLogsReq,
-  type ResumeSessionReq,
   type SessionDoneEvt,
   type SessionNoticeEvt,
-  type SessionPausedEvt,
   type SessionSummary,
   type ToolTrace,
   type ToolTraceEvt,
   type UserMessageReq,
   type WriteConfirmReq,
   type WriteConfirmResp,
-} from '../connectors/messages';
+} from '../messages';
 import type { SessionState, Turn } from '../agent/session';
 import type { LogEntry, LogConfig } from '../runtime/log';
 import { getLogConfig, setLogConfig, subscribeLog } from '../runtime/log';
 import { makeSessionId } from '../agent/session';
 import {
-  CHATBOTS,
   DEFAULT_CONFIG,
   PROVIDERS,
   loadLlmConfig,
-  loadLlmConfigForm,
   providerById,
   saveLlmConfig,
-  type ChatbotId,
   type LlmConfig,
 } from '../config/llm-config';
-
-const DEEPSEEK_URL = 'https://chat.deepseek.com';
 
 interface ProgressState {
   iteration: number;
   phase: 'injecting' | 'awaiting' | 'streaming';
   textLen?: number;
-}
-
-interface PausedState {
-  reason: 'tab_closed' | 'tab_navigated_away' | 'conv_mismatch' | 'tab_not_ready';
-  conversationUrl: string | null;
-  pendingPromptPreview?: string;
 }
 
 type View = 'closed' | 'menu' | 'backend' | 'adapters' | 'history' | 'logs';
@@ -90,9 +72,7 @@ export function App() {
   const [running, setRunning] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [progress, setProgress] = useState<ProgressState | null>(null);
-  const [paused, setPaused] = useState<PausedState | null>(null);
   const [pendingConfirms, setPendingConfirms] = useState<WriteConfirmReq[]>([]);
-  const [tabStatus, setTabStatus] = useState<ChatbotTabStatusEvt | null>(null);
   // Header menu state machine. 'closed' = no overlay; 'menu' = dropdown
   // showing; any other value = a settings page is open. Click outside the
   // menu/page region drops back to 'closed'.
@@ -115,21 +95,19 @@ export function App() {
     return sessionIdRef.current === eventSessionId;
   }
 
-  /* mount: ensure tab status, attach listeners, open keep-alive port */
+  /* mount: attach listeners, open keep-alive port */
   useEffect(() => {
-    void requestEnsureTab();
     void requestLogs();
     const handler = (m: unknown) => onIncomingMessage(m as Message);
     chrome.runtime.onMessage.addListener(handler);
     const unsubLog = subscribeLog((e) => setLogs((cur) => append(cur, e, 500)));
     // Pin the SW alive while the SidePanel is open. MV3 SWs are killed
     // after ~30s of no chrome.* activity, which would otherwise orphan a
-    // long-running orchestrator iteration (e.g., DeepSeek thinking for
-    // 90s) — pendingResponses / activeSessions would vanish and the next
-    // CHATBOT_RESPONSE arriving after wake-up would be dropped as
-    // "unmatched". An open chrome.runtime.Port keeps the SW pinned per
-    // MV3 spec. SW dies on disconnect (panel close) — that's fine, the
-    // user isn't watching anyway.
+    // long-running iteration (LLM thinking phases >30s with no chrome.*
+    // activity → SW recycle → activeSessions vanish → the next
+    // ASSISTANT_TURN arriving after wake-up is silently dropped). An open
+    // chrome.runtime.Port keeps the SW pinned per MV3 spec. SW dies on
+    // disconnect (panel close) — that's fine, the user isn't watching.
     let port: chrome.runtime.Port | null = null;
     try {
       port = chrome.runtime.connect({ name: 'webchat-keepalive' });
@@ -143,7 +121,7 @@ export function App() {
     };
   }, []);
 
-  /* load LLM backend config (mode / provider / chatbot) */
+  /* load LLM config */
   useEffect(() => {
     void loadLlmConfig().then(setLlmConfig);
   }, []);
@@ -185,11 +163,8 @@ export function App() {
       case 'ASSISTANT_TURN':
       case 'TOOL_TRACE':
       case 'SESSION_DONE':
-      case 'SESSION_PAUSED':
       case 'SESSION_NOTICE':
       case 'ITERATION_PROGRESS':
-      case 'CHATBOT_STREAMING':
-      case 'CHATBOT_BUSY':
       case 'WRITE_CONFIRM_REQ':
         if (!eventBelongsToCurrentSession(sid)) return;
         break;
@@ -206,23 +181,11 @@ export function App() {
       case 'SESSION_DONE':
         onSessionDone(m as SessionDoneEvt);
         break;
-      case 'SESSION_PAUSED':
-        onSessionPaused(m as SessionPausedEvt);
-        break;
       case 'SESSION_NOTICE':
         onSessionNotice(m as SessionNoticeEvt);
         break;
       case 'ITERATION_PROGRESS':
         onIterationProgress(m as IterationProgressEvt);
-        break;
-      case 'CHATBOT_STREAMING':
-        onChatbotStreaming(m as ChatbotStreamingEvt);
-        break;
-      case 'CHATBOT_TAB_STATUS':
-        setTabStatus(m as ChatbotTabStatusEvt);
-        break;
-      case 'CHATBOT_BUSY':
-        onChatbotBusy(m as ChatbotBusyEvt);
         break;
       case 'WRITE_CONFIRM_REQ':
         onWriteConfirmReq(m as WriteConfirmReq);
@@ -247,41 +210,14 @@ export function App() {
     ]);
   }
 
-  function onChatbotBusy(m: ChatbotBusyEvt): void {
-    const seconds = Math.round(m.nextRetryInMs / 1000);
-    const prefix = m.reason === 'stopped' ? `DeepSeek 生成被中止 (Stopped)` : `DeepSeek 服务繁忙`;
-    const verb = m.reason === 'stopped' ? '点 Regenerate 重试' : '重试';
-    setTurns((cur) => [
-      ...cur,
-      {
-        role: 'system',
-        text: `${prefix}，第 ${m.retryCount}/${m.maxRetries} 次${verb}将在 ${seconds} 秒后发起…`,
-        level: 'info',
-        ts: Date.now(),
-      },
-    ]);
-  }
-
   function onIterationProgress(m: IterationProgressEvt): void {
     if (m.phase === 'completed') {
       setProgress(null);
     } else if (m.phase === 'injecting' || m.phase === 'awaiting') {
       setProgress({ iteration: m.iteration, phase: m.phase });
+    } else if (m.phase === 'streaming') {
+      setProgress({ iteration: -1, phase: 'streaming', textLen: m.textLen });
     }
-  }
-
-  function onChatbotStreaming(m: ChatbotStreamingEvt): void {
-    setProgress({ iteration: -1, phase: 'streaming', textLen: m.textLen });
-  }
-
-  function onSessionPaused(m: SessionPausedEvt): void {
-    setRunning(false);
-    setProgress(null);
-    setPaused({
-      reason: m.reason,
-      conversationUrl: m.conversationUrl,
-      pendingPromptPreview: m.pendingPromptPreview,
-    });
   }
 
   function onWriteConfirmReq(m: WriteConfirmReq): void {
@@ -333,16 +269,11 @@ export function App() {
   function onSessionDone(m: SessionDoneEvt): void {
     setRunning(false);
     setProgress(null);
-    setPaused(null);
-    // NOTE: deliberately NOT clearing sessionId on 'no_more_commands' —
-    // follow-up messages stay in the same DeepSeek conversation so the
-    // chatbot keeps context. On 'error' / 'user_abort' we drop the
-    // binding since the session ended unhealthy and the user should
-    // start fresh.
+    // NOTE: deliberately NOT clearing sessionId on 'no_more_commands' /
+    // 'user_abort' — follow-up messages stay in the same session so the LLM
+    // keeps full context. On 'error' we drop the binding since the session
+    // ended unhealthy and the user should start fresh.
     if (m.reason === 'error') setSessionId(null);
-    // user_abort: keep sessionId so a follow-up still continues in the
-    // same DeepSeek conv (user just wanted to stop this turn, not the
-    // whole session).
     const text =
       m.reason === 'user_abort'
         ? '已停止'
@@ -362,14 +293,6 @@ export function App() {
     ]);
   }
 
-  async function requestEnsureTab(): Promise<void> {
-    const req: EnsureChatbotTabReq = { type: 'ENSURE_CHATBOT_TAB', chatbot: 'deepseek' };
-    try {
-      const r = (await chrome.runtime.sendMessage(req)) as ChatbotTabStatusEvt | undefined;
-      if (r) setTabStatus(r);
-    } catch {}
-  }
-
   async function requestLogs(): Promise<void> {
     const req: RequestLogsReq = { type: 'REQUEST_LOGS' };
     try {
@@ -380,10 +303,10 @@ export function App() {
 
   async function onSend(): Promise<void> {
     const text = input.trim();
-    if (!text || running || paused) return;
+    if (!text || running) return;
     // Reuse sessionId across follow-up messages so the SW can continue in
-    // the same DeepSeek conversation. Only allocate a new one if we're
-    // starting fresh (no prior session) or the previous one ended.
+    // the same chat history. Only allocate a new one if we're starting fresh
+    // (no prior session) or the previous one ended.
     const sid = sessionId ?? makeSessionId();
     setSessionId(sid);
     setRunning(true);
@@ -421,62 +344,11 @@ export function App() {
     void chrome.runtime.sendMessage(req).catch(() => {});
   }
 
-  function onResume(): void {
-    if (!sessionId) return;
-    const req: ResumeSessionReq = { type: 'RESUME_SESSION', sessionId };
-    setPaused(null);
-    setRunning(true);
-    setProgress({ iteration: 0, phase: 'injecting' });
-    chrome.runtime.sendMessage(req).catch((e) => {
-      setRunning(false);
-      setProgress(null);
-      setTurns((cur) => [
-        ...cur,
-        {
-          role: 'system',
-          text: `恢复失败：${e instanceof Error ? e.message : String(e)}`,
-          level: 'error',
-          ts: Date.now(),
-        },
-      ]);
-    });
-  }
-
-  function onDiscard(): void {
-    if (!sessionId) return;
-    const req: DiscardSessionReq = { type: 'DISCARD_SESSION', sessionId };
-    chrome.runtime.sendMessage(req).catch(() => {});
-    setPaused(null);
-    setRunning(false);
-    setSessionId(null);
-    setProgress(null);
-  }
-
   function onNewChat(): void {
-    if (running) {
-      // Abort the current run first so the SW doesn't hold the tab.
-      onAbort();
-    }
+    if (running) onAbort();
     setSessionId(null);
     setTurns([]);
     setProgress(null);
-    setPaused(null);
-    // Re-query tab status — after an error / abort the badge may be holding
-    // a stale "未就绪" from a transient state. Force the SW to re-broadcast
-    // the current best known tab (prefers any logged-in one over the
-    // freshly-opened-but-not-ready one).
-    void requestEnsureTab();
-  }
-
-  function onOpenDeepseek(): void {
-    void chrome.tabs.create({ url: DEEPSEEK_URL }).then(() => {
-      // Polling until connector announces ready.
-      const t = setInterval(async () => {
-        await requestEnsureTab();
-        if (tabStatus?.ready) clearInterval(t);
-      }, 1500);
-      setTimeout(() => clearInterval(t), 60_000);
-    });
   }
 
   function onKeyDown(ev: KeyboardEvent): void {
@@ -486,23 +358,10 @@ export function App() {
     }
   }
 
-  const statusKind = useMemo<'ok' | 'warn' | 'err'>(() => {
-    if (!tabStatus || tabStatus.tabId === null) return 'err';
-    if (!tabStatus.ready) return 'warn';
-    return 'ok';
-  }, [tabStatus]);
-  const statusText = useMemo(() => {
-    if (!tabStatus || tabStatus.tabId === null) return 'DeepSeek 未连接';
-    if (!tabStatus.ready) return 'DeepSeek 未就绪';
-    return 'DeepSeek 已就绪';
-  }, [tabStatus]);
-
-  // Backend-readiness derivations. In api mode there's no DeepSeek tab — the
-  // input gates on whether an API key is configured instead.
-  const isApiMode = llmConfig.mode === 'api';
-  const apiReady = llmConfig.mode === 'api' && !!llmConfig.apiKey;
-  const apiLabel = llmConfig.mode === 'api' ? llmConfig.model || llmConfig.provider : '';
-  const inputBlocked = !!paused || (isApiMode ? !apiReady : statusKind === 'err');
+  // API readiness: input gates on whether the user has configured an API key.
+  const apiReady = !!llmConfig.apiKey;
+  const apiLabel = llmConfig.model || llmConfig.provider;
+  const inputBlocked = !apiReady;
 
   return (
     <>
@@ -511,32 +370,17 @@ export function App() {
           <span class="brand" title="WebChat Agent">
             <IconBrand size={22} />
           </span>
-          {isApiMode ? (
-            <span
-              class={`status-pill ${apiReady ? 'ok' : 'warn'}`}
-              onClick={() => setView('backend')}
-              title="API 模式 · 点击打开设置"
-            >
-              <span class="dot" />
-              {apiReady ? `API · ${apiLabel}` : 'API 未配置'}
-            </span>
-          ) : (
-            <span
-              class={`status-pill ${statusKind}`}
-              onClick={statusKind === 'err' ? onOpenDeepseek : () => void requestEnsureTab()}
-              title={statusKind === 'err' ? '点击打开 chat.deepseek.com' : '点击刷新状态'}
-            >
-              <span class="dot" />
-              {statusText}
-            </span>
-          )}
+          <span
+            class={`status-pill ${apiReady ? 'ok' : 'warn'}`}
+            onClick={() => setView('backend')}
+            title={apiReady ? '点击打开设置' : '点击配置 API Key'}
+          >
+            <span class="dot" />
+            {apiReady ? apiLabel : 'API 未配置'}
+          </span>
         </span>
         <span class="header-actions">
-          <button
-            class="ghost-btn round"
-            title="开始一个新对话（结束当前对话，DeepSeek 会换新的 conversation）"
-            onClick={onNewChat}
-          >
+          <button class="ghost-btn round" title="开始一个新对话" onClick={onNewChat}>
             <IconPlus size={18} />
           </button>
           <span class="menu-anchor">
@@ -557,8 +401,7 @@ export function App() {
         {turns.map((t, i) => (
           <TurnView key={i} turn={t} />
         ))}
-        {progress && !paused && <ProgressBanner progress={progress} isApi={isApiMode} />}
-        {paused && <PausedBanner paused={paused} onResume={onResume} onDiscard={onDiscard} />}
+        {progress && <ProgressBanner progress={progress} />}
         {pendingConfirms.length > 0 && (
           <WriteConfirmCard
             req={pendingConfirms[0]}
@@ -572,15 +415,9 @@ export function App() {
         <div class={`composer ${inputBlocked && !running ? 'disabled' : ''}`}>
           <textarea
             placeholder={
-              paused
-                ? '会话已暂停，先点上方"恢复"或"丢弃"…'
-                : isApiMode
-                  ? apiReady
-                    ? '问我点什么，比如：帮我看看小红书首页最近有什么内容'
-                    : '先在右上角菜单 → LLM 后端 填入 API Key…'
-                  : statusKind === 'err'
-                    ? '先点击上方连接 DeepSeek…'
-                    : '问我点什么，比如：帮我看看小红书首页最近有什么内容'
+              apiReady
+                ? '问我点什么，比如：帮我看看小红书首页最近有什么内容'
+                : '先在右上角菜单 → LLM 后端 填入 API Key…'
             }
             value={input}
             onInput={(e) => setInput((e.target as HTMLTextAreaElement).value)}
@@ -604,10 +441,7 @@ export function App() {
             </button>
           )}
         </div>
-        <div class="hint">
-          Enter 发送 · Shift+Enter 换行 ·{' '}
-          {isApiMode ? `由 ${apiLabel || 'API'} 提供推理` : '由 chat.deepseek.com 提供推理算力'}
-        </div>
+        <div class="hint">Enter 发送 · Shift+Enter 换行 · 由 {apiLabel || 'API'} 提供推理</div>
       </footer>
 
       {/* Top-level menu pages. History owns its own overlay because it has a
@@ -616,21 +450,6 @@ export function App() {
       {view === 'backend' && (
         <PageOverlay title={PAGE_LABELS.backend} onClose={() => setView('closed')}>
           <LlmBackendSection config={llmConfig} onSave={(c) => setLlmConfig(c)} />
-          {llmConfig.mode === 'connector' && (
-            <div class="section">
-              <h4>DeepSeek 标签页</h4>
-              <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--surface)">
-                <span style="font-size:12px;color:var(--muted)">
-                  {tabStatus?.tabId === null || !tabStatus
-                    ? '未打开'
-                    : `tab=${tabStatus.tabId} · ${tabStatus.ready ? '已登录' : '未登录'}`}
-                </span>
-                <button class="btn sm outline" onClick={onOpenDeepseek}>
-                  打开 / 切换
-                </button>
-              </div>
-            </div>
-          )}
         </PageOverlay>
       )}
       {view === 'adapters' && (
@@ -642,12 +461,6 @@ export function App() {
         <HistoryPage
           currentSessionId={sessionId}
           onClose={() => setView('closed')}
-          onResume={(id) => {
-            setSessionId(id);
-            setView('closed');
-            const req: ResumeSessionReq = { type: 'RESUME_SESSION', sessionId: id };
-            chrome.runtime.sendMessage(req).catch(() => {});
-          }}
           onOpen={async (id) => {
             try {
               const r = (await chrome.runtime.sendMessage({
@@ -660,15 +473,6 @@ export function App() {
               setTurns(historyToUiTurns(s.history));
               setProgress(null);
               setRunning(false);
-              setPaused(
-                s.status === 'paused' && s.pauseReason
-                  ? {
-                      reason: s.pauseReason,
-                      conversationUrl: s.conversationUrl,
-                      pendingPromptPreview: s.pendingPrompt?.slice(0, 120),
-                    }
-                  : null,
-              );
               setView('closed');
             } catch {}
           }}
@@ -679,7 +483,6 @@ export function App() {
               setSessionId(null);
               setTurns([]);
               setProgress(null);
-              setPaused(null);
             }
           }}
         />
@@ -833,15 +636,13 @@ function LogsSection({
   );
 }
 
-function ProgressBanner({ progress, isApi }: { progress: ProgressState; isApi?: boolean }) {
+function ProgressBanner({ progress }: { progress: ProgressState }) {
   const label =
     progress.phase === 'injecting'
-      ? isApi
-        ? `正在请求模型…`
-        : `正在把消息注入到 DeepSeek tab…`
+      ? '正在请求模型…'
       : progress.phase === 'streaming'
-        ? `${isApi ? '模型' : 'DeepSeek'} 正在生成 (~${progress.textLen ?? 0} 字)…`
-        : `${isApi ? '模型' : 'DeepSeek'} 思考中… (iter ${progress.iteration})`;
+        ? `模型正在生成 (~${progress.textLen ?? 0} 字)…`
+        : `模型思考中… (iter ${progress.iteration})`;
   return (
     <div class="progress-banner">
       <span class="dots">
@@ -850,51 +651,6 @@ function ProgressBanner({ progress, isApi }: { progress: ProgressState; isApi?: 
         <span class="d3" />
       </span>
       <span>{label}</span>
-    </div>
-  );
-}
-
-function PausedBanner({
-  paused,
-  onResume,
-  onDiscard,
-}: {
-  paused: PausedState;
-  onResume: () => void;
-  onDiscard: () => void;
-}) {
-  const reasonText =
-    paused.reason === 'tab_closed'
-      ? 'DeepSeek 标签页已关闭'
-      : paused.reason === 'tab_navigated_away'
-        ? 'DeepSeek 标签页跳到了其他网站'
-        : paused.reason === 'conv_mismatch'
-          ? '该标签页切换到了另一个 DeepSeek 会话'
-          : 'DeepSeek 标签页未就绪';
-  return (
-    <div class="paused-banner">
-      <div class="title">⏸ 会话已暂停 · {reasonText}</div>
-      {paused.conversationUrl && (
-        <div class="hint">
-          恢复将打开原会话:{' '}
-          <a href={paused.conversationUrl} target="_blank" rel="noopener noreferrer">
-            {paused.conversationUrl.replace('https://chat.deepseek.com', '')}
-          </a>
-        </div>
-      )}
-      {paused.pendingPromptPreview && (
-        <div class="hint preview">未送达的消息预览: {paused.pendingPromptPreview}…</div>
-      )}
-      <div class="actions">
-        {paused.conversationUrl && (
-          <button class="primary" onClick={onResume}>
-            恢复
-          </button>
-        )}
-        <button class="secondary" onClick={onDiscard}>
-          丢弃
-        </button>
-      </div>
     </div>
   );
 }
@@ -1019,7 +775,7 @@ function TurnView({ turn }: { turn: UiTurn }) {
   );
 }
 
-function commandLabel(c: import('../connectors/messages').ParsedCommand): string {
+function commandLabel(c: import('../messages').ParsedCommand): string {
   if (c.action === 'execute_tool') return c.tool ?? 'execute_tool';
   return c.action;
 }
@@ -1097,33 +853,21 @@ function LlmBackendSection({
   config: LlmConfig;
   onSave: (c: LlmConfig) => void;
 }) {
-  // Form state holds BOTH branches' drafts simultaneously, not just the
-  // active one. We load via loadLlmConfigForm() so a previously saved API
-  // key survives a save-as-connector → reopen-and-toggle-back sequence
-  // (the old discriminated-union storage dropped the inactive branch on
-  // save). Defaults are placeholder-y so a brand-new install shows preset
-  // hints rather than empty inputs.
-  const [mode, setMode] = useState<'connector' | 'api'>(config.mode);
-  const [chatbot, setChatbot] = useState<ChatbotId>('deepseek');
-  const [provider, setProvider] = useState<string>('deepseek');
-  const [baseUrl, setBaseUrl] = useState<string>(providerById('deepseek')?.baseUrl ?? '');
-  const [apiKey, setApiKey] = useState<string>('');
-  const [model, setModel] = useState<string>(providerById('deepseek')?.defaultModel ?? '');
+  const [provider, setProvider] = useState<string>(config.provider);
+  const [baseUrl, setBaseUrl] = useState<string>(config.baseUrl);
+  const [apiKey, setApiKey] = useState<string>(config.apiKey);
+  const [model, setModel] = useState<string>(config.model);
   const [saved, setSaved] = useState(false);
 
-  // Load both branches' drafts on mount. Runs once — re-mount on page open
-  // gives us a fresh read so any external storage update (other extension
-  // session, etc.) shows up.
+  // Re-sync from the saved config when it arrives (parent's loadLlmConfig is
+  // async; on first mount the prop is still DEFAULT_CONFIG). After save the
+  // local state already matches → no-op.
   useEffect(() => {
-    void loadLlmConfigForm().then((full) => {
-      setMode(full.mode);
-      setChatbot(full.connector.chatbot);
-      setProvider(full.api.provider);
-      setBaseUrl(full.api.baseUrl);
-      setApiKey(full.api.apiKey);
-      setModel(full.api.model);
-    });
-  }, []);
+    setProvider(config.provider);
+    setBaseUrl(config.baseUrl);
+    setApiKey(config.apiKey);
+    setModel(config.model);
+  }, [config]);
 
   function pickProvider(id: string): void {
     setProvider(id);
@@ -1135,15 +879,12 @@ function LlmBackendSection({
   }
 
   function buildNext(): LlmConfig {
-    return mode === 'connector'
-      ? { mode: 'connector', chatbot }
-      : {
-          mode: 'api',
-          provider,
-          baseUrl: baseUrl.trim(),
-          apiKey: apiKey.trim(),
-          model: model.trim(),
-        };
+    return {
+      provider,
+      baseUrl: baseUrl.trim(),
+      apiKey: apiKey.trim(),
+      model: model.trim(),
+    };
   }
 
   function save(): void {
@@ -1154,26 +895,12 @@ function LlmBackendSection({
     setTimeout(() => setSaved(false), 1500);
   }
 
-  const canSave =
-    mode === 'connector'
-      ? CHATBOTS.find((c) => c.id === chatbot)?.implemented !== false
-      : !!apiKey.trim() && !!baseUrl.trim() && !!model.trim();
-
-  // What's CURRENTLY in effect (from the saved config, not the draft being
-  // edited) — shown up top so the active backend is never ambiguous.
-  const activeLabel =
-    config.mode === 'api'
-      ? `API · ${config.model || config.provider}`
-      : `聊天网页 · ${CHATBOTS.find((c) => c.id === config.chatbot)?.label ?? config.chatbot}`;
-  // Does the draft differ from what's saved? If so the user must hit Save for
-  // it to take effect — surfaced as an explicit warning so it can't be missed.
-  const dirty = JSON.stringify(buildNext()) !== JSON.stringify(config);
-
-  // Dot color in the "当前生效" header card — green when running, amber when
-  // API mode but no key yet (config shows as 'api' but won't work until saved).
-  const activeReady =
-    config.mode === 'api' ? !!config.apiKey && !!config.baseUrl && !!config.model : true;
+  const canSave = !!apiKey.trim() && !!baseUrl.trim() && !!model.trim();
+  const activeReady = !!config.apiKey && !!config.baseUrl && !!config.model;
+  const activeLabel = activeReady ? config.model || config.provider : '未配置 API Key';
   const activeDotKind: 'ok' | 'warn' = activeReady ? 'ok' : 'warn';
+  // Surfaced as an explicit warning so unsaved edits can't be missed.
+  const dirty = JSON.stringify(buildNext()) !== JSON.stringify(config);
 
   return (
     <>
@@ -1186,103 +913,53 @@ function LlmBackendSection({
       </div>
 
       <div class="section">
-        <h4>推理来源</h4>
-        <p class="section-hint">二选一,改完点最下方保存才生效。</p>
-        <button
-          class={`option-card ${mode === 'connector' ? 'selected' : ''}`}
-          onClick={() => setMode('connector')}
-        >
-          <span class="radio" />
-          <span class="body">
-            <span class="title">聊天网页(零 API Key)</span>
-            <span class="desc">
-              复用已登录的 DeepSeek / ChatGPT / Gemini 网页推理,不用 key,也不计费。
-              受聊天网页节奏限制(busy 重试 / 上下文受限)。
-            </span>
+        <h4>API 供应商</h4>
+        <p class="section-hint">
+          任何 OpenAI 兼容 /chat/completions endpoint 都可。Key 仅存于本机 chrome.storage。
+        </p>
+        <div class="pill-row" style="margin-bottom:14px">
+          {PROVIDERS.map((p) => (
+            <button
+              key={p.id}
+              class={`pill ${provider === p.id ? 'selected' : ''}`}
+              onClick={() => pickProvider(p.id)}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+        <div class="field">
+          <label>Base URL</label>
+          <input
+            value={baseUrl}
+            placeholder="https://api.deepseek.com"
+            onInput={(e) => setBaseUrl((e.target as HTMLInputElement).value)}
+          />
+        </div>
+        <div class="field">
+          <label>API Key</label>
+          <input
+            type="password"
+            value={apiKey}
+            placeholder="sk-..."
+            onInput={(e) => setApiKey((e.target as HTMLInputElement).value)}
+          />
+        </div>
+        <div class="field">
+          <label>Model</label>
+          <input
+            value={model}
+            placeholder="deepseek-chat"
+            onInput={(e) => setModel((e.target as HTMLInputElement).value)}
+          />
+          <span class="field-hint">
+            名字按 endpoint 实际支持填(例:deepseek-chat / gpt-4o / claude-sonnet-4-6)。
           </span>
-        </button>
-        <button
-          class={`option-card ${mode === 'api' ? 'selected' : ''}`}
-          onClick={() => setMode('api')}
-        >
-          <span class="radio" />
-          <span class="body">
-            <span class="title">自带 API Key</span>
-            <span class="desc">
-              任何 OpenAI 兼容 /chat/completions endpoint 都可。Key 仅存于本机 chrome.storage。
-            </span>
-          </span>
-        </button>
+        </div>
       </div>
 
-      {mode === 'connector' ? (
-        <div class="section">
-          <h4>聊天网页</h4>
-          <div class="field">
-            <label>选择网页</label>
-            <select
-              value={chatbot}
-              onChange={(e) => setChatbot((e.target as HTMLSelectElement).value as ChatbotId)}
-            >
-              {CHATBOTS.map((c) => (
-                <option value={c.id} disabled={!c.implemented}>
-                  {c.label}
-                  {c.implemented === false ? ' (待实装)' : ''}
-                </option>
-              ))}
-            </select>
-            <span class="field-hint">目前仅 DeepSeek 可用,其它正在接入。</span>
-          </div>
-        </div>
-      ) : (
-        <div class="section">
-          <h4>API 供应商</h4>
-          <div class="pill-row" style="margin-bottom:14px">
-            {PROVIDERS.map((p) => (
-              <button
-                key={p.id}
-                class={`pill ${provider === p.id ? 'selected' : ''}`}
-                onClick={() => pickProvider(p.id)}
-              >
-                {p.label}
-              </button>
-            ))}
-          </div>
-          <div class="field">
-            <label>Base URL</label>
-            <input
-              value={baseUrl}
-              placeholder="https://api.deepseek.com"
-              onInput={(e) => setBaseUrl((e.target as HTMLInputElement).value)}
-            />
-          </div>
-          <div class="field">
-            <label>API Key</label>
-            <input
-              type="password"
-              value={apiKey}
-              placeholder="sk-..."
-              onInput={(e) => setApiKey((e.target as HTMLInputElement).value)}
-            />
-          </div>
-          <div class="field">
-            <label>Model</label>
-            <input
-              value={model}
-              placeholder="deepseek-chat"
-              onInput={(e) => setModel((e.target as HTMLInputElement).value)}
-            />
-            <span class="field-hint">
-              名字按 endpoint 实际支持填(例:deepseek-chat / gpt-4o / claude-sonnet-4-6)。
-            </span>
-          </div>
-        </div>
-      )}
-
       <div class="form-footer">
-        {dirty && !saved && (
-          <div class="dirty-note">⚠ 有未保存的改动 —— 点下方按钮后才会切换/生效</div>
-        )}
+        {dirty && !saved && <div class="dirty-note">⚠ 有未保存的改动 —— 点下方按钮后才生效</div>}
         <button class="btn primary full" disabled={!canSave} onClick={save}>
           {saved ? '已保存 ✓' : dirty ? '保存并启用' : '保存后端设置'}
         </button>
@@ -1303,13 +980,11 @@ function LlmBackendSection({
 function HistoryPage({
   currentSessionId,
   onClose,
-  onResume,
   onOpen,
   onDelete,
 }: {
   currentSessionId: string | null;
   onClose: () => void;
-  onResume: (sessionId: string) => void;
   onOpen: (sessionId: string) => void;
   onDelete: (sessionId: string) => void;
 }): preact.JSX.Element {
@@ -1333,11 +1008,11 @@ function HistoryPage({
 
   useEffect(() => {
     void refresh();
-    // Auto-refresh when SESSION_DONE / SESSION_PAUSED / ASSISTANT_TURN happens
-    // — those are exactly the moments the list contents change.
+    // Auto-refresh when SESSION_DONE / ASSISTANT_TURN happens — those are
+    // the moments list contents change.
     const handler = (m: unknown) => {
       const t = (m as { type?: string })?.type;
-      if (t === 'SESSION_DONE' || t === 'SESSION_PAUSED' || t === 'ASSISTANT_TURN') {
+      if (t === 'SESSION_DONE' || t === 'ASSISTANT_TURN') {
         void refresh();
       }
     };
@@ -1366,7 +1041,6 @@ function HistoryPage({
   if (selectedId) {
     const summary = list.find((s) => s.id === selectedId);
     const isCurrent = selectedId === currentSessionId;
-    const canResume = summary?.status === 'paused' && !!summary.conversationUrl;
     const title = summary?.preview?.trim() || '会话详情';
 
     return (
@@ -1376,15 +1050,6 @@ function HistoryPage({
         onBack={backToList}
         rightActions={
           <>
-            {canResume && (
-              <button
-                class="btn primary sm"
-                title="重新打开 DeepSeek conversation 并继续这条暂停的会话"
-                onClick={() => onResume(selectedId)}
-              >
-                恢复
-              </button>
-            )}
             <button
               class="btn sm outline"
               disabled={isCurrent}
@@ -1498,25 +1163,6 @@ function SessionDetailView({
         )}
       </div>
 
-      {session.conversationUrl && (
-        <div class="conv-url">
-          会话 URL:{' '}
-          <a href={session.conversationUrl} target="_blank" rel="noopener noreferrer">
-            {session.conversationUrl.replace('https://chat.deepseek.com', '')}
-          </a>
-        </div>
-      )}
-
-      {session.status === 'paused' && session.pendingPrompt && (
-        <div class="pending">
-          <div class="label">未送达的消息</div>
-          <div>
-            {session.pendingPrompt.slice(0, 240)}
-            {session.pendingPrompt.length > 240 ? '...' : ''}
-          </div>
-        </div>
-      )}
-
       <div class="turns-heading">消息历史</div>
       <div class="turns">
         {session.history.length === 0 ? (
@@ -1568,8 +1214,6 @@ function badgeClass(status: SessionSummary['status']): string {
   switch (status) {
     case 'running':
       return 'pending';
-    case 'paused':
-      return 'warn';
     case 'error':
       return 'err';
     case 'aborted':
@@ -1583,8 +1227,6 @@ function badgeText(status: SessionSummary['status']): string {
   switch (status) {
     case 'running':
       return '进行中';
-    case 'paused':
-      return '已暂停';
     case 'error':
       return '出错';
     case 'aborted':

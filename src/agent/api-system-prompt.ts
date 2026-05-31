@@ -1,10 +1,10 @@
 /**
- * System prompt for the `api` engine (native function-calling).
+ * System prompt for the api-engine (native function-calling).
  *
- * Unlike the connector prompt (system-prompt.ts), this does NOT teach a text
- * protocol — the model gets real tools via the OpenAI `tools` param and calls
- * them with native `tool_calls`. So this prompt only carries the operator
- * persona + behavioural rules; the tool schemas themselves carry the detail.
+ * No text protocol — the model gets real tools via the OpenAI `tools` param
+ * and calls them with native `tool_calls`. So this prompt only carries the
+ * operator persona + behavioural rules; the tool schemas themselves carry
+ * the detail.
  */
 
 export function systemPromptApi(): string {

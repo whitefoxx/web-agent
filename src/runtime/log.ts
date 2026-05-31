@@ -7,7 +7,7 @@
  * the sidepanel's log viewer.
  *
  * Filter Chrome DevTools by `webchat` to see only our logs, or by
- * `webchat:loop` / `webchat:page` / `webchat:connector` etc. to narrow scope.
+ * `webchat:api` / `webchat:page` / `webchat:dispatcher` etc. to narrow scope.
  */
 
 const PREFIX = '%c[webchat:%s]%c';

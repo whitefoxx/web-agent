@@ -21,7 +21,7 @@
  * The store is best-effort: if IndexedDB isn't available (e.g., when the
  * unit tests load this module in a node environment), every operation
  * silently no-ops. That mirrors how the previous chrome.storage.session
- * shim behaved and keeps the orchestrator's `saveSession` path test-safe.
+ * shim behaved and keeps the api-engine's `saveSession` path test-safe.
  */
 
 import type { SessionState, SessionStatus } from './session';
