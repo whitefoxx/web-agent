@@ -3,19 +3,19 @@
  *
  * The bundled marketplace/xiaohongshu/comments.js re-exports the pure helper
  * `parseXhsLikeCountText` and `buildCommentsExtractJs`, so those are tested
- * directly. The single opencli test that evals `buildCommentsExtractJs`
- * against a real `jsdom` DOM ("extracts shortform like counts from the shared
- * xiaohongshu/rednote DOM script") is SKIPPED here: it requires the `jsdom`
- * package, which is not a dependency of this repo and may not be added (test
- * dir only). Its behavioral core (shortform like-count parsing) is still fully
- * covered by the `parseXhsLikeCountText` block below, which is the exact
- * function the DOM script uses for `likes`.
+ * directly. The opencli test that evals `buildCommentsExtractJs` against a real
+ * `jsdom` DOM ("extracts shortform like counts from the shared
+ * xiaohongshu/rednote DOM script") is now ported via the `jsdom` devDep — see
+ * the `buildCommentsExtractJs (jsdom DOM extraction)` block at the bottom. Its
+ * behavioral core (shortform like-count parsing) is additionally covered by the
+ * `parseXhsLikeCountText` block below.
  *
  * All `xiaohongshu comments` func tests are ported faithfully via the page
  * mock — opencli's createPageMock(evaluateResult) resolves a single canned
  * value for the one `page.evaluate(buildCommentsExtractJs(...))` call.
  */
 import { beforeEach, describe, expect, it } from 'vitest';
+import { JSDOM } from 'jsdom';
 import { findAdapter } from '../../../src/runtime/registry.js';
 import { makeFakeXiaohongshuPage } from '../_helpers/xiaohongshu-page.js';
 
@@ -24,6 +24,26 @@ import {
   buildCommentsExtractJs,
   parseXhsLikeCountText,
 } from '../../../marketplace/xiaohongshu/comments.js';
+
+// Ported verbatim from opencli's runCommentsExtract: eval the generated
+// extraction IIFE against a real jsdom document by swapping the relevant
+// globals (the script references `document` / `location` as bare globals).
+async function runCommentsExtract(html: string): Promise<{ results: unknown[] }> {
+  const dom = new JSDOM(html, {
+    url: 'https://www.xiaohongshu.com/search_result/abc123?xsec_token=tok',
+  });
+  const previousDocument = (globalThis as { document?: unknown }).document;
+  const previousLocation = (globalThis as { location?: unknown }).location;
+  (globalThis as { document?: unknown }).document = dom.window.document;
+  (globalThis as { location?: unknown }).location = dom.window.location;
+  try {
+    // eslint-disable-next-line no-eval
+    return await eval(buildCommentsExtractJs(false));
+  } finally {
+    (globalThis as { document?: unknown }).document = previousDocument;
+    (globalThis as { location?: unknown }).location = previousLocation;
+  }
+}
 
 describe('parseXhsLikeCountText', () => {
   it('parses exact integer and shortform like counts', () => {
@@ -258,5 +278,38 @@ describe('xiaohongshu/comments (marketplace)', () => {
       expect(result).toHaveLength(4);
       expect(result.map((r) => r.author)).toEqual(['A', 'A1', 'A2', 'B']);
     });
+  });
+});
+
+// jsdom-backed port of opencli's "extracts shortform like counts from the
+// shared xiaohongshu/rednote DOM script" test. Runs the generated extraction
+// IIFE against a real DOM (now that jsdom is a devDep) instead of only asserting
+// the baked-in parseXhsLikeCountText source.
+describe('buildCommentsExtractJs (jsdom DOM extraction)', () => {
+  it('extracts shortform like counts from the shared xiaohongshu/rednote DOM script', async () => {
+    const data = await runCommentsExtract(`
+      <main>
+        <section class="parent-comment">
+          <div class="comment-item">
+            <div class="author-wrapper"><span class="name">Alice</span></div>
+            <div class="content">Great note</div>
+            <span class="count">2.1w</span>
+            <span class="date">today</span>
+          </div>
+        </section>
+        <section class="parent-comment">
+          <div class="comment-item">
+            <span class="user-name">Bob</span>
+            <div class="note-text">Malformed count</div>
+            <span class="count">likes 2.1w</span>
+          </div>
+        </section>
+      </main>
+    `);
+
+    expect(data.results).toEqual([
+      { author: 'Alice', text: 'Great note', likes: 21000, time: 'today', is_reply: false, reply_to: '' },
+      { author: 'Bob', text: 'Malformed count', likes: 0, time: '', is_reply: false, reply_to: '' },
+    ]);
   });
 });

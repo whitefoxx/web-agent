@@ -3,17 +3,18 @@
  *
  * The bundled marketplace/xiaohongshu/delete-note.js re-exports `__test__`
  * ({ normalizeNoteId, buildLocateAndMaybeDeleteScript, buildVerifyGoneScript }),
- * so the pure `normalizeNoteId` test is ported directly. The single opencli
- * test that evals `buildLocateAndMaybeDeleteScript` against a real `jsdom` DOM
- * ("executes the generated row locator without substring-matching other
- * impression fields") is SKIPPED: it requires the `jsdom` package, which is
- * not a dependency of this repo and may not be added.
+ * so the pure `normalizeNoteId` test is ported directly. The opencli test that
+ * evals `buildLocateAndMaybeDeleteScript` against a real `jsdom` DOM ("executes
+ * the generated row locator without substring-matching other impression
+ * fields") is now ported via the `jsdom` devDep — see the last `it` in the
+ * command block.
  *
  * All func tests use opencli's `makePage([...])` shape: each evaluate call
  * resolves the next queued value (then falls through to undefined), which the
  * helper's setEvaluateOnceSequence mirrors exactly.
  */
 import { describe, expect, it } from 'vitest';
+import { JSDOM } from 'jsdom';
 import { findAdapter } from '../../../src/runtime/registry.js';
 import {
   ArgumentError,
@@ -208,5 +209,36 @@ describe('xiaohongshu/delete-note command (marketplace)', () => {
     await expect(
       getCommand()!.func!(page, { 'note-id': validId, execute: true }),
     ).rejects.toThrowError(/still visible after confirm/i);
+  });
+
+  // jsdom-backed port of opencli's "executes the generated row locator without
+  // substring-matching other impression fields" test. Now that jsdom is a
+  // devDep, eval the locator IIFE against a real DOM and assert it matches the
+  // row whose parsed noteTarget.value.noteId equals validId — not the row that
+  // merely carries validId in an unrelated `title` field.
+  it('executes the generated row locator without substring-matching other impression fields', () => {
+    const otherId = '6a08ba0b000000000702a894';
+    const dom = new JSDOM(
+      `
+      <div class="note" data-impression='{"noteTarget":{"value":{"noteId":"${otherId}"}},"title":"${validId}"}'>
+        <span class="control data-del">删除</span>
+      </div>
+      <div class="note" data-impression='{"noteTarget":{"value":{"noteId":"${validId}"}}}'>
+        <span class="control data-del">删除</span>
+      </div>
+    `,
+      { runScripts: 'outside-only' },
+    );
+    // jsdom does no layout, so offsetParent is always null. The locator's
+    // isVisible() relies on offsetParent, so polyfill it to the document body
+    // (verbatim from opencli's test).
+    Object.defineProperty(dom.window.HTMLElement.prototype, 'offsetParent', {
+      configurable: true,
+      get() {
+        return this.ownerDocument.body;
+      },
+    });
+    const result = dom.window.eval(__test__.buildLocateAndMaybeDeleteScript(validId, false));
+    expect(result).toEqual({ ok: true, clicked: false });
   });
 });

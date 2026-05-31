@@ -5,12 +5,13 @@
  * `buildScrollUntilJs`, `unwrapEvaluateResult`, `parseLimit` and
  * `__test__.stripXhsAuthorDateSuffix`, so all pure-helper tests are ported.
  *
- * Two opencli func/helper tests are SKIPPED because they eval the generated
- * DOM-extraction / scroll IIFEs against a real `jsdom` document, and `jsdom`
- * is not a dependency of this repo (and may not be added — test dir only):
+ * Two opencli func/helper tests eval the generated DOM-extraction / scroll
+ * IIFEs against a real `jsdom` document; both are now ported via the `jsdom`
+ * devDep:
  *   - 'separates fallback author text from appended relative date'
+ *     (in the `xiaohongshu/search (marketplace)` block)
  *   - buildScrollUntilJs › 'counts only visible real note rows'
- * Their non-DOM cores are still covered: stripXhsAuthorDateSuffix below covers
+ * Their non-DOM cores remain covered too: stripXhsAuthorDateSuffix below covers
  * the author/date separation logic, and the other buildScrollUntilJs tests
  * cover its string-generation behavior.
  *
@@ -18,6 +19,7 @@
  * each evaluate call resolves the next queued value.
  */
 import { describe, expect, it } from 'vitest';
+import { JSDOM } from 'jsdom';
 import { findAdapter } from '../../../src/runtime/registry.js';
 import { makeFakeXiaohongshuPage } from '../_helpers/xiaohongshu-page.js';
 
@@ -25,9 +27,18 @@ import '../../../marketplace/xiaohongshu/search.js';
 import {
   __test__,
   buildScrollUntilJs,
+  buildSearchExtractJs,
   noteIdToDate,
   unwrapEvaluateResult,
 } from '../../../marketplace/xiaohongshu/search.js';
+
+// jsdom does no layout, so getBoundingClientRect() returns all-zero rects and
+// the extraction/scroll scripts treat every node as invisible. Stub a non-zero
+// rect on the nodes a test wants counted (verbatim from opencli's test).
+function markVisible(el: Element): void {
+  (el as unknown as { getBoundingClientRect: () => { width: number; height: number } }).getBoundingClientRect =
+    () => ({ width: 100, height: 100 });
+}
 
 function createPageMock(evaluateResults: unknown[]) {
   const page = makeFakeXiaohongshuPage();
@@ -204,6 +215,41 @@ describe('xiaohongshu/search (marketplace)', () => {
     expect(result.map((item) => item.title)).toEqual(['Result A', 'Result B']);
     expect(page.evaluate).toHaveBeenCalledTimes(4);
   });
+
+  // jsdom-backed port of opencli's "separates fallback author text from
+  // appended relative date" test. Now that jsdom is a devDep, eval the
+  // extraction IIFE (buildSearchExtractJs, the same builder the func calls with
+  // 'www.xiaohongshu.com') against a real DOM and assert the author name is
+  // split from the appended relative date ("数字3天前端" kept, "3天前" stripped).
+  it('separates fallback author text from appended relative date', () => {
+    const dom = new JSDOM(
+      `
+      <section class="note-item">
+        <a class="cover mask" href="/search_result/68e90be80000000004022e66?xsec_token=test-token"></a>
+        <div class="title">数字作者测试</div>
+        <a class="author" href="/user/profile/author123">
+          <span>数字3天前端</span><span>3天前</span>
+        </a>
+        <span class="count">8</span>
+      </section>
+    `,
+      { url: 'https://www.xiaohongshu.com/search_result?keyword=test' },
+    );
+    markVisible(dom.window.document.querySelector('section.note-item')!);
+
+    const result = Function(
+      'document',
+      'getComputedStyle',
+      `return (${buildSearchExtractJs('www.xiaohongshu.com')})`,
+    )(dom.window.document, dom.window.getComputedStyle.bind(dom.window)) as Array<Record<string, unknown>>;
+
+    expect(result[0]).toMatchObject({
+      title: '数字作者测试',
+      author: '数字3天前端',
+      likes: '8',
+      author_url: 'https://www.xiaohongshu.com/user/profile/author123',
+    });
+  });
 });
 
 describe('buildScrollUntilJs', () => {
@@ -222,6 +268,39 @@ describe('buildScrollUntilJs', () => {
   it('rejects unsafe helper arguments instead of interpolating them into code', () => {
     expect(() => buildScrollUntilJs(0)).toThrow(/targetCount/);
     expect(() => buildScrollUntilJs(10, 0)).toThrow(/maxScrolls/);
+  });
+
+  // jsdom-backed port of opencli's "counts only visible real note rows" test.
+  // Now that jsdom is a devDep, eval the scroll-until IIFE against a real DOM:
+  // it must count only the visible, non-query note row (1), excluding the
+  // related-search `.query-note-item` row and the display:none row.
+  it('counts only visible real note rows', async () => {
+    const dom = new JSDOM(
+      `
+      <section class="note-item" id="visible"></section>
+      <section class="note-item query-note-item" id="query"></section>
+      <section class="note-item" id="hidden" style="display:none"></section>
+    `,
+      { url: 'https://www.xiaohongshu.com/search_result?keyword=test' },
+    );
+    markVisible(dom.window.document.querySelector('#visible')!);
+    markVisible(dom.window.document.querySelector('#query')!);
+    markVisible(dom.window.document.querySelector('#hidden')!);
+
+    const result = await Function(
+      'document',
+      'window',
+      'MutationObserver',
+      'getComputedStyle',
+      `return (${buildScrollUntilJs(1)})`,
+    )(
+      dom.window.document,
+      dom.window,
+      dom.window.MutationObserver,
+      dom.window.getComputedStyle.bind(dom.window),
+    );
+
+    expect(result).toBe(1);
   });
 });
 

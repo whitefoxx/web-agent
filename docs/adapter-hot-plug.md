@@ -968,10 +968,19 @@ marketplace 改为手动维护(§10 / commit `e9c211c`)后,bundle 后的 adapter
 - **0 个 adapter bug**:pipeline/func adapter 是 opencli 的忠实 esbuild 产物,行为一致;系统性的坑(注入 scope stub / 错误类 instanceof / log 缺失)已在 §10.18 统一修掉,所以移植阶段没再炸出新的逻辑 bug。
 - **跳过(记录在案,非偷懒)**:
   - 纯 helper 测试,但该 helper 被 inline 成 file-local 且 bundle 没 `__test__` 导出(linkedin/posts 的 activityUrl/parseMetric、xiaohongshu/note 的 parseNoteId 等)——其行为通过 func 间接覆盖了。
-  - **依赖 jsdom 的 DOM 提取测试**(xiaohongshu 4 + linkedin 2):opencli 用 `new JSDOM()` 把生成的 `buildXExtractJs` 脚本喂真 DOM 跑。webchat-agent 没装 jsdom 且 vitest env 是 `node`。这是**唯一真正的覆盖缺口**——那些 DOM 提取脚本整体没被执行过,正是 porting bug 可能藏身处。→ 后续用 happy-dom 补(见下一节 commit)。
+  - **依赖 jsdom 的 DOM 提取测试**(xiaohongshu + linkedin):opencli 用 `new JSDOM()` 把生成的 `buildXExtractJs` 脚本喂真 DOM 跑。当时没装 jsdom——**唯一真正的覆盖缺口**,那些 DOM 提取脚本整体没被执行过,正是 porting bug 可能藏身处。→ 已在 §13.6 补回。
 
 ### 13.5 教训
 
 - **测「你 ship 的产物」,不是「上游源码」**。opencli 测的是带 `./utils.js` 模块边界的源文件;我们 ship 的是 inline 后的 bundle。同一个断言,mock 的接缝完全不同——直接 copy opencli 测试会全红。
 - **per-site 拆分是对的**:14 站 14 种 seam,没有「一个 generic fake page 通吃」。让每个 agent 读自己站的 adapter + opencli 测试自己推接缝,比预先设计统一 helper 更省、更对。
 - **移植测试 = 廉价的 porting-bug 探针**:忠实搬 opencli 的断言,能过就证明 bundle 行为对;过不了且不是机械适配问题,就是真 bug。这轮 0 bug 本身就是「bundle 管线忠实」的证据。
+
+### 13.6 补回 jsdom DOM 提取测试(同 sweep 收尾)
+
+装 `jsdom@29`(devDep),把上面跳过的 DOM 提取测试补回来。这些测试**不依赖 mock seam**——opencli 直接 `new JSDOM(html)` + `dom.window.eval(buildXxx(...))` 把**生成的提取脚本字符串**喂进真 DOM 跑,断言抽取结果。所以近乎逐字移植(只改 builder 的 import 路径 + `__test__.` 取法)。
+
+- 4 个 adapter 的 builder 在 bundle 里都够得着:`buildCommentsExtractJs`(comments,直接 export)、`__test__.buildLocateAndMaybeDeleteScript`(delete-note)、`buildSearchExtractJs`/`buildScrollUntilJs`(search,直接 export)、`__test__.buildSentInvitationsScript`(sent-invitations)。
+- jsdom 不做 layout,要把 opencli 的 `offsetParent` polyfill / `getComputedStyle` stub 一起搬(可见性判定靠它们)。programmatic `new JSDOM()` 在现有 `environment:'node'` 下直接能用,不用改 vitest 配置。
+- **补回 5 个 DOM 测试,全绿,0 adapter bug**:把 5 个 builder 跟 opencli 原版逐行 diff,生成脚本**一字不差**——再次证明 esbuild bundle 忠实。全量套件 1150 → **1155 / 138 files**。
+- 剩下没补的只有「纯 helper 被 inline 成 file-local 且 bundle 没 `__test__` 导出」那几个(linkedin/posts、xiaohongshu/note),要补得改 marketplace 源码加导出 + 轮 sha256,收益不抵改动,**留着**(行为已通过 func 间接覆盖)。
