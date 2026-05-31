@@ -1,9 +1,8 @@
 // ../browser-agent/opencli/clis/arxiv/search.js
 import { cli, Strategy } from "@jackwener/opencli/registry";
-import { ArgumentError as ArgumentError2, EmptyResultError } from "@jackwener/opencli/errors";
-
+import { ArgumentError, CommandExecutionError, EmptyResultError } from "@jackwener/opencli/errors";
 // ../browser-agent/opencli/clis/arxiv/utils.js
-import { ArgumentError, CommandExecutionError } from "@jackwener/opencli/errors";
+
 var ARXIV_BASE = "https://export.arxiv.org/api/query";
 async function arxivFetch(params) {
   const resp = await fetch(`${ARXIV_BASE}?${params}`);
@@ -105,7 +104,7 @@ cli({
   func: async (args) => {
     const queryText = String(args.query || "").trim();
     if (!queryText) {
-      throw new ArgumentError2("arxiv search query cannot be empty");
+      throw new ArgumentError("arxiv search query cannot be empty");
     }
     const limit = normalizeArxivLimit(args.limit, 10, 25);
     const query = encodeURIComponent(`all:${queryText}`);

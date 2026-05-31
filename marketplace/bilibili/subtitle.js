@@ -1,10 +1,9 @@
 // ../browser-agent/opencli/clis/bilibili/subtitle.js
 import { cli, Strategy } from "@jackwener/opencli/registry";
-import { AuthRequiredError as AuthRequiredError2, CommandExecutionError as CommandExecutionError2, EmptyResultError as EmptyResultError2 } from "@jackwener/opencli/errors";
-
+import { AuthRequiredError, CommandExecutionError, EmptyResultError } from "@jackwener/opencli/errors";
 // ../browser-agent/opencli/clis/bilibili/utils.js
 import https from "node:https";
-import { AuthRequiredError, CommandExecutionError, EmptyResultError } from "@jackwener/opencli/errors";
+
 function resolveBvid(input) {
   const trimmed = String(input).trim();
   if (/^BV[A-Za-z0-9]+$/i.test(trimmed)) {
@@ -186,20 +185,20 @@ cli({
   columns: ["index", "from", "to", "content"],
   func: async (page, kwargs) => {
     if (!page)
-      throw new CommandExecutionError2("Browser session required for bilibili subtitle");
+      throw new CommandExecutionError("Browser session required for bilibili subtitle");
     const bvid = await resolveBvid(kwargs.bvid);
     let view;
     try {
       view = await apiGet(page, "/x/web-interface/view", { params: { bvid } });
     } catch (err) {
-      throw new CommandExecutionError2(`获取视频信息失败: ${err?.message || err}`);
+      throw new CommandExecutionError(`获取视频信息失败: ${err?.message || err}`);
     }
     if (view?.code !== 0) {
-      throw new CommandExecutionError2(`获取视频信息失败: ${view?.message ?? "unknown"} (${view?.code})`);
+      throw new CommandExecutionError(`获取视频信息失败: ${view?.message ?? "unknown"} (${view?.code})`);
     }
     const cid = view?.data?.cid;
     if (!cid) {
-      throw new CommandExecutionError2(`无法从 view API 拿到 cid (bvid=${bvid})`);
+      throw new CommandExecutionError(`无法从 view API 拿到 cid (bvid=${bvid})`);
     }
     let payload;
     try {
@@ -208,36 +207,36 @@ cli({
         signed: true
       });
     } catch (err) {
-      throw new CommandExecutionError2(`获取视频播放信息失败: ${err?.message || err}`);
+      throw new CommandExecutionError(`获取视频播放信息失败: ${err?.message || err}`);
     }
     if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-      throw new CommandExecutionError2("获取到的视频播放信息对象不符合预期格式");
+      throw new CommandExecutionError("获取到的视频播放信息对象不符合预期格式");
     }
     if (payload.code !== 0) {
-      throw new CommandExecutionError2(`获取视频播放信息失败: ${payload.message} (${payload.code})`);
+      throw new CommandExecutionError(`获取视频播放信息失败: ${payload.message} (${payload.code})`);
     }
     const needLoginSubtitle = payload.data?.need_login_subtitle === true;
     const subtitles = payload.data?.subtitle?.subtitles;
     if (!Array.isArray(subtitles)) {
-      throw new CommandExecutionError2("获取到的字幕列表对象不符合数组格式");
+      throw new CommandExecutionError("获取到的字幕列表对象不符合数组格式");
     }
     if (subtitles.length === 0) {
       if (needLoginSubtitle) {
-        throw new AuthRequiredError2("bilibili.com", "Bilibili subtitles are hidden behind login for this video. Please log in to bilibili.com in Chrome and retry.");
+        throw new AuthRequiredError("bilibili.com", "Bilibili subtitles are hidden behind login for this video. Please log in to bilibili.com in Chrome and retry.");
       }
-      throw new EmptyResultError2("bilibili subtitle", "此视频没有发现外挂或智能字幕。");
+      throw new EmptyResultError("bilibili subtitle", "此视频没有发现外挂或智能字幕。");
     }
     const target = kwargs.lang ? subtitles.find((s) => s.lan === kwargs.lang) || subtitles[0] : subtitles[0];
     if (!target || typeof target !== "object" || !Object.hasOwn(target, "subtitle_url")) {
-      throw new CommandExecutionError2("字幕条目缺少 subtitle_url 字段");
+      throw new CommandExecutionError("字幕条目缺少 subtitle_url 字段");
     }
     const targetSubUrl = typeof target.subtitle_url === "string" ? target.subtitle_url.trim() : "";
     if (!targetSubUrl) {
-      throw new AuthRequiredError2("bilibili.com", "[风控拦截/未登录] 获取到的 subtitle_url 为空！请确保 CLI 已成功登录且风控未封锁此账号。");
+      throw new AuthRequiredError("bilibili.com", "[风控拦截/未登录] 获取到的 subtitle_url 为空！请确保 CLI 已成功登录且风控未封锁此账号。");
     }
     const finalUrl = targetSubUrl.startsWith("//") ? "https:" + targetSubUrl : targetSubUrl;
     if (!/^https?:\/\//i.test(finalUrl)) {
-      throw new CommandExecutionError2(`字幕 URL 非法: ${finalUrl}`);
+      throw new CommandExecutionError(`字幕 URL 非法: ${finalUrl}`);
     }
     const fetchJs = `
       (async () => {
@@ -264,26 +263,26 @@ cli({
     try {
       items = await page.evaluate(fetchJs);
     } catch (err) {
-      throw new CommandExecutionError2(`字幕获取失败: ${err?.message || err}`);
+      throw new CommandExecutionError(`字幕获取失败: ${err?.message || err}`);
     }
     if (items?.error) {
-      throw new CommandExecutionError2(`字幕获取失败: ${items.error}${items.text ? " — " + items.text : ""}`);
+      throw new CommandExecutionError(`字幕获取失败: ${items.error}${items.text ? " — " + items.text : ""}`);
     }
     if (!items || typeof items !== "object" || items.success !== true) {
-      throw new CommandExecutionError2("字幕获取结果对象不符合预期格式");
+      throw new CommandExecutionError("字幕获取结果对象不符合预期格式");
     }
     const finalItems = items.data;
     if (!Array.isArray(finalItems)) {
-      throw new CommandExecutionError2("解析到的字幕列表对象不符合数组格式");
+      throw new CommandExecutionError("解析到的字幕列表对象不符合数组格式");
     }
     if (finalItems.length === 0) {
-      throw new EmptyResultError2("bilibili subtitle", "字幕文件中没有字幕片段。");
+      throw new EmptyResultError("bilibili subtitle", "字幕文件中没有字幕片段。");
     }
     return finalItems.map((item, idx) => {
       const from = Number(item?.from);
       const to = Number(item?.to);
       if (!item || typeof item !== "object" || !Number.isFinite(from) || !Number.isFinite(to)) {
-        throw new CommandExecutionError2("字幕片段缺少有效 from/to 时间戳");
+        throw new CommandExecutionError("字幕片段缺少有效 from/to 时间戳");
       }
       return {
         index: idx + 1,

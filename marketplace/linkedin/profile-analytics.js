@@ -1,9 +1,8 @@
 // ../browser-agent/opencli/clis/linkedin/profile-analytics.js
 import { cli, Strategy } from "@jackwener/opencli/registry";
-import { CommandExecutionError as CommandExecutionError2, EmptyResultError } from "@jackwener/opencli/errors";
-
+import { ArgumentError, AuthRequiredError, CommandExecutionError, EmptyResultError } from "@jackwener/opencli/errors";
 // ../browser-agent/opencli/clis/linkedin/shared.js
-import { ArgumentError, AuthRequiredError, CommandExecutionError } from "@jackwener/opencli/errors";
+
 var LINKEDIN_DOMAIN = "www.linkedin.com";
 function unwrapEvaluateResult(payload) {
   if (payload && typeof payload === "object" && "data" in payload && "session" in payload) return payload.data;
@@ -53,7 +52,7 @@ function normalizeProfileAnalyticsUrl(value) {
   const url = assertSafeLinkedinUrl(value || "https://www.linkedin.com/in/me/", "profile-url", "/in/me/");
   const parsed = new URL(url);
   if (!/^\/in\/[^/?#]+\/?$/.test(parsed.pathname)) {
-    throw new CommandExecutionError2("LinkedIn profile-analytics requires a /in/<handle>/ profile URL");
+    throw new CommandExecutionError("LinkedIn profile-analytics requires a /in/<handle>/ profile URL");
   }
   return parsed.toString();
 }
@@ -98,7 +97,7 @@ function buildProfileAnalyticsScript() {
 }
 function normalizeAnalytics(row) {
   if (!row || typeof row !== "object") {
-    throw new CommandExecutionError2("LinkedIn profile-analytics returned malformed extraction payload");
+    throw new CommandExecutionError("LinkedIn profile-analytics returned malformed extraction payload");
   }
   const metrics = parseDashboardMetrics(row.raw_analytics);
   if (!Object.values(metrics).some(Boolean)) {
@@ -123,7 +122,7 @@ cli({
   ],
   columns: ["profile_url", "profile_views", "post_impressions", "search_appearances", "followers", "connections", "raw_analytics"],
   func: async (page, args) => {
-    if (!page) throw new CommandExecutionError2("Browser session required for linkedin profile-analytics");
+    if (!page) throw new CommandExecutionError("Browser session required for linkedin profile-analytics");
     await page.goto(normalizeProfileAnalyticsUrl(args["profile-url"]));
     await page.wait(5);
     await assertLinkedInAuthenticated(page, "LinkedIn profile-analytics");

@@ -1,10 +1,9 @@
 // ../browser-agent/opencli/clis/bilibili/following.js
 import { cli, Strategy } from "@jackwener/opencli/registry";
-import { CommandExecutionError as CommandExecutionError2 } from "@jackwener/opencli/errors";
-
+import { AuthRequiredError, CommandExecutionError, EmptyResultError } from "@jackwener/opencli/errors";
 // ../browser-agent/opencli/clis/bilibili/utils.js
 import https from "node:https";
-import { AuthRequiredError, CommandExecutionError, EmptyResultError } from "@jackwener/opencli/errors";
+
 var MIXIN_KEY_ENC_TAB = [
   46,
   47,
@@ -176,13 +175,13 @@ cli({
   columns: ["mid", "name", "sign", "following", "fans"],
   func: async (page, kwargs) => {
     if (!page)
-      throw new CommandExecutionError2("Browser session required for bilibili following");
+      throw new CommandExecutionError("Browser session required for bilibili following");
     const uid = kwargs.uid ? await resolveUid(page, kwargs.uid) : await getSelfUid(page);
     const pn = kwargs.page ?? 1;
     const ps = Math.min(kwargs.limit ?? 50, 50);
     const payload = await fetchJson(page, `https://api.bilibili.com/x/relation/followings?vmid=${uid}&pn=${pn}&ps=${ps}&order=desc`);
     if (payload.code !== 0) {
-      throw new CommandExecutionError2(`获取关注列表失败: ${payload.message} (${payload.code})`);
+      throw new CommandExecutionError(`获取关注列表失败: ${payload.message} (${payload.code})`);
     }
     const list = payload.data?.list || [];
     if (list.length === 0) {

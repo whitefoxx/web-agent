@@ -2,10 +2,8 @@
 import { cli, Strategy } from "@jackwener/opencli/registry";
 
 // ../browser-agent/opencli/clis/douban/utils.js
-import { ArgumentError as ArgumentError2, CliError, EmptyResultError } from "@jackwener/opencli/errors";
-
+import { ArgumentError, CliError, EmptyResultError } from "@jackwener/opencli/errors";
 // ../browser-agent/opencli/clis/_shared/common.js
-import { ArgumentError } from "@jackwener/opencli/errors";
 
 // ../browser-agent/opencli/clis/douban/utils.js
 async function getSelfUid(page) {

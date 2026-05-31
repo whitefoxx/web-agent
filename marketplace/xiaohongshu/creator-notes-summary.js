@@ -1,10 +1,8 @@
 // ../browser-agent/opencli/clis/xiaohongshu/creator-notes-summary.js
-import { cli as cli3, Strategy as Strategy3 } from "@jackwener/opencli/registry";
-import { EmptyResultError as EmptyResultError3 } from "@jackwener/opencli/errors";
-
-// ../browser-agent/opencli/clis/xiaohongshu/creator-notes.js
-import { cli, Strategy } from "@jackwener/opencli/registry";
+import { Strategy, cli } from "@jackwener/opencli/registry";
 import { CommandExecutionError, EmptyResultError } from "@jackwener/opencli/errors";
+// ../browser-agent/opencli/clis/xiaohongshu/creator-notes.js
+
 var DATE_LINE_RE = /^发布于 (\d{4}年\d{2}月\d{2}日 \d{2}:\d{2})$/;
 var METRIC_LINE_RE = /^\d+$/;
 var VISIBILITY_LINE_RE = /可见$/;
@@ -444,8 +442,7 @@ cli({
 });
 
 // ../browser-agent/opencli/clis/xiaohongshu/creator-note-detail.js
-import { cli as cli2, Strategy as Strategy2 } from "@jackwener/opencli/registry";
-import { CommandExecutionError as CommandExecutionError2, EmptyResultError as EmptyResultError2 } from "@jackwener/opencli/errors";
+
 var NOTE_DETAIL_DATETIME_RE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/;
 var NOTE_DETAIL_METRICS = [
   { label: "曝光数", section: "基础数据" },
@@ -698,18 +695,18 @@ function isPlainObject(value) {
 }
 function assertOptionalArray(payload, key, suffix) {
   if (key in payload && !Array.isArray(payload[key])) {
-    throw new CommandExecutionError2(`xiaohongshu creator-note-detail: signed API ${suffix} returned malformed ${key}`);
+    throw new CommandExecutionError(`xiaohongshu creator-note-detail: signed API ${suffix} returned malformed ${key}`);
   }
 }
 function assertOptionalPlainObject(payload, key, suffix) {
   if (key in payload && !isPlainObject(payload[key])) {
-    throw new CommandExecutionError2(`xiaohongshu creator-note-detail: signed API ${suffix} returned malformed ${key}`);
+    throw new CommandExecutionError(`xiaohongshu creator-note-detail: signed API ${suffix} returned malformed ${key}`);
   }
 }
 function validateCapturedPayload(payload, endpoint) {
   const suffix = endpoint.suffix;
   if (!isPlainObject(payload)) {
-    throw new CommandExecutionError2(`xiaohongshu creator-note-detail: signed API ${suffix} returned a malformed payload`);
+    throw new CommandExecutionError(`xiaohongshu creator-note-detail: signed API ${suffix} returned a malformed payload`);
   }
   if (endpoint.key === "noteBase") {
     assertOptionalPlainObject(payload, "hour", suffix);
@@ -728,20 +725,20 @@ function validateCapturedPayload(payload, endpoint) {
 function parseCapturedJson(capture, endpoint) {
   const suffix = endpoint.suffix;
   if (!capture || typeof capture !== "object") {
-    throw new CommandExecutionError2(`xiaohongshu creator-note-detail: malformed capture for ${suffix}`);
+    throw new CommandExecutionError(`xiaohongshu creator-note-detail: malformed capture for ${suffix}`);
   }
   if (capture.ok !== true) {
-    throw new CommandExecutionError2(`xiaohongshu creator-note-detail: signed API ${suffix} returned HTTP ${capture.status ?? "non-2xx"}`);
+    throw new CommandExecutionError(`xiaohongshu creator-note-detail: signed API ${suffix} returned HTTP ${capture.status ?? "non-2xx"}`);
   }
   if (typeof capture.body !== "string") {
-    throw new CommandExecutionError2(`xiaohongshu creator-note-detail: signed API ${suffix} returned a non-text body`);
+    throw new CommandExecutionError(`xiaohongshu creator-note-detail: signed API ${suffix} returned a non-text body`);
   }
   try {
     const envelope = JSON.parse(capture.body);
     const payload = isPlainObject(envelope) && Object.hasOwn(envelope, "data") ? envelope.data : envelope;
     return validateCapturedPayload(payload, endpoint);
   } catch {
-    throw new CommandExecutionError2(`xiaohongshu creator-note-detail: signed API ${suffix} returned invalid JSON or payload shape`);
+    throw new CommandExecutionError(`xiaohongshu creator-note-detail: signed API ${suffix} returned invalid JSON or payload shape`);
   }
 }
 async function installXhsFetchCaptureHook2(page) {
@@ -815,10 +812,10 @@ async function captureNoteDetailPayload(page, noteId) {
       raw = await page.evaluate("JSON.stringify(window.__xhsCapture || {})");
       captureMap = typeof raw === "string" ? JSON.parse(raw) : {};
     } catch {
-      throw new CommandExecutionError2("xiaohongshu creator-note-detail: failed to read signed datacenter/note capture buffer");
+      throw new CommandExecutionError("xiaohongshu creator-note-detail: failed to read signed datacenter/note capture buffer");
     }
     if (!captureMap || typeof captureMap !== "object" || Array.isArray(captureMap)) {
-      throw new CommandExecutionError2("xiaohongshu creator-note-detail: malformed signed datacenter/note capture buffer");
+      throw new CommandExecutionError("xiaohongshu creator-note-detail: malformed signed datacenter/note capture buffer");
     }
     const captured = wantedSuffixes.filter((suffix) => findCapturedUrl(captureMap, suffix));
     if (captured.length === wantedSuffixes.length)
@@ -874,13 +871,13 @@ async function fetchCreatorNoteDetailRows(page, noteId) {
   appendAudienceRows(rows, apiPayload ?? void 0);
   return rows;
 }
-cli2({
+cli({
   site: "xiaohongshu",
   name: "creator-note-detail",
   access: "read",
   description: "小红书单篇笔记详情页数据 (笔记信息 + 核心/互动数据 + 观看来源 + 观众画像 + 趋势数据)",
   domain: "creator.xiaohongshu.com",
-  strategy: Strategy2.COOKIE,
+  strategy: Strategy.COOKIE,
   browser: true,
   navigateBefore: false,
   args: [
@@ -892,7 +889,7 @@ cli2({
     const rows = await fetchCreatorNoteDetailRows(page, noteId);
     const hasCoreMetric = rows.some((row) => row.section !== "笔记信息" && row.value);
     if (!hasCoreMetric) {
-      throw new EmptyResultError2("xiaohongshu creator-note-detail", "No note detail data found. Check note_id and login status for creator.xiaohongshu.com.");
+      throw new EmptyResultError("xiaohongshu creator-note-detail", "No note detail data found. Check note_id and login status for creator.xiaohongshu.com.");
     }
     return rows;
   }
@@ -935,13 +932,13 @@ function summarizeCreatorNote(note, rows, rank) {
     url: note.url
   };
 }
-cli3({
+cli({
   site: "xiaohongshu",
   name: "creator-notes-summary",
   access: "read",
   description: "小红书最近笔记批量摘要 (列表 + 单篇关键数据汇总)",
   domain: "creator.xiaohongshu.com",
-  strategy: Strategy3.COOKIE,
+  strategy: Strategy.COOKIE,
   browser: true,
   navigateBefore: false,
   args: [
@@ -953,7 +950,7 @@ cli3({
     const limit = kwargs.limit || 3;
     const notes = await fetchCreatorNotes(page, limit);
     if (!notes.length) {
-      throw new EmptyResultError3("xiaohongshu creator-notes-summary", "No notes found. Ensure you are logged into creator.xiaohongshu.com and the account has published notes.");
+      throw new EmptyResultError("xiaohongshu creator-notes-summary", "No notes found. Ensure you are logged into creator.xiaohongshu.com and the account has published notes.");
     }
     const results = [];
     for (const [index, note] of notes.entries()) {

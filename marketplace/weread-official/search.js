@@ -1,15 +1,8 @@
 // ../browser-agent/opencli/clis/weread-official/search.js
 import { cli, Strategy } from "@jackwener/opencli/registry";
-import { ArgumentError as ArgumentError2 } from "@jackwener/opencli/errors";
-
+import { ArgumentError, AuthRequiredError, CommandExecutionError, EmptyResultError, TimeoutError } from "@jackwener/opencli/errors";
 // ../browser-agent/opencli/clis/weread-official/utils.js
-import {
-  ArgumentError,
-  AuthRequiredError,
-  CommandExecutionError,
-  EmptyResultError,
-  TimeoutError
-} from "@jackwener/opencli/errors";
+
 var WEREAD_GATEWAY_URL = "https://i.weread.qq.com/api/agent/gateway";
 var WEREAD_DOMAIN = "weread.qq.com";
 var SKILL_VERSION = "1.0.3";
@@ -200,7 +193,7 @@ cli({
     const keyword = requireText(args.keyword, "keyword");
     const scopeKey = String(args.scope ?? "ebook").trim();
     if (!Object.prototype.hasOwnProperty.call(SEARCH_SCOPES, scopeKey)) {
-      throw new ArgumentError2(
+      throw new ArgumentError(
         `weread-official: scope must be one of: ${Object.keys(SEARCH_SCOPES).join(", ")}`
       );
     }

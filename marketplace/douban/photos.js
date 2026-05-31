@@ -2,10 +2,9 @@
 import { cli, Strategy } from "@jackwener/opencli/registry";
 
 // ../browser-agent/opencli/clis/douban/utils.js
-import { ArgumentError as ArgumentError2, CliError, EmptyResultError } from "@jackwener/opencli/errors";
-
+import { ArgumentError, CliError, EmptyResultError } from "@jackwener/opencli/errors";
 // ../browser-agent/opencli/clis/_shared/common.js
-import { ArgumentError } from "@jackwener/opencli/errors";
+
 function clamp(value, min, max) {
   return Math.max(min, Math.min(value, max));
 }
@@ -30,7 +29,7 @@ async function ensureDoubanReady(page) {
 function normalizeDoubanSubjectId(subjectId) {
   const normalized = String(subjectId || "").trim();
   if (!/^\d+$/.test(normalized)) {
-    throw new ArgumentError2(`Invalid Douban subject ID: ${subjectId}`);
+    throw new ArgumentError(`Invalid Douban subject ID: ${subjectId}`);
   }
   return normalized;
 }

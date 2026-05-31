@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "bundledAt": "2026-05-31T09:12:57.550Z",
+  "bundledAt": "2026-05-31T18:00:00.000Z",
   "generatedFrom": "opencli/clis",
   "includeAll": false,
   "count": 284,
@@ -15,7 +15,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "arxiv/author.js",
-      "sha256": "1dc7b57ba6acbc0fed0871ca4df605e8167b2f9eae3837fe6bd77b189ba96199"
+      "sha256": "0c975f4b86442da2992c994ab23375a6aac97bffd8c1c9df80e732b84689463c"
     },
     {
       "site": "arxiv",
@@ -27,7 +27,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "arxiv/paper.js",
-      "sha256": "848cc3bc1c8a5b8c4e734a992fec0ac2f5a532cae50b069c0eb76d01b14052d7"
+      "sha256": "37494fc337e15b7994e4d731d91145c437ab478baa373ad063d391d6da55977a"
     },
     {
       "site": "arxiv",
@@ -39,7 +39,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "arxiv/recent.js",
-      "sha256": "1324b17267a5e2f563d8670e82a2b7477f9a3980471cbc34ba7e15b7a5703f0c"
+      "sha256": "88f455eb2973c99d435984b0e08a2a92f6c3596cb19dd7c0b2a8912967ca0a5b"
     },
     {
       "site": "arxiv",
@@ -51,7 +51,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "arxiv/search.js",
-      "sha256": "9f6bd85a2962ff823160a7b276f3486791e75cd1249963fc501f5643b24a6bbe"
+      "sha256": "0f77ba654568d65f62d058a1172d1bf0a299806064c03a8cf342bd43de7ba3ba"
     },
     {
       "site": "bilibili",
@@ -64,7 +64,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "bilibili/comment.js",
-      "sha256": "478df972741ffbcddaecea28c2f175c33aae6e68e8c73b1bfac996ac727dc72b"
+      "sha256": "dc8d7c0744ed4ae9958897efd22d4162972716d98b9639a61f378ede58b019fc"
     },
     {
       "site": "bilibili",
@@ -77,7 +77,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "bilibili/comments.js",
-      "sha256": "c586115b454cb74a916772883faebbb3350007a62e1b741e7944c6f13481c2d2"
+      "sha256": "9865b09dc65c4e6ac67005bacc8c7adf3b9cf654e58f5a8103dd7a5f1cdd24fb"
     },
     {
       "site": "bilibili",
@@ -129,7 +129,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "bilibili/following.js",
-      "sha256": "cf9f1e510cd2d90e34eebafd6cd9cada99573031c3deff134bb8e5bf55c9c632"
+      "sha256": "e7283415c6cfffa74c5de37a1c957a19dd10c34d51d6cf376c90d84fb07bb7fa"
     },
     {
       "site": "bilibili",
@@ -207,7 +207,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "bilibili/subtitle.js",
-      "sha256": "f77a49f5fabb47eba5d0c142886cdd02e9d8fe1ba4ecc70814f282f346830e7d"
+      "sha256": "c3a953cfd6efd832fb1d0ac368e0ba85d290e0d91eb24a9fa5ebfc4dc3c626fb"
     },
     {
       "site": "bilibili",
@@ -220,7 +220,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "bilibili/summary.js",
-      "sha256": "a36fa8efc560f9d764b911a35a7dc3135a751e1ff6fb0d90a24b0187ae0785ad"
+      "sha256": "1595782e6caba5527e3aa2bfbccac5eba4811aadcd8ea9d951a7d8c408f6fb49"
     },
     {
       "site": "bilibili",
@@ -245,7 +245,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "bilibili/video.js",
-      "sha256": "43999ad9069c44cd556d1d0ae020ff585de6d09980312c564029a5e23d56e582"
+      "sha256": "825436b84eee7a022438cbf792f997e6a6c4c2d5b605650511b3a4cfb8a366b4"
     },
     {
       "site": "bluesky",
@@ -374,7 +374,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "chatgpt/ask.js",
-      "sha256": "3be3f2a668c3f1d8bf85099d8ee26bd7418c73da77a9325006d58c325cf7d45f"
+      "sha256": "6f41b72cf5b3a587041bbea71e101c3586896f8563f92462b3b55a5e11bb9370"
     },
     {
       "site": "chatgpt",
@@ -386,7 +386,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "chatgpt/detail.js",
-      "sha256": "e72dc32901a291c545f3834c89218fc5aada93c074fc2eac659478618673afb8"
+      "sha256": "7f2f3800a891c72fc9ce2738d6c50ee96222bf379f73efd89520794fda4c3d41"
     },
     {
       "site": "chatgpt",
@@ -398,7 +398,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "chatgpt/history.js",
-      "sha256": "4db678007f9fc405098aef68db758627412fbb37641edcac22d4dbc91e47b123"
+      "sha256": "f499a84e61b8a8ea105dd872c44cf183d3069556de332d98b819a040d2545f97"
     },
     {
       "site": "chatgpt",
@@ -422,7 +422,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "chatgpt/read.js",
-      "sha256": "d1ab81a972c287f5714f9f5dc205cbb838c409bc3f5a47494073bbc5f3bcacaf"
+      "sha256": "58ebd2f508d8f678d608fea6878646f8ecbb69c3b2669e2e04bf63bff858945b"
     },
     {
       "site": "chatgpt",
@@ -434,7 +434,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "chatgpt/send.js",
-      "sha256": "da23a4d86041bdd982082f4056dc5462d914ca661671ebc362daa219d104f6de"
+      "sha256": "a9de8542ae2c86122859759fc1df894a50337e22a326167891e5338c305ffc6e"
     },
     {
       "site": "chatgpt",
@@ -458,7 +458,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "claude/ask.js",
-      "sha256": "3a6fa67142b9a9afa7bc78107c7e1a0a189566e118d83475e95269e4a7ea8cbc"
+      "sha256": "8c2ced2313d6330014f685533652d9e7d226a6e3f88e63f373f12492b2f3854f"
     },
     {
       "site": "claude",
@@ -470,7 +470,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "claude/detail.js",
-      "sha256": "6ff16c87b63cdd121d09e9dca71fc90ee1f45e6da722458fa3255b8aabed5fb8"
+      "sha256": "366196041f471b1e340e51dcaab47f93941d2729cf510cf18737d2128cb5e222"
     },
     {
       "site": "claude",
@@ -482,7 +482,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "claude/history.js",
-      "sha256": "2fbfe099ab722bdc6dc8028361e8fa7c92bbf16212c4f24ba823b073dd71b048"
+      "sha256": "002761d756529b4a1d422586d411c6818ac41fa800ef0f390e9549fb2aed4f4a"
     },
     {
       "site": "claude",
@@ -506,7 +506,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "claude/read.js",
-      "sha256": "0d860cd642a7a287ba971982ae23238d61a99082c1b5a5272fdd3b4b9171fb48"
+      "sha256": "c37e000aca8d118267540f13e43b87a8c6f727b318d2d89aab3a989480117224"
     },
     {
       "site": "claude",
@@ -518,7 +518,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "claude/send.js",
-      "sha256": "7e6715cece06a871ac1353f8dda15ecf953aeb44df36ce721323a56cc6448675"
+      "sha256": "4670e675c3b1259de4d43e6b08e967dd112ec557a8349a4133d2ab6c93936a18"
     },
     {
       "site": "claude",
@@ -582,7 +582,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "douban/book-hot.js",
-      "sha256": "8232729c046e17aceef152bd40a1587036a33c1debbf4695cd738711735ada2f"
+      "sha256": "8e29a45ddffe91a7dcaa6c15bd081fea6ea01afd21f6d057a61a4ac08ac1774e"
     },
     {
       "site": "douban",
@@ -595,7 +595,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "douban/marks.js",
-      "sha256": "1354f60cc7a240636c5fb4009e065f93438f2acba93ff477bf1bb48bddf25fe0"
+      "sha256": "61bb78cb571ad3d802c264d1576252a67402a4a1c6ac7684c27b664f94ee304d"
     },
     {
       "site": "douban",
@@ -608,7 +608,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "douban/movie-hot.js",
-      "sha256": "cec2b0e2d4222371ff3a4cb50e8125e4bc468021091413c264105f44ed6a9fbc"
+      "sha256": "9ff3fe9abb2be873901c5e10ac0695cf0fbf5925cfceea8e62c166d5776462e2"
     },
     {
       "site": "douban",
@@ -621,7 +621,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "douban/photos.js",
-      "sha256": "28cf8e506cb63e4e2bd21b5a17c78873d4bb510cae8047a7c49fa13e28edfe21"
+      "sha256": "4039a7d818c88fcf7a9711ed31e2dff1dcf9d55dbe438509db84d6e726982fea"
     },
     {
       "site": "douban",
@@ -634,7 +634,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "douban/reviews.js",
-      "sha256": "f8945c87a409391947e437b1816005fddef71e83b84011fb884673a382932451"
+      "sha256": "63cdcbd1dfd955532f5022d63cffe9a51c0b02b971de69fe7d4c198ed24a25c5"
     },
     {
       "site": "douban",
@@ -647,7 +647,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "douban/search.js",
-      "sha256": "6016497f76da8bf029e3a59c9aaf9a310d025c9d06a9ecb1daa43e3a342b5452"
+      "sha256": "e989f40bb964155006acd3d7060d13946ae2ffedb254f52f69b20340a38f1ed6"
     },
     {
       "site": "douban",
@@ -660,7 +660,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "douban/subject.js",
-      "sha256": "b5a3423a8ba15d64d507aa69cb2422b473de1b0a5a7fdfa14e1c19d459cfa5ca"
+      "sha256": "3eb8f6f0620e19323006917391b68863fbafb804cd44ed4452ffbaa6097eff48"
     },
     {
       "site": "douban",
@@ -686,7 +686,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "douyin/activities.js",
-      "sha256": "caf74300959d7b4126f131184ba06106d9a5a1f667bad6da524ff10218a92998"
+      "sha256": "7e185b07287548a3a741fda7f06d8d86df1c6881f5213499f4c3b895568cda13"
     },
     {
       "site": "douyin",
@@ -699,7 +699,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "douyin/collections.js",
-      "sha256": "88614f8c8707136868d732eb2470b53f28f680cb6eccca8c697ed7ed4e73ddd5"
+      "sha256": "91ec63bfab86ec650d29560f5e3f59334479a7b327461eedaf6d3a6cfa94b274"
     },
     {
       "site": "douyin",
@@ -712,7 +712,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "douyin/delete.js",
-      "sha256": "82d189f03104fd28c0131139ce102259dc45d3383ee3ce9d984fb49141f75a4e"
+      "sha256": "f727e2668cb57d7aa9f7c89594ed2a271260c554b3e3355d7f82eca42edfae0f"
     },
     {
       "site": "douyin",
@@ -725,7 +725,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "douyin/drafts.js",
-      "sha256": "2d17264d5291586bc64706e36663fb00f0fb65776a14032c0561bcd36f1df812"
+      "sha256": "94b70ea309b11d925dd973f841a93064e7999f711e8b9f2c546479c41e9039d2"
     },
     {
       "site": "douyin",
@@ -738,7 +738,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "douyin/hashtag.js",
-      "sha256": "78711a2de931b9f3ae898db7118ac15aa333832d8a0e0d2caa3dbb3740caccb0"
+      "sha256": "dd2ec709e067b19a23ae76007e1edb664e1164141d3a56630393a9768b0ce5b6"
     },
     {
       "site": "douyin",
@@ -751,7 +751,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "douyin/location.js",
-      "sha256": "493ac39be2570fda79a2bda9b855f2bb5f80b6d3b685e7a77f5e948e2aef1231"
+      "sha256": "9bb9d51acfe035656e82dcd4f9aeb2dddb851a739c0ef7cec45ae1011469eae0"
     },
     {
       "site": "douyin",
@@ -764,7 +764,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "douyin/profile.js",
-      "sha256": "ff2b53d50a06c3745707010f9b9f967e9f0cb9b2a54351dc7b6fcbf1b29cca98"
+      "sha256": "501ac7a92a6067a9f0273a122acb5ff487f9d37c134b48e91d4b49cbe4a051d7"
     },
     {
       "site": "douyin",
@@ -777,7 +777,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "douyin/stats.js",
-      "sha256": "1adbae54e22ddf32427fb0639b7941e6daad1d10765b1f43e86ca8255a86a7d2"
+      "sha256": "0e7fa1f11b1e65c765da06710f9b3a231fc1b61ce83e523aac6f688db2543eb4"
     },
     {
       "site": "douyin",
@@ -790,7 +790,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "douyin/update.js",
-      "sha256": "e0ac248e1332bb78b65fe102bcb1714d68e6a1a9407c1f6d735b0e82d559d647"
+      "sha256": "e0e3c142932ccd26c3cf4f7a36331e8dc4c2b55798a3d34b19dcb86bff1e5a61"
     },
     {
       "site": "douyin",
@@ -803,7 +803,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "douyin/user-videos.js",
-      "sha256": "80c29b151fb2ca5ec173941a5773d5272d32d71e32d1a1f3ba9523802a6be151"
+      "sha256": "47c1cff03fec83a6d138410d85eb964d7b15b235e7d9c81f7f5b2b570e3bd05f"
     },
     {
       "site": "douyin",
@@ -816,7 +816,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "douyin/videos.js",
-      "sha256": "dca9b33f345b2e70a2dfb50b277d7ec3f5f7efc6e260cff51d50dc197c2acf70"
+      "sha256": "fed4c30f8a53111f4670a04e8cdd3ae0ec742fe0dc1afd62bc998f6e7f82b6de"
     },
     {
       "site": "gemini",
@@ -828,7 +828,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "gemini/ask.js",
-      "sha256": "ba053e2e5c1ab78a89525f029836987e6d7d2e2f602f822329c971f0ddd50448"
+      "sha256": "5fcf456ff0929794638a900ccc6539f16adc8d12e7dea8412fc723f209d7f8a4"
     },
     {
       "site": "gemini",
@@ -840,7 +840,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "gemini/deep-research.js",
-      "sha256": "b19dda9da13ebb066cc1a65642be1e78e22f28eaf2507f98fdb00d6c55a69661"
+      "sha256": "06e8e08a43f2e36b87bc9b03feaeba2bd6759d784fd4f86c793e55f8ae13b290"
     },
     {
       "site": "gemini",
@@ -852,7 +852,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "gemini/deep-research-result.js",
-      "sha256": "f9773df4aa9103bed138ebbd3e8153ce070e10ec486ac28381850da2ffcabc94"
+      "sha256": "ce6ceb94eeeb5e2542d1d4e3521e1f29ff617704931b1dbd61d52d90301c7596"
     },
     {
       "site": "gemini",
@@ -1279,7 +1279,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "linkedin/job-detail.js",
-      "sha256": "1e14043ed186951a5c087697b2f84c30758eb4ee7cd325f5235909d9ba19c7d7"
+      "sha256": "67c1697d0ea769feedd19ad33b628e16e5ad6d9e0fdd96810f053031fe38c9d5"
     },
     {
       "site": "linkedin",
@@ -1292,7 +1292,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "linkedin/jobs-preferences.js",
-      "sha256": "7b65f6eecc6ae6166621d4609ce8efee31c7102ff7d74fe2d9f4a35732cfa6f0"
+      "sha256": "7f1e376848486c344d5985bf52a521aabb527bad0c0dbf0857ab3eaa21355f6e"
     },
     {
       "site": "linkedin",
@@ -1317,7 +1317,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "linkedin/post-analytics.js",
-      "sha256": "525838b5ac9ae5ee6497db287b647af8966846fc43e9494488ebdbf487f0602b"
+      "sha256": "b9ab058dbe96bad5d0a3a6c5d3cbcf4894073051773221e5fcc6b93424f356cb"
     },
     {
       "site": "linkedin",
@@ -1330,7 +1330,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "linkedin/posts.js",
-      "sha256": "7a0a90853d38e3af013595bf826fc4d691b60171887b11da077f2ded7327e43d"
+      "sha256": "296a63873d94ddf93d3f0db524835ee910fafd3949e3be19fd38426427de503e"
     },
     {
       "site": "linkedin",
@@ -1343,7 +1343,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "linkedin/profile-analytics.js",
-      "sha256": "49deb57aadc86f538ff8024d5da73ecf7c22c1b05ba63a8e2fbac139588b9e34"
+      "sha256": "0bc26d6acd1bb3248d57774d3134ef76d5b5f6f4ce5beb339041ef7ce6e83aa5"
     },
     {
       "site": "linkedin",
@@ -1356,7 +1356,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "linkedin/profile-experience.js",
-      "sha256": "4b3d08f4c4eaa419c16decbafdceb7e46c58825b9ad525c8c4d096d78478817e"
+      "sha256": "cf741fc991639906a08bd357be8410adc38d92050d0f6ee0dff87d5514a2144d"
     },
     {
       "site": "linkedin",
@@ -1369,7 +1369,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "linkedin/profile-projects.js",
-      "sha256": "06f94027c7a1f0c8cf584cf8f4ac324ea9167ea6cd9043b83012ccd970c6bc10"
+      "sha256": "7ebf0859f92f8772a50ced1392af0fc2c51262d62bc1e6f6425e69d07b6c08a9"
     },
     {
       "site": "linkedin",
@@ -1382,7 +1382,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "linkedin/profile-read.js",
-      "sha256": "01d75f6e15b54808a7e1d26e9def6359a6e43b901df3fc00bb1e881cc7c85b4b"
+      "sha256": "1b294c94d9f7e699428b77a90392952f1ff6365bbf4adec12da152ada11c0d3c"
     },
     {
       "site": "linkedin",
@@ -1423,14 +1423,14 @@
     {
       "site": "linkedin",
       "name": "salesnav-thread",
-      "description": "Return full Sales Navigator message history for a thread id, Sales Navigator inbox URL, lead URL, recipient urn, or exact recipient name",
+      "description": "List LinkedIn Sales Navigator message conversations with API pagination",
       "access": "read",
       "type": "func",
       "tier": "official",
       "author": "opencli",
       "version": "1.0.0",
       "source": "linkedin/salesnav-thread.js",
-      "sha256": "d0d1031136af000bcc2b6e519b809fd234d1e3f134f110cb8d01b10b50da1a95"
+      "sha256": "a74eee6e65b911fadea5cd9ef726122557bb36d2fc8eedf6bbcc7e7d26f20d75"
     },
     {
       "site": "linkedin",
@@ -1468,7 +1468,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "linkedin/services-read.js",
-      "sha256": "a4bd3c8c7dcd3150eef36e8d5482220cbf57ee48fc850d5999c85937c8732d1c"
+      "sha256": "4a6deb758157924280e9423e7571a715bc65fe5a1ec8d98a62255976c3db8b9c"
     },
     {
       "site": "linkedin",
@@ -1493,7 +1493,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "linkedin/timeline.js",
-      "sha256": "56410778d1458b7c06e0deba3cc1f906db6384ef0c2c6c0169d816430a3ff00e"
+      "sha256": "040d7f123758f13c1542100b5fbc132bd73d26c08659feb79f6f90712d700f5e"
     },
     {
       "site": "lobsters",
@@ -1583,7 +1583,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "notebooklm/create.js",
-      "sha256": "1c2a2d7f7081b06196fa5ca69d103a10c2a9948b4cabf2ecdb71a18dbc639c19"
+      "sha256": "82c02ec7471017c6d0888179f22afd633a1e1d172d4623f052ed1bd67fd9ffcd"
     },
     {
       "site": "notebooklm",
@@ -1595,7 +1595,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "notebooklm/current.js",
-      "sha256": "a73da99b0c2577e74b9de933bb9b76020bc94e673852c87c56202e1f2a1f608c"
+      "sha256": "a8056f8e6b409e1fa915b225e5e38d8cb509fc7e3f284d7b2aa63bff4179bd8f"
     },
     {
       "site": "notebooklm",
@@ -1607,7 +1607,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "notebooklm/generate-audio.js",
-      "sha256": "6d21cfa982dd708deb73eb3959527051073485aae78439d47fac0e6f32c0829e"
+      "sha256": "3c81f60b3bfae775b9ec385f762b9aadeda4df2ab58750f3020b4883f4f62d5c"
     },
     {
       "site": "notebooklm",
@@ -1619,7 +1619,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "notebooklm/generate-slides.js",
-      "sha256": "63d4d0ed0ee412414370cf1d306b10caeba754574878fbb2035f8bb716fe8230"
+      "sha256": "cb4ae59833528a178921ce3c4a2364c61a221e8b6d27adbb66552ec811dc03f9"
     },
     {
       "site": "notebooklm",
@@ -1631,7 +1631,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "notebooklm/get.js",
-      "sha256": "9be47b681d7751f583f53460ead5e0b1637b85779e2f3acf5c29c306317676db"
+      "sha256": "a44eb8d776e741024a4055fc805ef7f2bef23b7150b2381935fb02d6c25bec16"
     },
     {
       "site": "notebooklm",
@@ -1643,7 +1643,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "notebooklm/history.js",
-      "sha256": "38626c9a9388d2e20d193f4776383c5616f75d7e348b96968b6f4354f38a94b0"
+      "sha256": "3d83256d0ea65bcc145b3e4f4681b46f8a907fc7d117c24cc23821e23acf68c9"
     },
     {
       "site": "notebooklm",
@@ -1655,7 +1655,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "notebooklm/list.js",
-      "sha256": "e2a99af0c2538a3f068e690c843106e4605a6c0ff23c4156403c009317d01e29"
+      "sha256": "8def4339fc197d3e557a7cf80fb32b9b57b59b6093ce89a365f3561b58a64473"
     },
     {
       "site": "notebooklm",
@@ -1667,7 +1667,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "notebooklm/note-list.js",
-      "sha256": "95c3a4276636bed36c90784d57e243aee931be973c6418b1a55f1d6a3e3a663f"
+      "sha256": "43e748af189e7bb922d6282b2e08beadbe09fde31522f7e8244e6aaf0ff7b23c"
     },
     {
       "site": "notebooklm",
@@ -1679,7 +1679,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "notebooklm/notes-get.js",
-      "sha256": "ff8dc2afa9d60ca0407d95203f8cb94efbe37dc55c5e70cb03e22d32934452d7"
+      "sha256": "133f48e2c51ecba288cf4fbb56a2e966765354d00978f229842d9ad71fa47b5c"
     },
     {
       "site": "notebooklm",
@@ -1691,7 +1691,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "notebooklm/open.js",
-      "sha256": "331b88c266b341b5fd846555e4fc5601abe8da526b6f07efc587192a709b176c"
+      "sha256": "66ac3e8d071890f6a174423d2d8a60c980a9f4048f0a0d1c614cb9d0e9bbb2fd"
     },
     {
       "site": "notebooklm",
@@ -1703,7 +1703,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "notebooklm/source-fulltext.js",
-      "sha256": "a2aca4f8c7f303ca4cb88a8507b82ea52ca9d6fb78a366fc069ddd1910964d32"
+      "sha256": "2c0deba3763bf520d9145137f938c4b6f0ee3d1efea3ab12b54e2bf0f8e2d6aa"
     },
     {
       "site": "notebooklm",
@@ -1715,7 +1715,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "notebooklm/source-get.js",
-      "sha256": "9a327300a6a42ca2775f7b7d3a4357268be30d6721b7268fad24842a631d1d9e"
+      "sha256": "3c7594045cf83bccf937af73e202f792c129c13ab25a4a24607bd2725313f031"
     },
     {
       "site": "notebooklm",
@@ -1727,7 +1727,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "notebooklm/source-guide.js",
-      "sha256": "f87b715dc7f09701bf8833f6d5074bd3a4fa3356b2f4eb888303f1b89936ce09"
+      "sha256": "c3ba1297554a7263ed82ea850732d1abfa56766ddb82cb21023e5db2581c4326"
     },
     {
       "site": "notebooklm",
@@ -1739,7 +1739,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "notebooklm/source-list.js",
-      "sha256": "7b90e48ed074a3691a452c6c5bc0d9fba2d8fed80d681fc677c0ae5ffd154545"
+      "sha256": "2628a944256746e45def4ddb4aea6710f2db2ce3e4e309e3f7de7b40d3c23b9f"
     },
     {
       "site": "notebooklm",
@@ -1751,7 +1751,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "notebooklm/status.js",
-      "sha256": "e871e6b2f6d25e62a08d5d1fc58eb8cc19f23949c9c0ba9ddf29a86d1dc0a251"
+      "sha256": "68ccca00378976d750fa1a719b3ba49fb84287af864a02d8f11471e756925e62"
     },
     {
       "site": "notebooklm",
@@ -1763,7 +1763,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "notebooklm/summary.js",
-      "sha256": "19286e76783dd771dcf3b8420d761cce5966244b6172c75dbfa8f773f4b037be"
+      "sha256": "96115f025da4816bb2d0ed7facb71f91961e6d557c6ba3b1e4f8277979aae3c7"
     },
     {
       "site": "notebooklm",
@@ -1775,7 +1775,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "notebooklm/write-note.js",
-      "sha256": "34780d98d3ff7bca7cb314f97c13b8f38054cb161f8dee3b22644dc15b92a714"
+      "sha256": "ee1c9c8c2a505a858e054f825ae8a28e67532f82197b24a9aae00565d7f1c1d4"
     },
     {
       "site": "reddit",
@@ -2191,7 +2191,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "twitter/article.js",
-      "sha256": "d1e1a4309b2c9313e33d29e27c942cdc7415870c4135b7586d28fb1a2cb356bc"
+      "sha256": "64747e9b9e380bfb9fdac6443c462619ed1ac9f7e8059e67f04adc673af6f619"
     },
     {
       "site": "twitter",
@@ -2217,7 +2217,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "twitter/bookmark.js",
-      "sha256": "34c0f1fa4814cecb0d1e293545e9aeaef90c72bddf9a96546f7c41e9ad7b308f"
+      "sha256": "70afa1e85d4240416a32678c85788e4f722184bfbdc11eb7fc4de139bcf7aa14"
     },
     {
       "site": "twitter",
@@ -2230,7 +2230,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "twitter/bookmark-folder.js",
-      "sha256": "ae759e689fd05935515f2599e63ae3a06ac7fa5e0c12bada9ea7c89e0ec140d2"
+      "sha256": "d884058edee0e49ecbc2fa9fe89c800817b1c25ec2e9b25cb24728ef35e2d766"
     },
     {
       "site": "twitter",
@@ -2243,7 +2243,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "twitter/bookmark-folders.js",
-      "sha256": "0e4ec1db0c1af0f5fa22ec8a2af2431ea425f62232b80fc51463a456f34098db"
+      "sha256": "56f8c2b4869a9583cf532c8b039cfc282fc00ac3b12f21a31424d1ff9cd24f5a"
     },
     {
       "site": "twitter",
@@ -2256,7 +2256,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "twitter/bookmarks.js",
-      "sha256": "1609c42c018adb2a43322d127818afef38bd24a324ba9acc99b8f5745d381a40"
+      "sha256": "3f8f8b2793fccd9c593d447594f0df510f2f1825ffdfceb64c6fc4e71d169694"
     },
     {
       "site": "twitter",
@@ -2269,7 +2269,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "twitter/delete.js",
-      "sha256": "e508c2d0db6a254f2a413adb16c5e21de07852ae3b75567b675253267f9ce78d"
+      "sha256": "896dd85abb521ec3ae97e6345423d53471c53ae759245ffa345823f45ddd9a29"
     },
     {
       "site": "twitter",
@@ -2282,7 +2282,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "twitter/device-follow.js",
-      "sha256": "f153d07ca085676aabcefbfd13f818bcb4e6445f62648bb0bbe08f1ee8f5bae5"
+      "sha256": "42b440f7945b7898dc47da67f68c673dad8f6a485e36be6d03414bab0074cbd4"
     },
     {
       "site": "twitter",
@@ -2308,7 +2308,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "twitter/followers.js",
-      "sha256": "65f825417d6087e45f16984c7069531927567ed00020fe37ef21b25c8d27dd10"
+      "sha256": "1e57f83adf010bd65133a669fa3fc3b5b8359a791677273eb641b62fb552a7f8"
     },
     {
       "site": "twitter",
@@ -2321,7 +2321,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "twitter/following.js",
-      "sha256": "1d0699498a90ad4772005868fb31ac3e618c4d1cc964f7eefd6bb6a53e1f9628"
+      "sha256": "83366560f1087aac183bd17f11f246643e74eded367453e6051e6523c933520c"
     },
     {
       "site": "twitter",
@@ -2334,7 +2334,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "twitter/hide-reply.js",
-      "sha256": "d6158c58fd0fb243349c01b3af03ad61fee8ada3f37a23bfad72f91262e760bf"
+      "sha256": "6efb37a3739ee5979a8b1975489a169e2309780bf4c40de0593d5a67ccd0016a"
     },
     {
       "site": "twitter",
@@ -2347,7 +2347,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "twitter/like.js",
-      "sha256": "b77db1c34d2c747bec4cddf17443c71248562bf863f154c802eb10f5967e0aaf"
+      "sha256": "86900f668d3e02b5ce399d5dd4eb4d44e5b73fd16e3bc66ceaab33777b3abd24"
     },
     {
       "site": "twitter",
@@ -2360,20 +2360,20 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "twitter/likes.js",
-      "sha256": "918d69552710798bc9aca0310ce790a66c0a7e59870e7e44a58fe08f11780660"
+      "sha256": "294cb56b89307ddaec24e193e21c93ef574215dc287aa21cf9e34816cd15c356"
     },
     {
       "site": "twitter",
       "name": "list-add",
-      "description": "Add a user to a Twitter/X list you own (no-op if already a member)",
-      "access": "write",
+      "description": "Get Twitter/X lists for the logged-in user (owned + subscribed)",
+      "access": "read",
       "domain": "x.com",
       "type": "func",
       "tier": "official",
       "author": "opencli",
       "version": "1.0.0",
       "source": "twitter/list-add.js",
-      "sha256": "108f26b91f88ebb471625dae2e4874724c3f5cfc1a0362421b23d8e751f3a382"
+      "sha256": "807af387c85f95b93f66facf0a1388a3375762cfa4c35e93e03063523978b5e4"
     },
     {
       "site": "twitter",
@@ -2386,20 +2386,20 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "twitter/list-create.js",
-      "sha256": "6f125e2ded91f8d6cd1206a0467de04eb78f9ba6ec6d87370fa4f4f574af66e4"
+      "sha256": "5b621f4cc252fd8c736490a0210386aa366b325d23c0087964f35a69ee2fdd71"
     },
     {
       "site": "twitter",
       "name": "list-remove",
-      "description": "Remove a user from a Twitter/X list you own (toggles via UI; no-op if not currently a member)",
-      "access": "write",
+      "description": "Get Twitter/X lists for the logged-in user (owned + subscribed)",
+      "access": "read",
       "domain": "x.com",
       "type": "func",
       "tier": "official",
       "author": "opencli",
       "version": "1.0.0",
       "source": "twitter/list-remove.js",
-      "sha256": "a736bc68392f9fe09a5fac71f014bcb765c45aa30a69263218f2bfd9aeccf16f"
+      "sha256": "8cead33091d4980a57909c4919a37debaeec818571ca856ff5c982c1c6f00791"
     },
     {
       "site": "twitter",
@@ -2412,7 +2412,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "twitter/list-tweets.js",
-      "sha256": "c02dfa3c68cb8a5c15dbb989b2f5e2b22285a1da89a9480c1e9d7120bff12df9"
+      "sha256": "c920931186d74cb7cb96517d1254cb93394302aa6c87e0bcd9851afc8cd1b26b"
     },
     {
       "site": "twitter",
@@ -2425,7 +2425,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "twitter/lists.js",
-      "sha256": "375d1debbfee2eac3dedfba3dda0d1b5114ad8ec00d11d547366b0f17b5db349"
+      "sha256": "78b461272d863ef9fb82084dee1e8b846a990eee1e51e7c21c7119a5db4f7780"
     },
     {
       "site": "twitter",
@@ -2451,7 +2451,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "twitter/profile.js",
-      "sha256": "8ba483b1a4ee4a23cca4f70eab71fafc919d950f476f3d2e1b60a7ff6460f2e0"
+      "sha256": "7f7ea76a5c91ca625b21e4cbd862ae9fcec3479d319f3e0e2fc35aad2142e703"
     },
     {
       "site": "twitter",
@@ -2477,7 +2477,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "twitter/retweet.js",
-      "sha256": "dda6a214b0811e6e6d4d1dbc50f855cce2872d5758d110a648dac9a9feafaa0b"
+      "sha256": "5000b60b8f68f66ffffcb64f06e3987c036ff60cfdb6d3f214dc4dc067c45f17"
     },
     {
       "site": "twitter",
@@ -2490,7 +2490,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "twitter/search.js",
-      "sha256": "f7bd6380d32be399c35806bfe7ba5e383c68c4136039c5b9a3d16bcd6e1cec40"
+      "sha256": "19c68d569d46856c41a45e8a45e547428620e8f6240220fc1b3a855026095353"
     },
     {
       "site": "twitter",
@@ -2503,7 +2503,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "twitter/thread.js",
-      "sha256": "e5cc95b5eceb4b901fe624f4f4d43816d36dfc7501d382e45b384ea842811c60"
+      "sha256": "50aa4d903327536b63f20a4c7ac1e59aa13baa92915a88195c3ac8ea2a769cf9"
     },
     {
       "site": "twitter",
@@ -2516,7 +2516,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "twitter/timeline.js",
-      "sha256": "855358c07ec0fa092073e6ca27fadc8d41f2af7dd5a190363f957868bb73a475"
+      "sha256": "52d080d7bac5b9d2d28b86d819b5438c4153bb0083481d00bfdb0cee4e4fd600"
     },
     {
       "site": "twitter",
@@ -2542,7 +2542,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "twitter/tweets.js",
-      "sha256": "ad3af27b28340f1585793efff8d3b3fe0d51f15ae33fbf84c005ab2056c6668c"
+      "sha256": "dff8ea122d101adb8556c166b85f8e5e363942716019d261a3c01c59386c9cf1"
     },
     {
       "site": "twitter",
@@ -2568,7 +2568,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "twitter/unbookmark.js",
-      "sha256": "c993f0d79468c989f44a478e344a0e63124d772e2d0e552b933a32d0ec8d9603"
+      "sha256": "c90a27e1b9ff3c9c9e269f1d042076f752153696a03e9accc8fed6d94c736983"
     },
     {
       "site": "twitter",
@@ -2594,7 +2594,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "twitter/unlike.js",
-      "sha256": "6a5533cf6e04c2b569a431a7397d75c6943ff286bd4c8da17942c99a86d2ed95"
+      "sha256": "6558abfb955032a8d68474df06371eee7b7fa75532863021f87fb81b0af96328"
     },
     {
       "site": "twitter",
@@ -2607,7 +2607,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "twitter/unretweet.js",
-      "sha256": "a49a65fd9adf4048728bdac9002cbd288c26fc3288ab8e4d5a8ac21698338230"
+      "sha256": "c75f4d5701ff8df667f22b163132dd3974edc5dc05460d246f472ca8aaa6ccb0"
     },
     {
       "site": "v2ex",
@@ -2776,7 +2776,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "weibo/delete.js",
-      "sha256": "08999a3d0a2f1e4a34cf26ad35c42f4a5d42441c458b2833f9d2eda7aad75c29"
+      "sha256": "ff543515af59930d93752ea5d972ce4dd5540fef6bdf971076dbf8ae8904d2f1"
     },
     {
       "site": "weibo",
@@ -2789,7 +2789,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "weibo/favorites.js",
-      "sha256": "451d2f41e5cbad69272b5a78a37ee4930d84fdf4f870c855124e6f43476e0b90"
+      "sha256": "90277da5c378871da38a15fc331618cdb0034c891351e6388a2f37d0162def65"
     },
     {
       "site": "weibo",
@@ -2828,7 +2828,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "weibo/me.js",
-      "sha256": "a26a6fd46983e3ee5b695b7d67b383969ea0d4c450c941d6219e132be72db10c"
+      "sha256": "8bc763810a01c4d0d4fabde5febd8bb2aa75f2b95df0b74ac9ba4f9b72529b8b"
     },
     {
       "site": "weibo",
@@ -2841,7 +2841,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "weibo/post.js",
-      "sha256": "ec0e80e19e3df8bb5f913e989ac54fac4e3f2ef4e473adfa3c47ce9f7872fa60"
+      "sha256": "fab07a57a7146943fe690c584f7e5b7d6a42fcb6d9b4d0007ca1ba639e6e6109"
     },
     {
       "site": "weibo",
@@ -2854,7 +2854,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "weibo/search.js",
-      "sha256": "69d9d44996fbe7ffd33ec0ace0080c971f161affd07cecf972f7a36227e9a700"
+      "sha256": "14b929b1c72d45f9855844a5e1a983de3cc87524a78dc29cb93a4b25a92f8087"
     },
     {
       "site": "weibo",
@@ -2867,7 +2867,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "weibo/user.js",
-      "sha256": "c45cea7de87c1294bfd638c8276aedccc1351fbc15767d2bf59acfcc8439b0f2"
+      "sha256": "36f0bea530276617e818275b250b7034bad897f3714c363b63398d11e8780b35"
     },
     {
       "site": "weibo",
@@ -2880,7 +2880,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "weibo/user-posts.js",
-      "sha256": "32e7101421b58143c3c129098fce6c9902ec29d64f7258b211de0627ad904170"
+      "sha256": "3431ec59910dfa9739b0fc21bed6bfb873270c7b41c8ec2d20877d789d4f4a15"
     },
     {
       "site": "weread-official",
@@ -2958,7 +2958,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "weread-official/review.js",
-      "sha256": "2c00cc14d2e4df5821ea2f3593d051f32733730576c1fce381bbd436b0f538f4"
+      "sha256": "8e2005493fa5b87cefffbcaf71a5fcffb0d6002279d318974a8efddda0b4316d"
     },
     {
       "site": "weread-official",
@@ -2971,7 +2971,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "weread-official/search.js",
-      "sha256": "81fd64b88c7ac34c7af3ca4e11f8266097cf97e8d3583b627b9b7dd57922baa6"
+      "sha256": "bc679a88dc436fe71a1b550fbcebb2f8ef1c92f6cc4cf2be46ab52c8d8bb6150"
     },
     {
       "site": "weread-official",
@@ -2997,7 +2997,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "weread/ai-outline.js",
-      "sha256": "8ee168f74cfe7271e8c947a8332590e1106fd420c8cecf669033b7b3456ff14d"
+      "sha256": "fcd1e2c7a8974449e974931207d4e31424b66c8db678eabf11517348912f0a45"
     },
     {
       "site": "weread",
@@ -3010,7 +3010,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "weread/book.js",
-      "sha256": "92a1791143b913dadaa4219c5ba1e285d4f22139d9a82bb28c784140b2701524"
+      "sha256": "8b3f2bf88055e091682e0d7f95c6a7a7021ffdf459013bc272aa4c196741da47"
     },
     {
       "site": "weread",
@@ -3023,7 +3023,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "weread/book-search.js",
-      "sha256": "4ddabf6f8d79557ad2f5a3e5157fd1e907d7185a4fb089bf2c2273e7cb5540db"
+      "sha256": "241a5edf543ab2d84135c06f32ff33f429a4f9547a01015e901d51e404ce364e"
     },
     {
       "site": "weread",
@@ -3088,7 +3088,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "weread/search.js",
-      "sha256": "4a791055def906f21a839eaace461a6eed9826ac904fc2874331e153d4d68699"
+      "sha256": "71f36568ed762d06fe963d580229134082ef87cca7fc7706c84b3cf69881b0ad"
     },
     {
       "site": "weread",
@@ -3101,7 +3101,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "weread/shelf.js",
-      "sha256": "036e97576c0a3918544f371f0d971ae18894b7510ee63c472291a95568751554"
+      "sha256": "3c1d799ebf34cfcca7903a68e7746fa44a38383f498dac55c5e1db191dfd90f8"
     },
     {
       "site": "wikipedia",
@@ -3126,7 +3126,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "wikipedia/random.js",
-      "sha256": "b9485e8d66240592bd028c5418ad50b1a6f3ef942704c89ed474e32823b9ebb7"
+      "sha256": "1a02f5abb4d558aab583b79f5918642f086c571368fcab9f74b071efd98e038a"
     },
     {
       "site": "wikipedia",
@@ -3138,7 +3138,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "wikipedia/search.js",
-      "sha256": "d6283ac32b0e1fd47989d4141ad8fec90aded1a5cb1888cb2f1a8a4e4c23624f"
+      "sha256": "2aa877ba64d65092b0b8c009a260559ba7df71c1ef47496c4383b104d894125c"
     },
     {
       "site": "wikipedia",
@@ -3150,7 +3150,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "wikipedia/summary.js",
-      "sha256": "c80133fb06f2ddfaef278ec11bdb159903dbc3d0f88c1bcc05b52ea6834cc6c9"
+      "sha256": "02c40e05842a0d641bd091b6c572b93302aaa4396714fdc5fd9cde55727e20a0"
     },
     {
       "site": "wikipedia",
@@ -3162,7 +3162,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "wikipedia/trending.js",
-      "sha256": "90dd1ebe93b75d22778f1b00b55950ddba3254565cfae418d97c95beeb30f2ca"
+      "sha256": "066a05bee2a89c2f65208f645940b491f8354af6e29bf5a7a68594691ed0f7c6"
     },
     {
       "site": "xiaohongshu",
@@ -3175,7 +3175,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "xiaohongshu/comments.js",
-      "sha256": "a762ad060f8f4fee06b16a15fce34916f5c4ec3da0c40fe4ccf880078938dd57"
+      "sha256": "5e0e96a901bc9a2f1a2e6d5027666c4acb2f60e0695e2448e590f45efaae2503"
     },
     {
       "site": "xiaohongshu",
@@ -3206,7 +3206,7 @@
     {
       "site": "xiaohongshu",
       "name": "creator-notes-summary",
-      "description": "小红书最近笔记批量摘要 (列表 + 单篇关键数据汇总)",
+      "description": "小红书创作者笔记列表 + 每篇数据 (标题/日期/观看/点赞/收藏/评论)",
       "access": "read",
       "domain": "creator.xiaohongshu.com",
       "type": "func",
@@ -3214,7 +3214,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "xiaohongshu/creator-notes-summary.js",
-      "sha256": "5444fad3ae501bfafddf42d868dbd74a14a3f1d11ab85a73eaeb5d73e952be70"
+      "sha256": "e39e1bbd8c6e71e6396b63a6cb1f461fa57eafc3fdb50bab60af32a396122a1d"
     },
     {
       "site": "xiaohongshu",
@@ -3266,7 +3266,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "xiaohongshu/note.js",
-      "sha256": "14a25d4fcc2ee42b6821c824be562b45cfe1e9396df0420c6eeb9c34a0f52912"
+      "sha256": "4b9fc61bd778467a3b6ce8dfe70238596fd14373682058226ab88f3ff1bc238f"
     },
     {
       "site": "xiaohongshu",
@@ -3487,7 +3487,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "zhihu/answer.js",
-      "sha256": "073291c1db1fd1c317cb8ad54224d3ad1d5429a5eb839ea6884669f46f0f1058"
+      "sha256": "d101171a24bafa82f1836c7498163a701cbaf45af5c2f2d4fdcf398ba9d3ed2f"
     },
     {
       "site": "zhihu",
@@ -3552,7 +3552,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "zhihu/comment.js",
-      "sha256": "d990158a8333d6b43186d665a12c0edcb6af238f9260f81945c29e740cf154bd"
+      "sha256": "41d7d4b9a408bd2ffdfec3574679d19b0dc545dc35111af432e8d5ff0761a1cc"
     },
     {
       "site": "zhihu",
@@ -3565,7 +3565,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "zhihu/favorite.js",
-      "sha256": "422f97e47d520a063a3ce389e5ad88fa8b7979d8839951b5ad31cddd750aee7f"
+      "sha256": "a21d85df6f5857a6d21dd52100d996ee7da92f29183f5fa0dc95c14c1c1833d6"
     },
     {
       "site": "zhihu",
@@ -3578,7 +3578,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "zhihu/follow.js",
-      "sha256": "ec8adbabfe3b083aa67eecb4dd67ca0ffa7fe12c8c1cdc21866e8cbf7ed575dd"
+      "sha256": "661bf713cff56afa498ec77192126da4ad928c1a20fe7aa5f143add523910d39"
     },
     {
       "site": "zhihu",
@@ -3604,7 +3604,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "zhihu/like.js",
-      "sha256": "67b491550886abba750105233abaa319f24bab56cc485799589ba3cebb29c4c2"
+      "sha256": "4c9079efe521716c34e61df6f96b254a41d056754d37b1acd59b24824ea376e9"
     },
     {
       "site": "zhihu",

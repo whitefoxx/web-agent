@@ -1,9 +1,8 @@
 // ../browser-agent/opencli/clis/gemini/deep-research.js
 import { cli, Strategy } from "@jackwener/opencli/registry";
-import { ArgumentError } from "@jackwener/opencli/errors";
-
+import { ArgumentError, CommandExecutionError } from "@jackwener/opencli/errors";
 // ../browser-agent/opencli/clis/gemini/utils.js
-import { CommandExecutionError } from "@jackwener/opencli/errors";
+
 var GEMINI_DOMAIN = "gemini.google.com";
 var GEMINI_APP_URL = "https://gemini.google.com/app";
 var GEMINI_DEEP_RESEARCH_DEFAULT_TOOL_LABELS = ["Deep Research", "Deep research", "深度研究"];

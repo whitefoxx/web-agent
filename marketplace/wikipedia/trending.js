@@ -1,9 +1,9 @@
 // ../browser-agent/opencli/clis/wikipedia/trending.js
-import { CliError as CliError2 } from "@jackwener/opencli/errors";
+import { CliError } from "@jackwener/opencli/errors";
 import { cli, Strategy } from "@jackwener/opencli/registry";
 
 // ../browser-agent/opencli/clis/wikipedia/utils.js
-import { CliError } from "@jackwener/opencli/errors";
+
 var DESC_MAX_LEN = 80;
 async function wikiFetch(lang, path) {
   const url = `https://${lang}.wikipedia.org${path}`;
@@ -39,10 +39,10 @@ cli({
     const data = await wikiFetch(lang, `/api/rest_v1/feed/featured/${yyyy}/${mm}/${dd}`);
     const articles = data?.mostread?.articles;
     if (!articles?.length)
-      throw new CliError2("NOT_FOUND", "No trending articles available", "Try a different language with --lang");
+      throw new CliError("NOT_FOUND", "No trending articles available", "Try a different language with --lang");
     const selectedArticles = articles.slice(0, limit);
     if (selectedArticles.some((article) => !String(article?.title || "").trim())) {
-      throw new CliError2("PARSE_ERROR", "Wikipedia trending returned an article without title", "Trending rows require a title so they can be opened with wikipedia page.");
+      throw new CliError("PARSE_ERROR", "Wikipedia trending returned an article without title", "Trending rows require a title so they can be opened with wikipedia page.");
     }
     return selectedArticles.map((a, i) => ({
       rank: i + 1,

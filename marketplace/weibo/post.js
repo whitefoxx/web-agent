@@ -1,9 +1,8 @@
 // ../browser-agent/opencli/clis/weibo/post.js
 import { cli, Strategy } from "@jackwener/opencli/registry";
-import { CommandExecutionError as CommandExecutionError2 } from "@jackwener/opencli/errors";
-
-// ../browser-agent/opencli/clis/weibo/utils.js
 import { AuthRequiredError, CommandExecutionError } from "@jackwener/opencli/errors";
+// ../browser-agent/opencli/clis/weibo/utils.js
+
 function unwrapEvaluateResult(payload) {
   if (payload && !Array.isArray(payload) && typeof payload === "object" && "session" in payload && "data" in payload) {
     return payload.data;
@@ -80,7 +79,7 @@ cli({
       })()
     `)), "weibo post");
     if (data.error)
-      throw new CommandExecutionError2(String(data.error));
+      throw new CommandExecutionError(String(data.error));
     return Object.entries(data).map(([field, value]) => ({
       field,
       value: String(value)

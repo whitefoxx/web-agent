@@ -1,10 +1,9 @@
 // ../browser-agent/opencli/clis/bilibili/comment.js
 import { cli, Strategy } from "@jackwener/opencli/registry";
-import { ArgumentError, AuthRequiredError as AuthRequiredError2, CommandExecutionError as CommandExecutionError2, EmptyResultError as EmptyResultError2 } from "@jackwener/opencli/errors";
-
+import { ArgumentError, AuthRequiredError, CommandExecutionError, EmptyResultError } from "@jackwener/opencli/errors";
 // ../browser-agent/opencli/clis/bilibili/utils.js
 import https from "node:https";
-import { AuthRequiredError, CommandExecutionError, EmptyResultError } from "@jackwener/opencli/errors";
+
 function resolveBvid(input) {
   const trimmed = String(input).trim();
   if (/^BV[A-Za-z0-9]+$/i.test(trimmed)) {
@@ -227,14 +226,14 @@ function isAuthLikeBilibiliError(code, message) {
 }
 function requireOkPayload(payload, label) {
   if (!payload || typeof payload !== "object" || Array.isArray(payload) || !Object.hasOwn(payload, "code")) {
-    throw new CommandExecutionError2(`Bilibili ${label} API returned a malformed payload`);
+    throw new CommandExecutionError(`Bilibili ${label} API returned a malformed payload`);
   }
   if (payload.code !== 0) {
     const message = payload.message ?? "unknown error";
     if (isAuthLikeBilibiliError(payload.code, message)) {
-      throw new AuthRequiredError2("bilibili.com", `Bilibili ${label} API requires login or permission: ${message} (${payload.code})`);
+      throw new AuthRequiredError("bilibili.com", `Bilibili ${label} API requires login or permission: ${message} (${payload.code})`);
     }
-    throw new CommandExecutionError2(`Bilibili ${label} API failed: ${message} (${payload.code})`);
+    throw new CommandExecutionError(`Bilibili ${label} API failed: ${message} (${payload.code})`);
   }
   return payload.data;
 }
@@ -261,7 +260,7 @@ cli({
   columns: ["rpid", "bvid", "oid", "message", "url"],
   func: async (page, kwargs) => {
     if (!page) {
-      throw new CommandExecutionError2("Browser session required for bilibili comment");
+      throw new CommandExecutionError("Browser session required for bilibili comment");
     }
     const message = String(kwargs.message ?? "").trim();
     if (!message)
@@ -279,7 +278,7 @@ cli({
     const viewData = requireOkPayload(view, "view");
     const oid = viewData?.aid;
     if (!oid)
-      throw new CommandExecutionError2(`Cannot resolve aid for bvid: ${bvid}`);
+      throw new CommandExecutionError(`Cannot resolve aid for bvid: ${bvid}`);
     const atNameToMid = {};
     for (const match of message.matchAll(/@([^\s@]+)/g)) {
       const name = match[1];
@@ -288,11 +287,11 @@ cli({
       try {
         const mid = Number(await resolveUid(page, name));
         if (!Number.isInteger(mid) || mid <= 0) {
-          throw new CommandExecutionError2(`Bilibili user search returned malformed mid for @${name}`);
+          throw new CommandExecutionError(`Bilibili user search returned malformed mid for @${name}`);
         }
         atNameToMid[name] = mid;
       } catch (error) {
-        if (!(error instanceof EmptyResultError2)) {
+        if (!(error instanceof EmptyResultError)) {
           throw error;
         }
       }
@@ -309,7 +308,7 @@ cli({
     const postData = requireOkPayload(payload, "reply add");
     const rpid = postData?.rpid;
     if (!rpid) {
-      throw new CommandExecutionError2("Bilibili reply add API did not return rpid for the posted comment");
+      throw new CommandExecutionError("Bilibili reply add API did not return rpid for the posted comment");
     }
     return [{
       rpid: String(rpid),

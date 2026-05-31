@@ -1,9 +1,8 @@
 // ../browser-agent/opencli/clis/weibo/favorites.js
 import { cli, Strategy } from "@jackwener/opencli/registry";
-import { ArgumentError, CommandExecutionError as CommandExecutionError2, EmptyResultError } from "@jackwener/opencli/errors";
-
+import { ArgumentError, AuthRequiredError, CommandExecutionError, EmptyResultError } from "@jackwener/opencli/errors";
 // ../browser-agent/opencli/clis/weibo/utils.js
-import { AuthRequiredError, CommandExecutionError } from "@jackwener/opencli/errors";
+
 function unwrapEvaluateResult(payload) {
   if (payload && !Array.isArray(payload) && typeof payload === "object" && "session" in payload && "data" in payload) {
     return payload.data;
@@ -176,7 +175,7 @@ cli({
     const items = rawData.map((card) => parseFavoriteCard(card, favUrl)).filter(Boolean);
     const uniqueItems = dedupeFavorites(items, favUrl);
     if (uniqueItems.length === 0) {
-      throw new CommandExecutionError2("Failed to parse visible Weibo favorites");
+      throw new CommandExecutionError("Failed to parse visible Weibo favorites");
     }
     return uniqueItems.slice(0, limit);
   }

@@ -1,9 +1,8 @@
 // ../browser-agent/opencli/clis/claude/send.js
 import { cli, Strategy } from "@jackwener/opencli/registry";
-import { CommandExecutionError as CommandExecutionError2 } from "@jackwener/opencli/errors";
-
-// ../browser-agent/opencli/clis/claude/utils.js
 import { ArgumentError, AuthRequiredError, CommandExecutionError } from "@jackwener/opencli/errors";
+// ../browser-agent/opencli/clis/claude/utils.js
+
 var CLAUDE_DOMAIN = "claude.ai";
 var CLAUDE_URL = "https://claude.ai/new";
 var COMPOSER_SELECTOR = '[data-testid="chat-input"]';
@@ -176,7 +175,7 @@ var sendCommand = cli({
     await withRetry(() => ensureClaudeComposer(page, "Claude send requires a visible composer on the current page."));
     const sendResult = await withRetry(() => sendMessage(page, prompt));
     if (!sendResult?.ok) {
-      throw new CommandExecutionError2(sendResult?.reason || "Failed to send message");
+      throw new CommandExecutionError(sendResult?.reason || "Failed to send message");
     }
     return [{
       Status: "Success",

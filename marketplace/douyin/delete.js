@@ -1,12 +1,10 @@
 // ../browser-agent/opencli/clis/douyin/delete.js
 import { cli, Strategy } from "@jackwener/opencli/registry";
-import { ArgumentError, CommandExecutionError as CommandExecutionError3 } from "@jackwener/opencli/errors";
-
+import { ArgumentError, AuthRequiredError, CommandExecutionError } from "@jackwener/opencli/errors";
 // ../browser-agent/opencli/clis/douyin/_shared/browser-fetch.js
-import { AuthRequiredError, CommandExecutionError as CommandExecutionError2 } from "@jackwener/opencli/errors";
 
 // ../browser-agent/opencli/clis/douyin/_shared/evaluate-result.js
-import { CommandExecutionError } from "@jackwener/opencli/errors";
+
 function unwrapEvaluateResult(payload) {
   if (payload && !Array.isArray(payload) && typeof payload === "object" && "session" in payload && "data" in payload) {
     return payload.data;
@@ -59,13 +57,13 @@ async function browserFetch(page, method, url, options = {}) {
   try {
     result = unwrapEvaluateResult(await page.evaluate(js));
   } catch (error) {
-    throw new CommandExecutionError2(`Douyin API request failed (${method} ${url}): ${error instanceof Error ? error.message : String(error)}`);
+    throw new CommandExecutionError(`Douyin API request failed (${method} ${url}): ${error instanceof Error ? error.message : String(error)}`);
   }
   if (result == null) {
-    throw new CommandExecutionError2(`Empty response from Douyin API (${method} ${url})`);
+    throw new CommandExecutionError(`Empty response from Douyin API (${method} ${url})`);
   }
   if (Array.isArray(result) || typeof result !== "object") {
-    throw new CommandExecutionError2(`Malformed response from Douyin API (${method} ${url})`);
+    throw new CommandExecutionError(`Malformed response from Douyin API (${method} ${url})`);
   }
   if (result && typeof result === "object" && "status_code" in result) {
     const code = result.status_code;
@@ -74,7 +72,7 @@ async function browserFetch(page, method, url, options = {}) {
       if (isAuthLikeError(code, msg)) {
         throw new AuthRequiredError("creator.douyin.com", `Douyin API auth/permission error ${code} at ${method} ${url}: ${msg}`);
       }
-      throw new CommandExecutionError2(`Douyin API error ${code} at ${method} ${url}: ${msg}`);
+      throw new CommandExecutionError(`Douyin API error ${code} at ${method} ${url}: ${msg}`);
     }
   }
   return result;
@@ -169,7 +167,7 @@ async function deleteViaCreatorManage(page, workId) {
     })()
   `), "抖音后台管理删除响应异常");
   if (!result?.ok) {
-    throw new CommandExecutionError3(`抖音后台管理删除失败: ${JSON.stringify(result)}`);
+    throw new CommandExecutionError(`抖音后台管理删除失败: ${JSON.stringify(result)}`);
   }
   return result;
 }
@@ -177,7 +175,7 @@ async function findWorkListItem(page, workId) {
   const data = await browserFetch(page, "GET", `https://creator.douyin.com${WORK_LIST_URL}`, { timeoutMs: 8e3 });
   const list = data.data?.work_list ?? data.aweme_list ?? data.work_list ?? [];
   if (!Array.isArray(list)) {
-    throw new CommandExecutionError3("抖音作品列表响应缺少 work_list/aweme_list");
+    throw new CommandExecutionError("抖音作品列表响应缺少 work_list/aweme_list");
   }
   return list.find((entry) => String(entry.aweme_id || "") === workId || String(entry.item_id || "") === workId) || null;
 }
@@ -206,7 +204,7 @@ cli({
     }
     const before = await findWorkListItem(page, awemeId);
     if (!before) {
-      throw new CommandExecutionError3(`抖音作品 ${awemeId} 未在作品列表中找到，未执行删除`);
+      throw new CommandExecutionError(`抖音作品 ${awemeId} 未在作品列表中找到，未执行删除`);
     }
     const url = "https://creator.douyin.com/web/api/media/aweme/delete/?aid=1128";
     await browserFetch(page, "POST", url, { body: { aweme_id: awemeId }, timeoutMs: 8e3 });
@@ -218,6 +216,6 @@ cli({
         return [{ status: `✅ 已删除 ${awemeId}` }];
       }
     }
-    throw new CommandExecutionError3(`抖音作品 ${awemeId} 删除后仍在作品列表中，删除未确认`);
+    throw new CommandExecutionError(`抖音作品 ${awemeId} 删除后仍在作品列表中，删除未确认`);
   }
 });

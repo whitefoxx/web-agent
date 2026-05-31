@@ -1,9 +1,8 @@
 // ../browser-agent/opencli/clis/weread/book.js
 import { cli, Strategy } from "@jackwener/opencli/registry";
-import { CliError as CliError2 } from "@jackwener/opencli/errors";
-
-// ../browser-agent/opencli/clis/weread/utils.js
 import { CliError } from "@jackwener/opencli/errors";
+// ../browser-agent/opencli/clis/weread/utils.js
+
 var WEREAD_DOMAIN = "weread.qq.com";
 var WEREAD_WEB_ORIGIN = `https://${WEREAD_DOMAIN}`;
 var WEREAD_SHELF_URL = `${WEREAD_WEB_ORIGIN}/web/shelf`;
@@ -430,7 +429,7 @@ cli({
         rating
       }];
     } catch (error) {
-      if (!(error instanceof CliError2) || error.code !== "AUTH_REQUIRED") {
+      if (!(error instanceof CliError) || error.code !== "AUTH_REQUIRED") {
         throw error;
       }
       const { readerUrl: resolvedReaderUrl, snapshot } = await resolveShelfReader(page, bookId);

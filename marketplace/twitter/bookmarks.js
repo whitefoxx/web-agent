@@ -1,9 +1,8 @@
 // ../browser-agent/opencli/clis/twitter/bookmarks.js
 import { cli, Strategy } from "@jackwener/opencli/registry";
-import { AuthRequiredError, CommandExecutionError } from "@jackwener/opencli/errors";
-
+import { ArgumentError, AuthRequiredError, CommandExecutionError } from "@jackwener/opencli/errors";
 // ../browser-agent/opencli/clis/twitter/shared.js
-import { ArgumentError } from "@jackwener/opencli/errors";
+
 function extractMedia(legacy) {
   const media = legacy?.extended_entities?.media || legacy?.entities?.media;
   if (!Array.isArray(media) || media.length === 0) {
@@ -28,7 +27,7 @@ function extractMedia(legacy) {
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { ArgumentError as ArgumentError2 } from "@jackwener/opencli/errors";
+
 var TWITTER_BEARER_TOKEN = "AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA";
 var MAX_IMAGE_SIZE_BYTES = 20 * 1024 * 1024;
 var ENGAGEMENT_WEIGHTS = Object.freeze({

@@ -1,9 +1,9 @@
 // ../browser-agent/opencli/clis/zhihu/favorite.js
-import { CliError as CliError3, CommandExecutionError } from "@jackwener/opencli/errors";
+import { CliError, CommandExecutionError } from "@jackwener/opencli/errors";
 import { cli, Strategy } from "@jackwener/opencli/registry";
 
 // ../browser-agent/opencli/clis/zhihu/target.js
-import { CliError } from "@jackwener/opencli/errors";
+
 var USER_RE = /^user:([A-Za-z0-9_-]+)$/;
 var QUESTION_RE = /^question:(\d+)$/;
 var ANSWER_RE = /^answer:(\d+):(\d+)$/;
@@ -96,7 +96,7 @@ function assertAllowedKinds(command, target) {
 
 // ../browser-agent/opencli/clis/zhihu/write-shared.js
 import { readFile, stat } from "node:fs/promises";
-import { CliError as CliError2 } from "@jackwener/opencli/errors";
+
 var RESULT_ROW_RESERVED_KEYS = /* @__PURE__ */ new Set(["status", "outcome", "message", "target_type", "target"]);
 var EXPLICIT_IDENTITY_META_TOKEN_GROUPS = [
   ["self"],
@@ -108,13 +108,13 @@ var EXPLICIT_IDENTITY_META_TOKEN_GROUPS = [
 var IN_PAGE_EXPLICIT_IDENTITY_META_TOKEN_GROUPS = JSON.stringify(EXPLICIT_IDENTITY_META_TOKEN_GROUPS);
 function requireExecute(kwargs) {
   if (!kwargs.execute) {
-    throw new CliError2("INVALID_INPUT", "This Zhihu write command requires --execute");
+    throw new CliError("INVALID_INPUT", "This Zhihu write command requires --execute");
   }
 }
 function buildResultRow(message, targetType, target, outcome, extra = {}) {
   for (const key of Object.keys(extra)) {
     if (RESULT_ROW_RESERVED_KEYS.has(key)) {
-      throw new CliError2("INVALID_INPUT", `Result extra field cannot overwrite reserved key: ${key}`);
+      throw new CliError("INVALID_INPUT", `Result extra field cannot overwrite reserved key: ${key}`);
     }
   }
   return [{ status: "success", outcome, message, target_type: targetType, target, ...extra }];
@@ -145,7 +145,7 @@ cli({
     const collectionName = typeof kwargs.collection === "string" ? kwargs.collection : void 0;
     const collectionId = typeof kwargs["collection-id"] === "string" ? kwargs["collection-id"] : void 0;
     if ((collectionName ? 1 : 0) + (collectionId ? 1 : 0) !== 1) {
-      throw new CliError3("INVALID_INPUT", "Use exactly one of --collection or --collection-id");
+      throw new CliError("INVALID_INPUT", "Use exactly one of --collection or --collection-id");
     }
     await page.goto("https://www.zhihu.com");
     await page.wait(2);
@@ -189,7 +189,7 @@ cli({
             return { ok: false, message: data.error ? data.error.message : 'HTTP ' + resp.status };
         })()`);
     if (!apiResult?.ok) {
-      throw new CliError3("COMMAND_EXEC", apiResult?.message || "Failed to favorite");
+      throw new CliError("COMMAND_EXEC", apiResult?.message || "Failed to favorite");
     }
     return buildResultRow(`Favorited ${target.kind} ${target.id}`, target.kind, rawTarget, "applied", {
       collection_name: collectionName || "",

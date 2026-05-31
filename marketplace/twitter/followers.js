@@ -1,9 +1,9 @@
 // ../browser-agent/opencli/clis/twitter/followers.js
-import { ArgumentError as ArgumentError2, AuthRequiredError, selectorError, EmptyResultError, CommandExecutionError } from "@jackwener/opencli/errors";
+import { ArgumentError, AuthRequiredError, CommandExecutionError, EmptyResultError, selectorError } from "@jackwener/opencli/errors";
 import { cli, Strategy } from "@jackwener/opencli/registry";
 
 // ../browser-agent/opencli/clis/twitter/shared.js
-import { ArgumentError } from "@jackwener/opencli/errors";
+
 var SCREEN_NAME_PATTERN = /^[A-Za-z0-9_]{1,15}$/;
 var SCREEN_NAME_HOSTS = /* @__PURE__ */ new Set(["x.com", "twitter.com", "mobile.twitter.com"]);
 var RESERVED_SCREEN_NAME_PATHS = /* @__PURE__ */ new Set([
@@ -127,12 +127,12 @@ cli({
   func: async (page, kwargs) => {
     const limit = kwargs.limit;
     if (!Number.isInteger(limit) || limit <= 0) {
-      throw new ArgumentError2("limit must be a positive integer");
+      throw new ArgumentError("limit must be a positive integer");
     }
     const rawUser = String(kwargs.user ?? "").trim();
     let targetUser = normalizeScreenName(rawUser);
     if (rawUser && !targetUser) {
-      throw new ArgumentError2("twitter followers user must be a valid Twitter/X handle", "Example: opencli twitter followers @elonmusk --limit 100");
+      throw new ArgumentError("twitter followers user must be a valid Twitter/X handle", "Example: opencli twitter followers @elonmusk --limit 100");
     }
     if (!targetUser) {
       await page.goto("https://x.com/home");
@@ -150,7 +150,7 @@ cli({
       }
     }
     if (!targetUser) {
-      throw new ArgumentError2("twitter followers user cannot be empty", "Example: opencli twitter followers @elonmusk --limit 100");
+      throw new ArgumentError("twitter followers user cannot be empty", "Example: opencli twitter followers @elonmusk --limit 100");
     }
     await page.goto(`https://x.com/${targetUser}`);
     await page.wait(3);

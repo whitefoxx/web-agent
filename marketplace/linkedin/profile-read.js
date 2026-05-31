@@ -1,9 +1,8 @@
 // ../browser-agent/opencli/clis/linkedin/profile-read.js
 import { cli, Strategy } from "@jackwener/opencli/registry";
-import { CommandExecutionError as CommandExecutionError2 } from "@jackwener/opencli/errors";
-
-// ../browser-agent/opencli/clis/linkedin/shared.js
 import { ArgumentError, AuthRequiredError, CommandExecutionError } from "@jackwener/opencli/errors";
+// ../browser-agent/opencli/clis/linkedin/shared.js
+
 var LINKEDIN_DOMAIN = "www.linkedin.com";
 function unwrapEvaluateResult(payload) {
   if (payload && typeof payload === "object" && "data" in payload && "session" in payload) return payload.data;
@@ -69,7 +68,7 @@ function normalizeProfileReadUrl(value) {
   const url = assertSafeLinkedinUrl(value || "https://www.linkedin.com/in/me/", "profile-url", "/in/me/");
   const parsed = new URL(url);
   if (!/^\/in\/[^/?#]+\/?$/.test(parsed.pathname)) {
-    throw new CommandExecutionError2("LinkedIn profile-read requires a /in/<handle>/ profile URL");
+    throw new CommandExecutionError("LinkedIn profile-read requires a /in/<handle>/ profile URL");
   }
   return parsed.toString();
 }
@@ -141,10 +140,10 @@ function buildAboutEditExtractionScript() {
 }
 function normalizeProfile(row) {
   if (!row || typeof row !== "object") {
-    throw new CommandExecutionError2("LinkedIn profile-read returned malformed extraction payload");
+    throw new CommandExecutionError("LinkedIn profile-read returned malformed extraction payload");
   }
   const name = compactRepeatedText(row.name);
-  if (!name) throw new CommandExecutionError2("LinkedIn profile-read could not find a profile name");
+  if (!name) throw new CommandExecutionError("LinkedIn profile-read could not find a profile name");
   return {
     profile_url: normalizeWhitespace(row.profile_url),
     name,
@@ -172,7 +171,7 @@ cli({
   ],
   columns: ["profile_url", "name", "headline", "location", "about", "about_character_count", "about_skills", "experience", "education", "services", "featured"],
   func: async (page, args) => {
-    if (!page) throw new CommandExecutionError2("Browser session required for linkedin profile-read");
+    if (!page) throw new CommandExecutionError("Browser session required for linkedin profile-read");
     const profileUrl = normalizeProfileReadUrl(args["profile-url"]);
     const shouldReadEditor = !normalizeWhitespace(args["profile-url"]);
     await page.goto(profileUrl);

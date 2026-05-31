@@ -1,9 +1,9 @@
 // ../browser-agent/opencli/clis/wikipedia/random.js
-import { CliError as CliError2 } from "@jackwener/opencli/errors";
+import { CliError } from "@jackwener/opencli/errors";
 import { cli, Strategy } from "@jackwener/opencli/registry";
 
 // ../browser-agent/opencli/clis/wikipedia/utils.js
-import { CliError } from "@jackwener/opencli/errors";
+
 var EXTRACT_MAX_LEN = 300;
 async function wikiFetch(lang, path) {
   const url = `https://${lang}.wikipedia.org${path}`;
@@ -38,7 +38,7 @@ cli({
     const lang = args.lang || "en";
     const data = await wikiFetch(lang, "/api/rest_v1/page/random/summary");
     if (!data?.title)
-      throw new CliError2("NOT_FOUND", "No random article returned", "Try again");
+      throw new CliError("NOT_FOUND", "No random article returned", "Try again");
     return [formatSummaryRow(data, lang)];
   }
 });

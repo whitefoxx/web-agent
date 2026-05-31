@@ -1,9 +1,8 @@
 // ../browser-agent/opencli/clis/weread/ai-outline.js
 import { cli, Strategy } from "@jackwener/opencli/registry";
-import { CliError as CliError2 } from "@jackwener/opencli/errors";
-
-// ../browser-agent/opencli/clis/weread/utils.js
 import { CliError } from "@jackwener/opencli/errors";
+// ../browser-agent/opencli/clis/weread/utils.js
+
 var WEREAD_DOMAIN = "weread.qq.com";
 var WEREAD_WEB_ORIGIN = `https://${WEREAD_DOMAIN}`;
 var WEREAD_SHELF_URL = `${WEREAD_WEB_ORIGIN}/web/shelf`;
@@ -38,19 +37,19 @@ async function postWebApiWithCookies(page, path, body) {
     body: JSON.stringify(body)
   });
   if (resp.status === 401) {
-    throw new CliError2("AUTH_REQUIRED", "Not logged in to WeRead", "Please log in to weread.qq.com in Chrome first");
+    throw new CliError("AUTH_REQUIRED", "Not logged in to WeRead", "Please log in to weread.qq.com in Chrome first");
   }
   let data;
   try {
     data = await resp.json();
   } catch {
-    throw new CliError2("PARSE_ERROR", `Invalid JSON response for ${path}`, "WeRead may have returned an HTML error page");
+    throw new CliError("PARSE_ERROR", `Invalid JSON response for ${path}`, "WeRead may have returned an HTML error page");
   }
   if (data?.errcode === -2010 || data?.errcode === -2012) {
-    throw new CliError2("AUTH_REQUIRED", "Not logged in to WeRead", "Please log in to weread.qq.com in Chrome first");
+    throw new CliError("AUTH_REQUIRED", "Not logged in to WeRead", "Please log in to weread.qq.com in Chrome first");
   }
   if (!resp.ok) {
-    throw new CliError2("FETCH_ERROR", `HTTP ${resp.status} for ${path}`, "WeRead API may be temporarily unavailable");
+    throw new CliError("FETCH_ERROR", `HTTP ${resp.status} for ${path}`, "WeRead API may be temporarily unavailable");
   }
   return data;
 }
@@ -65,12 +64,12 @@ async function postWebApi(path, body) {
     body: JSON.stringify(body)
   });
   if (!resp.ok) {
-    throw new CliError2("FETCH_ERROR", `HTTP ${resp.status} for ${path}`, "WeRead API may be temporarily unavailable");
+    throw new CliError("FETCH_ERROR", `HTTP ${resp.status} for ${path}`, "WeRead API may be temporarily unavailable");
   }
   try {
     return await resp.json();
   } catch {
-    throw new CliError2("PARSE_ERROR", `Invalid JSON response for ${path}`, "WeRead may have returned an HTML error page");
+    throw new CliError("PARSE_ERROR", `Invalid JSON response for ${path}`, "WeRead may have returned an HTML error page");
   }
 }
 cli({
@@ -97,7 +96,7 @@ cli({
     });
     const chapters = chapterData?.data?.[0]?.updated ?? [];
     if (chapters.length === 0) {
-      throw new CliError2("NOT_FOUND", "No chapters found for this book", "Check that the book ID is correct");
+      throw new CliError("NOT_FOUND", "No chapters found for this book", "Check that the book ID is correct");
     }
     const chapterUids = chapters.map((c) => c.chapterUid);
     const chapterNameMap = /* @__PURE__ */ new Map();
@@ -134,7 +133,7 @@ cli({
       }
     }
     if (rawRows.length === 0) {
-      throw new CliError2("NOT_FOUND", "No AI outline available for this book", "AI outlines may not be generated for all books");
+      throw new CliError("NOT_FOUND", "No AI outline available for this book", "AI outlines may not be generated for all books");
     }
     if (rawMode) {
       return rawRows.slice(0, Number(args.limit));

@@ -1,9 +1,8 @@
 // ../browser-agent/opencli/clis/arxiv/paper.js
 import { cli, Strategy } from "@jackwener/opencli/registry";
-import { EmptyResultError } from "@jackwener/opencli/errors";
-
+import { ArgumentError, CommandExecutionError, EmptyResultError } from "@jackwener/opencli/errors";
 // ../browser-agent/opencli/clis/arxiv/utils.js
-import { ArgumentError, CommandExecutionError } from "@jackwener/opencli/errors";
+
 var ARXIV_BASE = "https://export.arxiv.org/api/query";
 async function arxivFetch(params) {
   const resp = await fetch(`${ARXIV_BASE}?${params}`);

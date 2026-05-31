@@ -1,9 +1,8 @@
 // ../browser-agent/opencli/clis/claude/ask.js
 import { cli, Strategy } from "@jackwener/opencli/registry";
-import { ArgumentError as ArgumentError2, CommandExecutionError as CommandExecutionError2, EmptyResultError } from "@jackwener/opencli/errors";
-
+import { ArgumentError, AuthRequiredError, CommandExecutionError, EmptyResultError } from "@jackwener/opencli/errors";
 // ../browser-agent/opencli/clis/claude/utils.js
-import { ArgumentError, AuthRequiredError, CommandExecutionError } from "@jackwener/opencli/errors";
+
 var CLAUDE_DOMAIN = "claude.ai";
 var CLAUDE_URL = "https://claude.ai/new";
 var COMPOSER_SELECTOR = '[data-testid="chat-input"]';
@@ -411,7 +410,7 @@ var askCommand = cli({
     const modelExplicit = kwargs.__opencliOptionSources?.model === "cli";
     const wantModel = kwargs.model || "sonnet";
     if (inConversation && modelExplicit) {
-      throw new ArgumentError2(
+      throw new ArgumentError(
         `Cannot switch to ${wantModel} model inside an existing conversation.`,
         "Re-run with --new to start a fresh chat before selecting a model."
       );
@@ -420,24 +419,24 @@ var askCommand = cli({
       const modelResult = await withRetry(() => selectModel(page, wantModel));
       if (!modelResult?.ok) {
         if (modelResult?.upgrade) {
-          throw new ArgumentError2(
+          throw new ArgumentError(
             `${wantModel} model requires a paid Claude plan.`,
             "Pick --model sonnet or --model haiku, or upgrade your account."
           );
         }
-        throw new CommandExecutionError2(`Could not switch to ${wantModel} model`);
+        throw new CommandExecutionError(`Could not switch to ${wantModel} model`);
       }
     }
     const thinkResult = await withRetry(() => setAdaptiveThinking(page, wantThink));
     if (!thinkResult?.ok && wantThink) {
-      throw new CommandExecutionError2("Could not enable Adaptive thinking");
+      throw new CommandExecutionError("Could not enable Adaptive thinking");
     }
     if (kwargs.file) {
       const baseline2 = await withRetry(() => getBubbleCount(page));
       try {
         const fileResult = await sendWithFile(page, kwargs.file, prompt);
         if (fileResult && !fileResult.ok) {
-          throw new CommandExecutionError2(fileResult.reason || "Failed to attach file");
+          throw new CommandExecutionError(fileResult.reason || "Failed to attach file");
         }
       } catch (err) {
         if (!String(err?.message || err).includes("Promise was collected")) throw err;
@@ -454,7 +453,7 @@ var askCommand = cli({
     const baseline = await withRetry(() => getBubbleCount(page));
     const sendResult = await withRetry(() => sendMessage(page, prompt));
     if (!sendResult?.ok) {
-      throw new CommandExecutionError2(sendResult?.reason || "Failed to send message");
+      throw new CommandExecutionError(sendResult?.reason || "Failed to send message");
     }
     const result = await waitForResponse(page, baseline, prompt, timeoutMs);
     if (!result) {

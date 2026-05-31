@@ -1,9 +1,9 @@
 // ../browser-agent/opencli/clis/wikipedia/search.js
-import { CliError as CliError2 } from "@jackwener/opencli/errors";
+import { CliError } from "@jackwener/opencli/errors";
 import { cli, Strategy } from "@jackwener/opencli/registry";
 
 // ../browser-agent/opencli/clis/wikipedia/utils.js
-import { CliError } from "@jackwener/opencli/errors";
+
 async function wikiFetch(lang, path) {
   const url = `https://${lang}.wikipedia.org${path}`;
   const resp = await fetch(url, {
@@ -36,7 +36,7 @@ cli({
     const data = await wikiFetch(lang, `/w/api.php?action=query&list=search&srsearch=${q}&srlimit=${limit}&format=json&utf8=1`);
     const results = data?.query?.search;
     if (!results?.length)
-      throw new CliError2("NOT_FOUND", "No articles found", "Try a different keyword");
+      throw new CliError("NOT_FOUND", "No articles found", "Try a different keyword");
     return results.map((r) => ({
       title: r.title,
       snippet: r.snippet.replace(/<[^>]+>/g, "").slice(0, 120),

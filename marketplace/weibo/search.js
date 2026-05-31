@@ -1,9 +1,8 @@
 // ../browser-agent/opencli/clis/weibo/search.js
 import { cli, Strategy } from "@jackwener/opencli/registry";
-import { CliError } from "@jackwener/opencli/errors";
-
+import { AuthRequiredError, CliError, CommandExecutionError } from "@jackwener/opencli/errors";
 // ../browser-agent/opencli/clis/weibo/utils.js
-import { AuthRequiredError, CommandExecutionError } from "@jackwener/opencli/errors";
+
 function unwrapEvaluateResult(payload) {
   if (payload && !Array.isArray(payload) && typeof payload === "object" && "session" in payload && "data" in payload) {
     return payload.data;

@@ -1,9 +1,8 @@
 // ../browser-agent/opencli/clis/linkedin/job-detail.js
 import { cli, Strategy } from "@jackwener/opencli/registry";
-import { ArgumentError as ArgumentError2, CommandExecutionError as CommandExecutionError2 } from "@jackwener/opencli/errors";
-
-// ../browser-agent/opencli/clis/linkedin/shared.js
 import { ArgumentError, AuthRequiredError, CommandExecutionError } from "@jackwener/opencli/errors";
+// ../browser-agent/opencli/clis/linkedin/shared.js
+
 var LINKEDIN_DOMAIN = "www.linkedin.com";
 function unwrapEvaluateResult(payload) {
   if (payload && typeof payload === "object" && "data" in payload && "session" in payload) return payload.data;
@@ -65,7 +64,7 @@ function normalizeJobUrl(value) {
   const url = assertSafeLinkedinUrl(value, "job-url");
   const parsed = new URL(url);
   const match = parsed.pathname.match(/^\/jobs\/view\/(\d+)/) || parsed.search.match(/[?&]currentJobId=(\d+)/);
-  if (!match) throw new ArgumentError2("job-url must be a https://www.linkedin.com/jobs/view/<id> URL");
+  if (!match) throw new ArgumentError("job-url must be a https://www.linkedin.com/jobs/view/<id> URL");
   return `https://www.linkedin.com/jobs/search/?currentJobId=${match[1]}`;
 }
 function decodeLinkedinRedirect(url) {
@@ -169,10 +168,10 @@ function buildExtractionScript() {
 }
 function normalizeDetail(row) {
   if (!row || typeof row !== "object") {
-    throw new CommandExecutionError2("LinkedIn job detail returned malformed extraction payload");
+    throw new CommandExecutionError("LinkedIn job detail returned malformed extraction payload");
   }
   const title = normalizeWhitespace(row.title);
-  if (!title) throw new CommandExecutionError2("LinkedIn job detail could not find a job title");
+  if (!title) throw new CommandExecutionError("LinkedIn job detail could not find a job title");
   return {
     title,
     company: normalizeWhitespace(row.company),
@@ -200,7 +199,7 @@ cli({
   ],
   columns: ["title", "company", "location", "workplace_type", "job_type", "applicants", "listed", "apply_url", "company_url", "url", "description"],
   func: async (page, args) => {
-    if (!page) throw new CommandExecutionError2("Browser session required for linkedin job-detail");
+    if (!page) throw new CommandExecutionError("Browser session required for linkedin job-detail");
     const jobUrl = normalizeJobUrl(args["job-url"]);
     await page.goto(jobUrl);
     await page.wait(4);

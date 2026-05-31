@@ -1,9 +1,8 @@
 // ../browser-agent/opencli/clis/arxiv/recent.js
 import { cli, Strategy } from "@jackwener/opencli/registry";
-import { EmptyResultError } from "@jackwener/opencli/errors";
-
+import { ArgumentError, CommandExecutionError, EmptyResultError } from "@jackwener/opencli/errors";
 // ../browser-agent/opencli/clis/arxiv/utils.js
-import { ArgumentError, CommandExecutionError } from "@jackwener/opencli/errors";
+
 var ARXIV_BASE = "https://export.arxiv.org/api/query";
 var ARXIV_CATEGORY_PATTERN = /^[a-z]+(?:-[a-z]+)*(?:\.[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*)?$/;
 async function arxivFetch(params) {

@@ -1,15 +1,8 @@
 // ../browser-agent/opencli/clis/weread-official/review.js
 import { cli, Strategy } from "@jackwener/opencli/registry";
-import { ArgumentError as ArgumentError2 } from "@jackwener/opencli/errors";
-
+import { ArgumentError, AuthRequiredError, CommandExecutionError, EmptyResultError, TimeoutError } from "@jackwener/opencli/errors";
 // ../browser-agent/opencli/clis/weread-official/utils.js
-import {
-  ArgumentError,
-  AuthRequiredError,
-  CommandExecutionError,
-  EmptyResultError,
-  TimeoutError
-} from "@jackwener/opencli/errors";
+
 var WEREAD_GATEWAY_URL = "https://i.weread.qq.com/api/agent/gateway";
 var WEREAD_DOMAIN = "weread.qq.com";
 var SKILL_VERSION = "1.0.3";
@@ -201,7 +194,7 @@ cli({
     const bookId = requireBookId(args.bookId);
     const typeKey = String(args.type ?? "all").trim();
     if (!Object.prototype.hasOwnProperty.call(TYPE_ALIASES, typeKey)) {
-      throw new ArgumentError2(
+      throw new ArgumentError(
         `weread-official: type must be one of: ${Object.keys(TYPE_ALIASES).join(", ")}`
       );
     }

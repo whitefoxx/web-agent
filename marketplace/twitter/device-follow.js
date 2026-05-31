@@ -1,12 +1,12 @@
 // ../browser-agent/opencli/clis/twitter/device-follow.js
-import { ArgumentError as ArgumentError2, AuthRequiredError, CommandExecutionError, EmptyResultError } from "@jackwener/opencli/errors";
+import { ArgumentError, AuthRequiredError, CommandExecutionError, EmptyResultError } from "@jackwener/opencli/errors";
 import { cli, Strategy } from "@jackwener/opencli/registry";
 
 // ../browser-agent/opencli/clis/twitter/utils.js
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { ArgumentError } from "@jackwener/opencli/errors";
+
 var TWITTER_BEARER_TOKEN = "AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA";
 var MAX_IMAGE_SIZE_BYTES = 20 * 1024 * 1024;
 var ENGAGEMENT_WEIGHTS = Object.freeze({
@@ -41,7 +41,7 @@ function parseLimit(value) {
   if (value === void 0 || value === null || value === "") return 20;
   const limit = Number(value);
   if (!Number.isInteger(limit) || limit < 1 || limit > MAX_LIMIT) {
-    throw new ArgumentError2(`--limit must be an integer between 1 and ${MAX_LIMIT}`);
+    throw new ArgumentError(`--limit must be an integer between 1 and ${MAX_LIMIT}`);
   }
   return limit;
 }

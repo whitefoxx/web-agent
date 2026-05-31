@@ -1,10 +1,9 @@
 // ../browser-agent/opencli/clis/chatgpt/send.js
 import { cli, Strategy } from "@jackwener/opencli/registry";
-import { CommandExecutionError as CommandExecutionError2 } from "@jackwener/opencli/errors";
-
+import { ArgumentError, AuthRequiredError, CommandExecutionError, TimeoutError } from "@jackwener/opencli/errors";
 // ../browser-agent/opencli/clis/chatgpt/utils.js
 import { htmlToMarkdown } from "@jackwener/opencli/utils";
-import { ArgumentError, AuthRequiredError, CommandExecutionError, TimeoutError } from "@jackwener/opencli/errors";
+
 var CHATGPT_DOMAIN = "chatgpt.com";
 var CHATGPT_URL = "https://chatgpt.com";
 var COMPOSER_SELECTORS = [
@@ -280,7 +279,7 @@ var sendCommand = cli({
     await ensureChatGPTComposer(page, "ChatGPT send requires a logged-in ChatGPT session with a visible composer.");
     const sent = await sendChatGPTMessage(page, prompt);
     if (!sent) {
-      throw new CommandExecutionError2("Failed to send message to ChatGPT", `Open ${CHATGPT_URL} and verify the composer is ready.`);
+      throw new CommandExecutionError("Failed to send message to ChatGPT", `Open ${CHATGPT_URL} and verify the composer is ready.`);
     }
     return [{ Status: "Success", InjectedText: prompt }];
   }

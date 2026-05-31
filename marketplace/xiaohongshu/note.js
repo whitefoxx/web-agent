@@ -1,9 +1,8 @@
 // ../browser-agent/opencli/clis/xiaohongshu/note.js
 import { cli, Strategy } from "@jackwener/opencli/registry";
-import { AuthRequiredError, CliError, EmptyResultError } from "@jackwener/opencli/errors";
-
+import { ArgumentError, AuthRequiredError, CliError, EmptyResultError } from "@jackwener/opencli/errors";
 // ../browser-agent/opencli/clis/xiaohongshu/note-helpers.js
-import { ArgumentError } from "@jackwener/opencli/errors";
+
 function parseNoteId(input) {
   const trimmed = input.trim();
   const match = trimmed.match(/\/(?:explore|note|search_result|discovery\/item)\/([a-f0-9]+)|\/user\/profile\/[^/?#]+\/([a-f0-9]+)/i);

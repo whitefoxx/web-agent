@@ -61,7 +61,17 @@ export interface MarketIndex {
   adapters: MarketAdapter[];
 }
 
-let cachedIndex: MarketIndex | null = null;
+// No module-level cache: a stale `cachedIndex` after a marketplace rebuild
+// was the root cause of `EmptyResultError2 is not defined` resurfacing after
+// uninstall+reinstall — the install path used the cached entry's OLD sha256
+// against Chrome's HTTP-cached OLD source, both matching → old source went
+// back into IDB. See docs/adapter-hot-plug.md §10.15.
+// The Marketplace tab already caches the result in React state per mount;
+// the index is local (~85KB, instant) so refetching costs nothing.
+//
+// fetch() below also uses `cache: 'no-store'` to bypass Chrome's
+// chrome-extension:// HTTP cache, which is the only other place stale bytes
+// could come from.
 
 /** Stable id used both as the IDB primary key (site/name) and as the
  * `bundled:<id>` origin URL recorded with the install. */
@@ -79,9 +89,8 @@ function defaultBaseUrl(): string {
 }
 
 export async function fetchMarketIndex(baseUrl: string = defaultBaseUrl()): Promise<MarketIndex> {
-  if (cachedIndex) return cachedIndex;
   const url = new URL('index.json', baseUrl).toString();
-  const resp = await fetch(url);
+  const resp = await fetch(url, { cache: 'no-store' });
   if (!resp.ok) {
     throw new Error(`market index fetch failed: ${resp.status} ${resp.statusText}`);
   }
@@ -97,7 +106,6 @@ export async function fetchMarketIndex(baseUrl: string = defaultBaseUrl()): Prom
         `Rebuild: node scripts/build-marketplace-index.mjs --popular`,
     );
   }
-  cachedIndex = data;
   return data;
 }
 
@@ -122,7 +130,7 @@ export async function fetchAdapterSource(
   baseUrl: string = defaultBaseUrl(),
 ): Promise<string> {
   const url = new URL(adapter.source, baseUrl).toString();
-  const resp = await fetch(url);
+  const resp = await fetch(url, { cache: 'no-store' });
   if (!resp.ok) {
     throw new Error(`adapter source fetch failed: ${resp.status} ${resp.statusText} (${url})`);
   }

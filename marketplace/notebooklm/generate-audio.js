@@ -1,14 +1,13 @@
 // ../browser-agent/opencli/clis/notebooklm/generate-audio.js
 import { cli, Strategy } from "@jackwener/opencli/registry";
-import { CommandExecutionError as CommandExecutionError2, EmptyResultError } from "@jackwener/opencli/errors";
-
+import { ArgumentError, AuthRequiredError, CliError, CommandExecutionError, EmptyResultError } from "@jackwener/opencli/errors";
 // ../browser-agent/opencli/clis/notebooklm/shared.js
 var NOTEBOOKLM_SITE = "notebooklm";
 var NOTEBOOKLM_DOMAIN = "notebooklm.google.com";
 var NOTEBOOKLM_HOME_URL = "https://notebooklm.google.com/";
 
 // ../browser-agent/opencli/clis/notebooklm/rpc.js
-import { AuthRequiredError, CliError } from "@jackwener/opencli/errors";
+
 function unwrapNotebooklmEvaluateResult(payload) {
   if (payload && typeof payload === "object" && !Array.isArray(payload) && "session" in payload && "data" in payload) {
     return payload.data;
@@ -196,7 +195,7 @@ async function callNotebooklmRpc(page, rpcId, params, options = {}) {
 }
 
 // ../browser-agent/opencli/clis/notebooklm/utils.js
-import { ArgumentError, AuthRequiredError as AuthRequiredError2, CliError as CliError2, CommandExecutionError } from "@jackwener/opencli/errors";
+
 var NOTEBOOKLM_NOTEBOOK_DETAIL_RPC_ID = "rLM1Ne";
 function unwrapNotebooklmSingletonResult(result) {
   let current = result;
@@ -212,28 +211,28 @@ function parseNotebooklmIdFromUrl(url) {
 var NOTEBOOK_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function ensureNotebookUuid(candidate) {
   if (!NOTEBOOK_UUID_RE.test(candidate)) {
-    throw new CliError2("NOTEBOOKLM_INVALID_NOTEBOOK", `NotebookLM notebook id "${candidate}" is not a valid UUID`, "Pass a notebook id from `opencli notebooklm list` or a full notebook URL like https://notebooklm.google.com/notebook/<uuid>.");
+    throw new CliError("NOTEBOOKLM_INVALID_NOTEBOOK", `NotebookLM notebook id "${candidate}" is not a valid UUID`, "Pass a notebook id from `opencli notebooklm list` or a full notebook URL like https://notebooklm.google.com/notebook/<uuid>.");
   }
   return candidate;
 }
 function parseNotebooklmNotebookTarget(value) {
   const normalized = value.trim();
   if (!normalized) {
-    throw new CliError2("NOTEBOOKLM_INVALID_NOTEBOOK", "NotebookLM notebook id is required", "Pass a notebook id from `opencli notebooklm list` or a full notebook URL.");
+    throw new CliError("NOTEBOOKLM_INVALID_NOTEBOOK", "NotebookLM notebook id is required", "Pass a notebook id from `opencli notebooklm list` or a full notebook URL.");
   }
   if (/^https?:\/\//i.test(normalized)) {
     let parsed;
     try {
       parsed = new URL(normalized);
     } catch {
-      throw new CliError2("NOTEBOOKLM_INVALID_NOTEBOOK", "NotebookLM notebook URL is invalid", "Pass a full NotebookLM notebook URL like https://notebooklm.google.com/notebook/<uuid>.");
+      throw new CliError("NOTEBOOKLM_INVALID_NOTEBOOK", "NotebookLM notebook URL is invalid", "Pass a full NotebookLM notebook URL like https://notebooklm.google.com/notebook/<uuid>.");
     }
     if (parsed.protocol !== "https:" || parsed.hostname !== NOTEBOOKLM_DOMAIN || parsed.username || parsed.password || parsed.port) {
-      throw new CliError2("NOTEBOOKLM_INVALID_NOTEBOOK", "NotebookLM notebook URL must be a canonical https://notebooklm.google.com URL", "Pass a notebook id from `opencli notebooklm list` or a full NotebookLM notebook URL.");
+      throw new CliError("NOTEBOOKLM_INVALID_NOTEBOOK", "NotebookLM notebook URL must be a canonical https://notebooklm.google.com URL", "Pass a notebook id from `opencli notebooklm list` or a full NotebookLM notebook URL.");
     }
     const notebookId = parseNotebooklmIdFromUrl(normalized);
     if (!notebookId) {
-      throw new CliError2("NOTEBOOKLM_INVALID_NOTEBOOK", "NotebookLM notebook URL is invalid", "Pass a full NotebookLM notebook URL like https://notebooklm.google.com/notebook/<uuid>.");
+      throw new CliError("NOTEBOOKLM_INVALID_NOTEBOOK", "NotebookLM notebook URL is invalid", "Pass a full NotebookLM notebook URL like https://notebooklm.google.com/notebook/<uuid>.");
     }
     return ensureNotebookUuid(notebookId);
   }
@@ -427,10 +426,10 @@ async function getNotebooklmPageState(page) {
 async function requireNotebooklmSession(page) {
   const state = await getNotebooklmPageState(page);
   if (state.hostname !== NOTEBOOKLM_DOMAIN) {
-    throw new CliError2("NOTEBOOKLM_UNAVAILABLE", "NotebookLM page is not available in the current browser session", `Open Chrome and navigate to ${NOTEBOOKLM_HOME_URL}`);
+    throw new CliError("NOTEBOOKLM_UNAVAILABLE", "NotebookLM page is not available in the current browser session", `Open Chrome and navigate to ${NOTEBOOKLM_HOME_URL}`);
   }
   if (state.loginRequired) {
-    throw new AuthRequiredError2(NOTEBOOKLM_DOMAIN, "NotebookLM requires a logged-in Google session");
+    throw new AuthRequiredError(NOTEBOOKLM_DOMAIN, "NotebookLM requires a logged-in Google session");
   }
   return state;
 }
@@ -492,7 +491,7 @@ cli({
       await page.goto(buildNotebooklmNotebookUrl(notebookId));
       await page.wait(2);
     } catch (error) {
-      throw new CommandExecutionError2(`Failed to open NotebookLM notebook ${notebookId}: ${error?.message || error}`);
+      throw new CommandExecutionError(`Failed to open NotebookLM notebook ${notebookId}: ${error?.message || error}`);
     }
     await requireNotebooklmSession(page);
     const sources = await listNotebooklmSourcesViaRpc(page);
@@ -503,7 +502,7 @@ cli({
     const rpc = await callNotebooklmRpc(page, NOTEBOOKLM_CREATE_AUDIO_RPC_ID, buildCreateAudioArgs(notebookId, sourceIds));
     const audioId = parseAudioIdFromResult(rpc.result, [notebookId, ...sourceIds]);
     if (!audioId) {
-      throw new CommandExecutionError2("NotebookLM CreateAudioOverview RPC returned no audio id; server may have rejected the request.");
+      throw new CommandExecutionError("NotebookLM CreateAudioOverview RPC returned no audio id; server may have rejected the request.");
     }
     return [{
       notebook_id: notebookId,

@@ -1,9 +1,8 @@
 // ../browser-agent/opencli/clis/linkedin/profile-projects.js
 import { cli, Strategy } from "@jackwener/opencli/registry";
-import { CommandExecutionError as CommandExecutionError2, EmptyResultError } from "@jackwener/opencli/errors";
-
+import { ArgumentError, AuthRequiredError, CommandExecutionError, EmptyResultError } from "@jackwener/opencli/errors";
 // ../browser-agent/opencli/clis/linkedin/shared.js
-import { ArgumentError, AuthRequiredError, CommandExecutionError } from "@jackwener/opencli/errors";
+
 var LINKEDIN_DOMAIN = "www.linkedin.com";
 function unwrapEvaluateResult(payload) {
   if (payload && typeof payload === "object" && "data" in payload && "session" in payload) return payload.data;
@@ -65,7 +64,7 @@ function normalizeProfileUrl(value) {
   const url = assertSafeLinkedinUrl(value || "https://www.linkedin.com/in/me/", "profile-url", "/in/me/");
   const parsed = new URL(url);
   if (!/^\/in\/[^/?#]+\/?$/.test(parsed.pathname)) {
-    throw new CommandExecutionError2("LinkedIn profile-projects requires a /in/<handle>/ profile URL");
+    throw new CommandExecutionError("LinkedIn profile-projects requires a /in/<handle>/ profile URL");
   }
   return parsed.toString();
 }
@@ -73,7 +72,7 @@ function profileProjectsUrl(profileUrl) {
   const url = assertSafeLinkedinUrl(profileUrl, "profile-url");
   const parsed = new URL(url);
   if (!/^\/in\/[^/?#]+\/?$/.test(parsed.pathname) || parsed.pathname === "/in/me/") {
-    throw new CommandExecutionError2("LinkedIn profile-projects requires a resolved /in/<handle>/ profile URL");
+    throw new CommandExecutionError("LinkedIn profile-projects requires a resolved /in/<handle>/ profile URL");
   }
   return new URL(`${parsed.pathname.replace(/\/?$/, "/")}details/projects/`, "https://www.linkedin.com").toString();
 }
@@ -261,10 +260,10 @@ function buildProjectsExtractionScript() {
 }
 function normalizeProject(row) {
   if (!row || typeof row !== "object") {
-    throw new CommandExecutionError2("LinkedIn profile-projects returned malformed row");
+    throw new CommandExecutionError("LinkedIn profile-projects returned malformed row");
   }
   const title = normalizeWhitespace(row.title);
-  if (!title) throw new CommandExecutionError2("LinkedIn profile-projects returned a project without a title");
+  if (!title) throw new CommandExecutionError("LinkedIn profile-projects returned a project without a title");
   return {
     rank: Number(row.rank) || 0,
     title,
@@ -291,7 +290,7 @@ cli({
   ],
   columns: ["rank", "title", "date_range", "associated_with", "description", "skills", "media", "urls", "profile_url", "raw_text"],
   func: async (page, args) => {
-    if (!page) throw new CommandExecutionError2("Browser session required for linkedin profile-projects");
+    if (!page) throw new CommandExecutionError("Browser session required for linkedin profile-projects");
     const profileUrl = normalizeProfileUrl(args["profile-url"]);
     let projectsUrl;
     if (!args["profile-url"] || new URL(profileUrl).pathname === "/in/me/") {
@@ -307,7 +306,7 @@ cli({
         return ownProfileLink ? ownProfileLink.toString() : '';
       })()`));
       if (!resolvedProfileUrl) {
-        throw new CommandExecutionError2("LinkedIn profile-projects could not resolve /in/me/ to a profile URL");
+        throw new CommandExecutionError("LinkedIn profile-projects could not resolve /in/me/ to a profile URL");
       }
       projectsUrl = profileProjectsUrl(resolvedProfileUrl);
     } else {
@@ -324,7 +323,7 @@ cli({
     await page.wait(1);
     const payload = unwrapEvaluateResult(await page.evaluate(buildProjectsExtractionScript()));
     if (!payload || !Array.isArray(payload.projectRows)) {
-      throw new CommandExecutionError2("LinkedIn profile-projects returned malformed extraction payload");
+      throw new CommandExecutionError("LinkedIn profile-projects returned malformed extraction payload");
     }
     const rows = payload.projectRows.map(normalizeProject);
     if (rows.length === 0) {

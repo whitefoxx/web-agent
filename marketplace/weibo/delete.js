@@ -1,9 +1,8 @@
 // ../browser-agent/opencli/clis/weibo/delete.js
 import { cli, Strategy } from "@jackwener/opencli/registry";
-import { ArgumentError, AuthRequiredError as AuthRequiredError2, CommandExecutionError as CommandExecutionError2, EmptyResultError } from "@jackwener/opencli/errors";
-
+import { ArgumentError, AuthRequiredError, CommandExecutionError, EmptyResultError } from "@jackwener/opencli/errors";
 // ../browser-agent/opencli/clis/weibo/utils.js
-import { AuthRequiredError, CommandExecutionError } from "@jackwener/opencli/errors";
+
 function unwrapEvaluateResult(payload) {
   if (payload && !Array.isArray(payload) && typeof payload === "object" && "session" in payload && "data" in payload) {
     return payload.data;
@@ -67,7 +66,7 @@ cli({
   columns: ["status", "id", "mblogid"],
   func: async (page, kwargs) => {
     if (!page) {
-      throw new CommandExecutionError2("Browser session required for weibo delete");
+      throw new CommandExecutionError("Browser session required for weibo delete");
     }
     const raw = String(kwargs.id ?? "").trim();
     const id = normalizePostId(raw);
@@ -158,19 +157,19 @@ cli({
       })()
     `)), "weibo delete");
     if (result.error === "auth") {
-      throw new AuthRequiredError2("weibo.com", "Cookie 已过期！请在当前 Chrome 浏览器中重新登录 Weibo。");
+      throw new AuthRequiredError("weibo.com", "Cookie 已过期！请在当前 Chrome 浏览器中重新登录 Weibo。");
     }
     if (result.error === "not_found") {
       throw new EmptyResultError("weibo delete", `Post not found for id "${String(result.input ?? raw)}". Verify the post still exists and belongs to the logged-in account.`);
     }
     if (result.error === "show_http" || result.error === "destroy_http" || result.error === "verify_http") {
-      throw new CommandExecutionError2(`weibo delete: HTTP ${result.status}`);
+      throw new CommandExecutionError(`weibo delete: HTTP ${result.status}`);
     }
     if (result.error === "api" || result.error === "verify_malformed" || result.error === "verify_mismatch" || result.error === "still_exists") {
-      throw new CommandExecutionError2(`weibo delete: ${String(result.msg ?? result.error)}`);
+      throw new CommandExecutionError(`weibo delete: ${String(result.msg ?? result.error)}`);
     }
     if (!result.ok) {
-      throw new CommandExecutionError2("weibo delete returned an unexpected response");
+      throw new CommandExecutionError("weibo delete returned an unexpected response");
     }
     return [{ status: "deleted", id: String(result.id ?? ""), mblogid: String(result.mblogid ?? "") }];
   }

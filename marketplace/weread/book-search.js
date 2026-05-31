@@ -1,9 +1,8 @@
 // ../browser-agent/opencli/clis/weread/book-search.js
 import { cli, Strategy } from "@jackwener/opencli/registry";
-import { ArgumentError, CommandExecutionError, EmptyResultError } from "@jackwener/opencli/errors";
-
+import { ArgumentError, CliError, CommandExecutionError, EmptyResultError } from "@jackwener/opencli/errors";
 // ../browser-agent/opencli/clis/weread/utils.js
-import { CliError } from "@jackwener/opencli/errors";
+
 var WEREAD_DOMAIN = "weread.qq.com";
 var WEREAD_WEB_ORIGIN = `https://${WEREAD_DOMAIN}`;
 var WEREAD_SHELF_URL = `${WEREAD_WEB_ORIGIN}/web/shelf`;

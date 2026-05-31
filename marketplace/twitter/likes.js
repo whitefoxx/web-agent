@@ -1,9 +1,8 @@
 // ../browser-agent/opencli/clis/twitter/likes.js
 import { cli, Strategy } from "@jackwener/opencli/registry";
-import { ArgumentError as ArgumentError3, AuthRequiredError, CommandExecutionError, EmptyResultError } from "@jackwener/opencli/errors";
-
+import { ArgumentError, AuthRequiredError, CommandExecutionError, EmptyResultError } from "@jackwener/opencli/errors";
 // ../browser-agent/opencli/clis/twitter/shared.js
-import { ArgumentError } from "@jackwener/opencli/errors";
+
 var QUERY_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
 var SCREEN_NAME_PATTERN = /^[A-Za-z0-9_]{1,15}$/;
 var SCREEN_NAME_HOSTS = /* @__PURE__ */ new Set(["x.com", "twitter.com", "mobile.twitter.com"]);
@@ -168,7 +167,7 @@ function extractMedia(legacy) {
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { ArgumentError as ArgumentError2 } from "@jackwener/opencli/errors";
+
 var TWITTER_BEARER_TOKEN = "AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA";
 var MAX_IMAGE_SIZE_BYTES = 20 * 1024 * 1024;
 var ENGAGEMENT_WEIGHTS = Object.freeze({
@@ -343,7 +342,7 @@ cli({
     const rawUsername = String(kwargs.username ?? "").trim();
     let username = normalizeTwitterScreenName(rawUsername);
     if (rawUsername && !username) {
-      throw new ArgumentError3("twitter likes username must be a valid Twitter/X handle", "Example: opencli twitter likes @jack --limit 20");
+      throw new ArgumentError("twitter likes username must be a valid Twitter/X handle", "Example: opencli twitter likes @jack --limit 20");
     }
     const cookies = await page.getCookies({ url: "https://x.com" });
     const ct0 = cookies.find((c) => c.name === "ct0")?.value || null;

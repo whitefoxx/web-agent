@@ -1,9 +1,8 @@
 // ../browser-agent/opencli/clis/linkedin/timeline.js
 import { cli, Strategy } from "@jackwener/opencli/registry";
-import { AuthRequiredError as AuthRequiredError2, EmptyResultError } from "@jackwener/opencli/errors";
-
+import { ArgumentError, AuthRequiredError, CommandExecutionError, EmptyResultError } from "@jackwener/opencli/errors";
 // ../browser-agent/opencli/clis/linkedin/shared.js
-import { ArgumentError, AuthRequiredError, CommandExecutionError } from "@jackwener/opencli/errors";
+
 function normalizeWhitespace(value) {
   return String(value ?? "").replace(/[\u00a0\u202f]+/g, " ").replace(/\s+/g, " ").trim();
 }
@@ -516,7 +515,7 @@ cli({
       await page.wait(1);
     }
     if (sawLoginWall && posts.length === 0) {
-      throw new AuthRequiredError2("linkedin.com", "LinkedIn timeline requires an active signed-in browser session");
+      throw new AuthRequiredError("linkedin.com", "LinkedIn timeline requires an active signed-in browser session");
     }
     if (posts.length === 0) {
       throw new EmptyResultError("linkedin timeline", "Make sure your LinkedIn home feed is visible in the browser.");

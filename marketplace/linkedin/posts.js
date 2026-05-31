@@ -2,10 +2,9 @@
 import { cli, Strategy } from "@jackwener/opencli/registry";
 
 // ../browser-agent/opencli/clis/linkedin/posts-core.js
-import { CommandExecutionError as CommandExecutionError2, EmptyResultError } from "@jackwener/opencli/errors";
-
+import { ArgumentError, AuthRequiredError, CommandExecutionError, EmptyResultError } from "@jackwener/opencli/errors";
 // ../browser-agent/opencli/clis/linkedin/shared.js
-import { ArgumentError, AuthRequiredError, CommandExecutionError } from "@jackwener/opencli/errors";
+
 var LINKEDIN_DOMAIN = "www.linkedin.com";
 function unwrapEvaluateResult(payload) {
   if (payload && typeof payload === "object" && "data" in payload && "session" in payload) return payload.data;
@@ -93,17 +92,17 @@ function activityUrl(profileUrl) {
   const url = assertSafeLinkedinUrl(profileUrl || "https://www.linkedin.com/in/me/", "profile-url", "/in/me/");
   const parsed = new URL(url);
   if (!/^\/in\/[^/?#]+\/?$/.test(parsed.pathname)) {
-    throw new CommandExecutionError2("linkedin posts requires a /in/<handle>/ profile URL");
+    throw new CommandExecutionError("linkedin posts requires a /in/<handle>/ profile URL");
   }
   return `https://www.linkedin.com${parsed.pathname.replace(/\/?$/, "/")}recent-activity/all/`;
 }
 function normalizePost(row) {
   if (!row || typeof row !== "object") {
-    throw new CommandExecutionError2("LinkedIn posts returned malformed row");
+    throw new CommandExecutionError("LinkedIn posts returned malformed row");
   }
   const body = normalizeWhitespace(row.body);
   const url = normalizeHttpUrl(row.url);
-  if (!body && !url) throw new CommandExecutionError2("LinkedIn posts returned a row without body or URL");
+  if (!body && !url) throw new CommandExecutionError("LinkedIn posts returned a row without body or URL");
   return {
     author: compactRepeatedText(row.author),
     posted_at: normalizeWhitespace(row.posted_at),
@@ -259,7 +258,7 @@ function buildPostsScript() {
   })()`;
 }
 async function collectPosts(page, args) {
-  if (!page) throw new CommandExecutionError2("Browser session required for linkedin posts");
+  if (!page) throw new CommandExecutionError("Browser session required for linkedin posts");
   const limit = parseLimit(args.limit, DEFAULT_POSTS_LIMIT, MAX_POSTS_LIMIT);
   await page.goto(activityUrl(args["profile-url"]));
   await page.wait(5);
@@ -268,7 +267,7 @@ async function collectPosts(page, args) {
   for (let i = 0; i < 6 && rows.length < limit; i++) {
     const payload = unwrapEvaluateResult(await page.evaluate(buildPostsScript()));
     if (!payload || !Array.isArray(payload.rows)) {
-      throw new CommandExecutionError2("LinkedIn posts returned malformed extraction payload");
+      throw new CommandExecutionError("LinkedIn posts returned malformed extraction payload");
     }
     rows = rows.concat(payload.rows.map(normalizePost));
     const seen = /* @__PURE__ */ new Set();

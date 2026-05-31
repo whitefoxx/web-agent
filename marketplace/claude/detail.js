@@ -1,9 +1,8 @@
 // ../browser-agent/opencli/clis/claude/detail.js
 import { cli, Strategy } from "@jackwener/opencli/registry";
-import { EmptyResultError } from "@jackwener/opencli/errors";
-
+import { ArgumentError, AuthRequiredError, CommandExecutionError, EmptyResultError } from "@jackwener/opencli/errors";
 // ../browser-agent/opencli/clis/claude/utils.js
-import { ArgumentError, AuthRequiredError, CommandExecutionError } from "@jackwener/opencli/errors";
+
 var CLAUDE_DOMAIN = "claude.ai";
 var COMPOSER_SELECTOR = '[data-testid="chat-input"]';
 var MESSAGE_SELECTOR = ".font-claude-response";

@@ -1,10 +1,9 @@
 // ../browser-agent/opencli/clis/chatgpt/history.js
 import { cli, Strategy } from "@jackwener/opencli/registry";
-import { EmptyResultError } from "@jackwener/opencli/errors";
-
+import { ArgumentError, AuthRequiredError, CommandExecutionError, EmptyResultError, TimeoutError } from "@jackwener/opencli/errors";
 // ../browser-agent/opencli/clis/chatgpt/utils.js
 import { htmlToMarkdown } from "@jackwener/opencli/utils";
-import { ArgumentError, AuthRequiredError, CommandExecutionError, TimeoutError } from "@jackwener/opencli/errors";
+
 var CHATGPT_DOMAIN = "chatgpt.com";
 var CHATGPT_URL = "https://chatgpt.com";
 var COMPOSER_SELECTORS = [

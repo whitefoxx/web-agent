@@ -1,9 +1,8 @@
 // ../browser-agent/opencli/clis/linkedin/jobs-preferences.js
 import { cli, Strategy } from "@jackwener/opencli/registry";
-import { CommandExecutionError as CommandExecutionError2 } from "@jackwener/opencli/errors";
-
-// ../browser-agent/opencli/clis/linkedin/shared.js
 import { ArgumentError, AuthRequiredError, CommandExecutionError } from "@jackwener/opencli/errors";
+// ../browser-agent/opencli/clis/linkedin/shared.js
+
 var LINKEDIN_DOMAIN = "www.linkedin.com";
 function unwrapEvaluateResult(payload) {
   if (payload && typeof payload === "object" && "data" in payload && "session" in payload) return payload.data;
@@ -84,15 +83,15 @@ function buildAlertsScript() {
 }
 function normalizePreferences(preferences, alerts) {
   if (!preferences || typeof preferences !== "object") {
-    throw new CommandExecutionError2("LinkedIn jobs preferences returned malformed preferences payload");
+    throw new CommandExecutionError("LinkedIn jobs preferences returned malformed preferences payload");
   }
   if (!alerts || typeof alerts !== "object") {
-    throw new CommandExecutionError2("LinkedIn jobs preferences returned malformed alerts payload");
+    throw new CommandExecutionError("LinkedIn jobs preferences returned malformed alerts payload");
   }
   const preferenceText = normalizeWhitespace(preferences.raw_preferences);
   const alertText = normalizeWhitespace(alerts.raw_preferences);
   if (!preferenceText && !alertText) {
-    throw new CommandExecutionError2("LinkedIn jobs preferences could not find stable preferences content");
+    throw new CommandExecutionError("LinkedIn jobs preferences could not find stable preferences content");
   }
   return {
     open_to_work: inferOpenToWork(`${preferenceText} ${alertText}`),
@@ -115,7 +114,7 @@ cli({
   args: [],
   columns: ["open_to_work", "job_titles", "locations", "job_alerts", "preferences_url", "alerts_url", "raw_preferences"],
   func: async (page) => {
-    if (!page) throw new CommandExecutionError2("Browser session required for linkedin jobs-preferences");
+    if (!page) throw new CommandExecutionError("Browser session required for linkedin jobs-preferences");
     await page.goto(PREFERENCES_URL);
     await page.wait(5);
     await assertLinkedInAuthenticated(page, "LinkedIn jobs-preferences");

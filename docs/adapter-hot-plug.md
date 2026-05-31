@@ -658,6 +658,134 @@ ReferenceError: getSelfUid is not defined
 
 **教训**:**当上游(opencli)有自己的 runtime 假设(Node、文件系统、特定 crypto),把它搬到 sandbox 不是"装个 polyfill"那么简单——polyfill 必须是 schema 级的**:每个 import 形状要有对应的 rewrite,每个 rewrite 输出的标识符要有对应的 scope 注入,每个被注入的对象要回答 adapter 真实调用模式(`createHash(algo).update(s).digest(enc)` 三层 API,不是单函数)。**rewrite 跟 scope 注入 + 静态/动态两种 import 形状必须一致**,缺一就回到 ReferenceError。这是 10.4(URL 漂移)/10.11(redirect)/10.13(API 形状)的共同形态:**当一个 contract 是分布式的(多个组件分别承担一部分),要保证所有组件互相能对上**——通过共享代码(stripModuleSyntax 是同一份)、通过类型(让 ts 顶住)、或者通过测试(end-to-end 一条龙)。
 
+### 10.14 esbuild `as X2` alias 把 import strip + scope-inject 撕成两半
+
+**症状**(`bilibili__subtitle` 浏览器实测):
+
+```
+ReferenceError: EmptyResultError2 is not defined
+```
+
+`bilibili__summary` 同样。
+
+**根因**:adapter 和它 inline 的 utils.js **都从 `@jackwener/opencli/errors` 导入了同名错误类**。esbuild bundle 把两份 import 合到同一作用域,后出现的(adapter 自己的)被自动 alias 成 `*2` 后缀来避免 declarator 冲突:
+
+```js
+// marketplace/bilibili/subtitle.js 头部
+import { cli, Strategy } from "@jackwener/opencli/registry";
+import { AuthRequiredError as AuthRequiredError2, CommandExecutionError as CommandExecutionError2, EmptyResultError as EmptyResultError2 } from "@jackwener/opencli/errors";  // adapter 的 import
+// ↓ utils.js 块内联进来
+import { AuthRequiredError, CommandExecutionError, EmptyResultError } from "@jackwener/opencli/errors";  // utils 的 import
+```
+
+adapter 函数体引用 `EmptyResultError2 / AuthRequiredError2 / ...`(esbuild 把所有引用都改名了);utils 函数体引用无后缀的。两边在 vitest 测试里都 work 因为 import 真的会 resolve,alias 和原名指向同一个 class。
+
+**但运行时** `stripModuleSyntax` 把这两行 import **整条删掉**,然后 eval scope 只注入无后缀名:
+
+```js
+// src/sandbox/eval-core.ts 的 buildScope
+{ cli, Strategy, AuthRequiredError, CommandExecutionError, EmptyResultError, ArgumentError, RateLimitedError, __nodeShim, ... }
+```
+
+adapter 函数体里的 `EmptyResultError2` 在 scope 里找不到 → ReferenceError。**至关重要的是这条只在跑到 `throw new EmptyResultError2(...)` 那一刻才炸**,光「装上 + 列表里能看到」不会暴露,所以 §6 的「装得上 ≠ 跑得动」教训重演。
+
+涉及面广:整个 marketplace 121 个 .js 文件中招(几乎所有 func adapter,只要 adapter 自己 import 了 errors 名字)。
+
+**修法**(本次 commit):
+
+不在 runtime 加 alias 注入(脆弱:下次 esbuild 改名规则就要跟着改),而是**把 source 改干净**。一次性脚本 `/tmp/fix-aliased-errors.mjs` 对每个 marketplace `.js`:
+
+1. 抓所有 `import { ... } from "@jackwener/opencli/errors";` 行
+2. 解析每个名字,把 `X as X2` 折回 canonical `X`
+3. 把所有 error-import 行合并成**一行** canonical(按字母排序的 union)
+4. 把函数体里所有 `X2 / X3 / ...` standalone 标识符换回 `X`
+5. 同步更新 `marketplace/index.json` 里对应条目的 `sha256`(install path 校验 sha256,不更新就装不上 —— [[webchat-agent-marketplace-authoritative]])
+
+写完后全 21 个测试文件 / 258 测试还过(测试本来 alias 也 work,所以没回归),浏览器实测 `bilibili__subtitle` / `bilibili__summary` 恢复。
+
+**教训**:**测试通过 ≠ 产线通过**,**bundle 形态 + runtime contract 必须共享同一份"导入名字解析规则"**。这次的 gap:
+
+1. **vitest 走真 import 路径**(`@jackwener/opencli/errors` 真的 resolve 到 `src/runtime/errors.js`),所以 alias 也 work
+2. **runtime 走 strip + 注入**,只认无后缀名
+
+两条路在「import 形态等价于注入 scope」上有隐性 contract,bundle 工具(esbuild)又自由地引入新形态(alias),contract 就坏了 —— 跟 10.13 一样,「打包 → 字符串 → eval」每多一级抽象就多一层隐式假设要对齐。
+
+**这次本来该早一步抓到**:Phase B 选样测试时挑的 xiaohongshu/search / hackernews 都是**单一 errors import 源**的形态(adapter 没 utils 或 utils 没 errors)。一旦换成 bilibili/zhihu 这种 utils 重度依赖的 site,alias 形态立刻浮现。**端到端选样要刻意覆盖代码形态多样性,不要只挑最自包含的跑通就盖章** —— 这条 §10.8 写过,还是没记住。下次 marketplace 测样要刻意挑「最长的、有 utils 的、有 sibling 链的」,而不是最像 hello-world 的。
+
+**还有一条**:**marketplace 一旦改成手动维护**(commit [`e9c211c`] 起),这种 bundle artifacts 残留就是「需要 lint 的源码」级别的债务,不是「重跑就好」。建议下次再写「跑过一次的 build 脚本」前先 lint 输出:**单个文件不许有同 module 的两条 import** 是最直接的 invariant。
+
+### 10.15 `cachedIndex` 永不失效 — uninstall/reinstall 装回老 source
+
+**症状**:修完 §10.14 之后,用户在浏览器里:reload extension → SidePanel 卸载 `bilibili/subtitle` → 重新安装 → **同一个 `EmptyResultError2 is not defined` 又来一遍**。
+
+控制台 fetch 看 marketplace 里的文件,**Chrome 端给的是干净的新版**(无 `*2` alias),但用 console 打开 IDB 看 installed_adapters 里 `bilibili/subtitle` 的 `source` 字段,**装着的还是旧版**(含 `*2`)。证据:JS string `.length` 9309,9309 - 9117 = 192 char 差,正好对应旧版多出的 `as X2` alias 字符串总长。
+
+**根因**(两层叠加):
+
+1. **`src/sidepanel/marketplace.ts` 顶层 `let cachedIndex: MarketIndex | null = null;` 永不重置**。SidePanel 页面在 ext reload 之间**不会自动重启**(只有 SW 重启),它的 JS module-level state 整段保留。SidePanel 装的 `MarketAdapter` 对象来自 `cachedIndex`,所以 `a.sha256` 一直是首次打开 Market tab 时的版本。
+2. **`fetch()` 没标 `cache: 'no-store'`**。chrome-extension:// 的 URL 跟普通 HTTP 一样走浏览器 cache。如果 Chrome 恰好缓存了上一次 fetch 的旧 .js 响应,这次 fetch 还给老内容。
+
+两者叠加 → `fetchAdapterSource(a)` 用**老 sha256** 校验**老 .js 内容**,**两个老对老 match**,sha256 校验通过 → 老 source 写进 IDB。用户看到「安装成功」,运行依然炸。
+
+**修法**(本次 commit):
+
+1. **删掉 `cachedIndex` module-level cache**。Marketplace tab 本来就在 React state 里缓存渲染结果(每次 mount 拿一次),不需要 module-level 那层。85KB 的本地 fetch 是即时操作,没性能损失。
+2. **`fetch(..., { cache: 'no-store' })`** 在 `fetchMarketIndex` 和 `fetchAdapterSource` 两处都加上。即便 Chrome 想缓存也得绕过 disk → 永远拿最新 dist。
+3. **`tests/marketplace.test.ts` 的 fetchMock 断言** 加上第二个参数 `{ cache: 'no-store' }`(否则单元测试反过来失败)。
+
+**用户验证步骤**(必须按顺序):
+
+```
+npm run build          # 更新 dist
+chrome://extensions    # 点 reload 按钮(让 SidePanel 拿到新 JS)
+SidePanel              # 卸载受影响 adapter → 重装
+```
+
+注意 reload 不重启 SidePanel 页面这件事是 Chrome 的行为,不是我们的 bug。如果 SidePanel 已经打开**且**有 module-level cache,reload 后必须**关 SidePanel 再开**才能让新 JS 上来。但删了 cachedIndex 之后,这步可省。
+
+**教训**:**module-level cache 是 SPA 的「跨 reload 泄漏面」**。React/Preact 组件状态会在 mount/unmount 时自然清掉,但 module-level `let` / `Map` 是常驻的 —— ext reload 都不重启它们。任何需要「在 ext 升级 / 重载之后必须重读」的东西(market index、用户设置、外部资源指纹)都**不应该在 module-level 缓存**。让 React state 做缓存,或显式提供 invalidate API。
+
+**另一条**:**chrome-extension:// 的 `fetch` 不是天然「读盘」**。它走完整的 HTTP cache 路径,跟外网 fetch 一样。开发自己写的资源(dist 里的 .js / .json)如果有「我改了你要拿新的」语义,**默认必须** `cache: 'no-store'`,否则 ext reload 后还可能拿到老内容。
+
+### 10.16 `registry.js` 警告对 installed func adapter 误报
+
+**症状**(SW boot 日志):
+
+```
+[registry] bilibili/subtitle registered with neither func nor pipeline — it cannot execute.
+[registry] bilibili/summary registered with neither func nor pipeline — it cannot execute.
+... (34 条,几乎每个 installed func adapter 都报一遍)
+[webchat:install] restored 34 installed adapters (35 commands)
+```
+
+警告说「它不能执行」,但用户实际跑 `bilibili__subtitle` **能跑出结果**。误报。
+
+**根因**:func adapter 的捕获 def 经过 sandbox eval → SW IDB → loadInstalledOnBoot 这条链,**closure 不可序列化**,所以重启后 `def.func` 是 undefined。但 dispatcher 会查 `def._userScriptSource`(install 时存的 source string,Phase B func 用 chrome.userScripts.execute 注入页面跑)。`registry.js` 的 cli() 检查只看 `func` + `pipeline`,**不看 `_userScriptSource`**,所以漏判 → 警告满天飞。
+
+**修法**(本次 commit):cli() 的「无法执行」判定加一条 `hasUserScriptSource = typeof def._userScriptSource === 'string' && def._userScriptSource.length > 0`。三条路径都没了才警告。
+
+**教训**:**警告条件要跟实际执行路径同步**。dispatcher 有 3 条 routing(func / pipeline / _userScriptSource),registry 只看 2 条,长期信号噪音掩盖真问题。下次加新执行路径时,把 registry 的判定也带上 —— 或者反过来,**把「能跑」的判定写在 dispatcher 一处,registry 调它**。现在分两份,未来再加路径就会再次脱钩。
+
+### 10.17 sandbox.html 之间的 cross-origin load 错误(暂存观察)
+
+**症状**:
+
+```
+Unsafe attempt to load URL chrome-extension://eciechpekgbkbbhcchmaaohechhmlekb/sandbox.html
+from frame with URL chrome-extension://eciechpekgbkbbhcchmaaohechhmlekb/sandbox.html.
+Domains, protocols and ports must match.
+```
+
+URL 和 frame URL 都是 sandbox.html。意思是 sandbox.html 的 frame **里头**有人在尝试 load chrome-extension://...sandbox.html。但 sandbox 页是 opaque origin(MV3 `sandbox.pages`),从它里头 load chrome-extension:// 的资源是跨 origin → 被拒。
+
+**还没修**。情况不清楚:
+- 看 `dist/sandbox.html` 是纯 inline script,没有 `<iframe>` / `<script src>` / `<a href>` 之类会触发资源加载的元素。
+- 看 `src/sidepanel/sandbox-host.ts`,iframe 只在 `ensureSandbox()` 创建一次,`readyPromise` 缓存,**不会重复创建**。
+
+**假设**(待 repro 时验证):ext reload 后,SidePanel 老页面的 `iframe.contentWindow` 变成了「断头」frame(origin 已经失效)。下次 `evalAdapterInSandbox` 的 postMessage 触发 iframe 用旧 URL 重新 navigate 自己,Chrome 就拒了。如果是这个,fix 是在 `ensureSandbox` 加一层「检测 frame 死了重建」(可以监听 chrome.runtime.onSuspend 或 detect contentWindow.location === 'about:blank')。
+
+**目前现象**:不影响 adapter 跑(用户已经能成功 fetch subtitle)。先记下,等下次稳定 repro 再下手 —— 没有 stack trace 瞎修风险比留着大。
+
 ## 11. 市场布局 v2:per-file + sha256(为公开市场铺路)
 
 > 关键改动 commit:`<next>`(本节描述的整体 schema-v2 切换)。

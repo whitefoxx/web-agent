@@ -1,9 +1,8 @@
 // ../browser-agent/opencli/clis/linkedin/services-read.js
 import { cli, Strategy } from "@jackwener/opencli/registry";
-import { CommandExecutionError as CommandExecutionError2, EmptyResultError } from "@jackwener/opencli/errors";
-
+import { ArgumentError, AuthRequiredError, CommandExecutionError, EmptyResultError } from "@jackwener/opencli/errors";
 // ../browser-agent/opencli/clis/linkedin/shared.js
-import { ArgumentError, AuthRequiredError, CommandExecutionError } from "@jackwener/opencli/errors";
+
 var LINKEDIN_DOMAIN = "www.linkedin.com";
 function unwrapEvaluateResult(payload) {
   if (payload && typeof payload === "object" && "data" in payload && "session" in payload) return payload.data;
@@ -53,7 +52,7 @@ function normalizeProfileUrl(value) {
   const url = assertSafeLinkedinUrl(value || "https://www.linkedin.com/in/me/", "profile-url", "/in/me/");
   const parsed = new URL(url);
   if (!/^\/in\/[^/?#]+\/?$/.test(parsed.pathname)) {
-    throw new CommandExecutionError2("LinkedIn services-read requires a /in/<handle>/ profile URL");
+    throw new CommandExecutionError("LinkedIn services-read requires a /in/<handle>/ profile URL");
   }
   return parsed.toString();
 }
@@ -61,7 +60,7 @@ function normalizeServicesUrl(value) {
   const url = assertSafeLinkedinUrl(value, "services-url", "/services/page/");
   const parsed = new URL(url);
   if (!/^\/services\/page\/[^/?#]+\/?$/.test(parsed.pathname)) {
-    throw new CommandExecutionError2("LinkedIn services-read requires a /services/page/<id>/ URL");
+    throw new CommandExecutionError("LinkedIn services-read requires a /services/page/<id>/ URL");
   }
   return parsed.toString();
 }
@@ -144,7 +143,7 @@ function pairsToMedia(items) {
 }
 function normalizeServices(row) {
   if (!row || typeof row !== "object") {
-    throw new CommandExecutionError2("LinkedIn services-read returned malformed extraction payload");
+    throw new CommandExecutionError("LinkedIn services-read returned malformed extraction payload");
   }
   const services = Array.isArray(row.services_provided) ? row.services_provided.map(normalizeWhitespace).filter(Boolean) : [];
   const mediaItems = pairsToMedia(row.media_lines);
@@ -154,7 +153,7 @@ function normalizeServices(row) {
   const overview = normalizeWhitespace(row.overview);
   const availability = normalizeWhitespace(row.availability);
   if (!serviceUrl || !pageTitle && !overview && services.length === 0) {
-    throw new CommandExecutionError2("LinkedIn services-read could not find stable Services page content");
+    throw new CommandExecutionError("LinkedIn services-read could not find stable Services page content");
   }
   return {
     service_url: serviceUrl,
@@ -202,7 +201,7 @@ cli({
   ],
   columns: ["service_url", "page_title", "overview", "availability", "work_locations", "pricing", "services_provided", "services_count", "media", "media_count", "messages", "reviews_visibility"],
   func: async (page, args) => {
-    if (!page) throw new CommandExecutionError2("Browser session required for linkedin services-read");
+    if (!page) throw new CommandExecutionError("Browser session required for linkedin services-read");
     let servicesUrl = normalizeWhitespace(args["services-url"]);
     const shouldReadOwnerEdit = !servicesUrl && !normalizeWhitespace(args["profile-url"]);
     if (servicesUrl) {

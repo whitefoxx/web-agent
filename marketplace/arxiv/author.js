@@ -1,9 +1,8 @@
 // ../browser-agent/opencli/clis/arxiv/author.js
 import { cli, Strategy } from "@jackwener/opencli/registry";
-import { ArgumentError as ArgumentError2, EmptyResultError } from "@jackwener/opencli/errors";
-
+import { ArgumentError, CommandExecutionError, EmptyResultError } from "@jackwener/opencli/errors";
 // ../browser-agent/opencli/clis/arxiv/utils.js
-import { ArgumentError, CommandExecutionError } from "@jackwener/opencli/errors";
+
 var ARXIV_BASE = "https://export.arxiv.org/api/query";
 async function arxivFetch(params) {
   const resp = await fetch(`${ARXIV_BASE}?${params}`);
@@ -105,7 +104,7 @@ cli({
   func: async (args) => {
     const authorText = String(args.author || "").trim();
     if (!authorText) {
-      throw new ArgumentError2("arxiv author cannot be empty", 'Example: opencli arxiv author "Yoshua Bengio"');
+      throw new ArgumentError("arxiv author cannot be empty", 'Example: opencli arxiv author "Yoshua Bengio"');
     }
     const limit = normalizeArxivLimit(args.limit, 20, 50);
     const query = encodeURIComponent(`au:"${authorText}"`);

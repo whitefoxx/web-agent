@@ -2,10 +2,9 @@
 import { cli, Strategy } from "@jackwener/opencli/registry";
 
 // ../browser-agent/opencli/clis/douyin/_shared/browser-fetch.js
-import { AuthRequiredError, CommandExecutionError as CommandExecutionError2 } from "@jackwener/opencli/errors";
-
+import { ArgumentError, AuthRequiredError, CommandExecutionError } from "@jackwener/opencli/errors";
 // ../browser-agent/opencli/clis/douyin/_shared/evaluate-result.js
-import { CommandExecutionError } from "@jackwener/opencli/errors";
+
 function unwrapEvaluateResult(payload) {
   if (payload && !Array.isArray(payload) && typeof payload === "object" && "session" in payload && "data" in payload) {
     return payload.data;
@@ -51,13 +50,13 @@ async function browserFetch(page, method, url, options = {}) {
   try {
     result = unwrapEvaluateResult(await page.evaluate(js));
   } catch (error) {
-    throw new CommandExecutionError2(`Douyin API request failed (${method} ${url}): ${error instanceof Error ? error.message : String(error)}`);
+    throw new CommandExecutionError(`Douyin API request failed (${method} ${url}): ${error instanceof Error ? error.message : String(error)}`);
   }
   if (result == null) {
-    throw new CommandExecutionError2(`Empty response from Douyin API (${method} ${url})`);
+    throw new CommandExecutionError(`Empty response from Douyin API (${method} ${url})`);
   }
   if (Array.isArray(result) || typeof result !== "object") {
-    throw new CommandExecutionError2(`Malformed response from Douyin API (${method} ${url})`);
+    throw new CommandExecutionError(`Malformed response from Douyin API (${method} ${url})`);
   }
   if (result && typeof result === "object" && "status_code" in result) {
     const code = result.status_code;
@@ -66,25 +65,25 @@ async function browserFetch(page, method, url, options = {}) {
       if (isAuthLikeError(code, msg)) {
         throw new AuthRequiredError("creator.douyin.com", `Douyin API auth/permission error ${code} at ${method} ${url}: ${msg}`);
       }
-      throw new CommandExecutionError2(`Douyin API error ${code} at ${method} ${url}: ${msg}`);
+      throw new CommandExecutionError(`Douyin API error ${code} at ${method} ${url}: ${msg}`);
     }
   }
   return result;
 }
 
 // ../browser-agent/opencli/clis/douyin/hashtag.js
-import { ArgumentError, CommandExecutionError as CommandExecutionError3 } from "@jackwener/opencli/errors";
+
 function isPlainObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 function requireListField(res, field, action) {
   if (!isPlainObject(res)) {
-    throw new CommandExecutionError3(`douyin hashtag ${action}: API returned malformed payload`);
+    throw new CommandExecutionError(`douyin hashtag ${action}: API returned malformed payload`);
   }
   const list = res[field];
   if (list === void 0 || list === null) return [];
   if (!Array.isArray(list)) {
-    throw new CommandExecutionError3(`douyin hashtag ${action}: API returned malformed "${field}"`);
+    throw new CommandExecutionError(`douyin hashtag ${action}: API returned malformed "${field}"`);
   }
   return list;
 }
@@ -137,7 +136,7 @@ cli({
         }];
       });
       if (list.length > 0 && rows.length === 0) {
-        throw new CommandExecutionError3("douyin hashtag search: API returned challenges but none had stable challenge_info shape");
+        throw new CommandExecutionError("douyin hashtag search: API returned challenges but none had stable challenge_info shape");
       }
       return rows;
     }
@@ -153,15 +152,15 @@ cli({
       const url = `https://creator.douyin.com/aweme/v1/hotspot/recommend/?${kw ? `keyword=${encodeURIComponent(kw)}&` : ""}aid=1128`;
       const res = await browserFetch(page, "GET", url);
       if (!isPlainObject(res)) {
-        throw new CommandExecutionError3("douyin hashtag hot: API returned malformed payload");
+        throw new CommandExecutionError("douyin hashtag hot: API returned malformed payload");
       }
       const hotspotList = res.hotspot_list;
       const allSentences = res.all_sentences;
       if (hotspotList !== void 0 && hotspotList !== null && !Array.isArray(hotspotList)) {
-        throw new CommandExecutionError3('douyin hashtag hot: API returned malformed "hotspot_list"');
+        throw new CommandExecutionError('douyin hashtag hot: API returned malformed "hotspot_list"');
       }
       if (allSentences !== void 0 && allSentences !== null && !Array.isArray(allSentences)) {
-        throw new CommandExecutionError3('douyin hashtag hot: API returned malformed "all_sentences"');
+        throw new CommandExecutionError('douyin hashtag hot: API returned malformed "all_sentences"');
       }
       const items = Array.isArray(hotspotList) ? hotspotList : Array.isArray(allSentences) ? allSentences.map((h) => ({
         sentence: h?.word ?? "",

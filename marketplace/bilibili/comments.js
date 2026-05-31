@@ -1,10 +1,9 @@
 // ../browser-agent/opencli/clis/bilibili/comments.js
 import { cli, Strategy } from "@jackwener/opencli/registry";
-import { ArgumentError, AuthRequiredError as AuthRequiredError2, CommandExecutionError as CommandExecutionError2, EmptyResultError as EmptyResultError2 } from "@jackwener/opencli/errors";
-
+import { ArgumentError, AuthRequiredError, CommandExecutionError, EmptyResultError } from "@jackwener/opencli/errors";
 // ../browser-agent/opencli/clis/bilibili/utils.js
 import https from "node:https";
-import { AuthRequiredError, CommandExecutionError, EmptyResultError } from "@jackwener/opencli/errors";
+
 function resolveBvid(input) {
   const trimmed = String(input).trim();
   if (/^BV[A-Za-z0-9]+$/i.test(trimmed)) {
@@ -196,43 +195,43 @@ function parseParent(value) {
 }
 function requireOkPayload(payload, label) {
   if (!payload || typeof payload !== "object" || Array.isArray(payload) || !Object.hasOwn(payload, "code")) {
-    throw new CommandExecutionError2(`Bilibili ${label} API returned a malformed payload`);
+    throw new CommandExecutionError(`Bilibili ${label} API returned a malformed payload`);
   }
   if (payload.code !== 0) {
     const message = payload.message ?? "unknown error";
     if (isAuthLikeBilibiliError(payload.code, message)) {
-      throw new AuthRequiredError2("bilibili.com", `Bilibili ${label} API requires login or permission: ${message} (${payload.code})`);
+      throw new AuthRequiredError("bilibili.com", `Bilibili ${label} API requires login or permission: ${message} (${payload.code})`);
     }
-    throw new CommandExecutionError2(`Bilibili ${label} API failed: ${message} (${payload.code})`);
+    throw new CommandExecutionError(`Bilibili ${label} API failed: ${message} (${payload.code})`);
   }
   return payload.data;
 }
 function requireReplies(data, label) {
   if (!data || typeof data !== "object" || Array.isArray(data)) {
-    throw new CommandExecutionError2(`Bilibili ${label} API returned malformed data`);
+    throw new CommandExecutionError(`Bilibili ${label} API returned malformed data`);
   }
   if (!Object.hasOwn(data, "replies")) {
-    throw new CommandExecutionError2(`Bilibili ${label} API did not return replies`);
+    throw new CommandExecutionError(`Bilibili ${label} API did not return replies`);
   }
   if (data.replies === null) {
     return [];
   }
   if (!Array.isArray(data.replies)) {
-    throw new CommandExecutionError2(`Bilibili ${label} API returned malformed replies`);
+    throw new CommandExecutionError(`Bilibili ${label} API returned malformed replies`);
   }
   return data.replies;
 }
 function formatReplyRow(reply, index) {
   if (!reply || typeof reply !== "object" || Array.isArray(reply)) {
-    throw new CommandExecutionError2(`Bilibili comments reply ${index + 1} was malformed`);
+    throw new CommandExecutionError(`Bilibili comments reply ${index + 1} was malformed`);
   }
   const rpid = String(reply.rpid ?? "").trim();
   if (!rpid) {
-    throw new CommandExecutionError2(`Bilibili comments reply ${index + 1} was missing rpid`);
+    throw new CommandExecutionError(`Bilibili comments reply ${index + 1} was missing rpid`);
   }
   const ctime = Number(reply.ctime);
   if (!Number.isFinite(ctime)) {
-    throw new CommandExecutionError2(`Bilibili comments reply ${index + 1} was missing ctime`);
+    throw new CommandExecutionError(`Bilibili comments reply ${index + 1} was missing ctime`);
   }
   return {
     rank: index + 1,
@@ -259,7 +258,7 @@ cli({
   columns: ["rank", "rpid", "author", "text", "likes", "replies", "time"],
   func: async (page, kwargs) => {
     if (!page) {
-      throw new CommandExecutionError2("Browser session required for bilibili comments");
+      throw new CommandExecutionError("Browser session required for bilibili comments");
     }
     let bvid;
     try {
@@ -273,7 +272,7 @@ cli({
     const viewData = requireOkPayload(view, "view");
     const aid = viewData?.aid;
     if (!aid)
-      throw new CommandExecutionError2(`Cannot resolve aid for bvid: ${bvid}`);
+      throw new CommandExecutionError(`Cannot resolve aid for bvid: ${bvid}`);
     const payload = parent != null ? await apiGet(page, "/x/v2/reply/reply", {
       params: { oid: aid, type: 1, root: parent, pn: 1, ps: limit }
     }) : await apiGet(page, "/x/v2/reply/main", {
@@ -283,7 +282,7 @@ cli({
     const label = parent != null ? "reply thread" : "reply main";
     const replies = requireReplies(requireOkPayload(payload, label), label);
     if (replies.length === 0) {
-      throw new EmptyResultError2(parent != null ? `bilibili comment replies: ${parent}` : `bilibili comments: ${bvid}`);
+      throw new EmptyResultError(parent != null ? `bilibili comment replies: ${parent}` : `bilibili comments: ${bvid}`);
     }
     return replies.slice(0, limit).map(formatReplyRow);
   }

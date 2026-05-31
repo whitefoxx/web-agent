@@ -1,9 +1,9 @@
 // ../browser-agent/opencli/clis/zhihu/comment.js
-import { CliError as CliError3, CommandExecutionError } from "@jackwener/opencli/errors";
+import { CliError, CommandExecutionError } from "@jackwener/opencli/errors";
 import { cli, Strategy } from "@jackwener/opencli/registry";
 
 // ../browser-agent/opencli/clis/zhihu/target.js
-import { CliError } from "@jackwener/opencli/errors";
+
 var USER_RE = /^user:([A-Za-z0-9_-]+)$/;
 var QUESTION_RE = /^question:(\d+)$/;
 var ANSWER_RE = /^answer:(\d+):(\d+)$/;
@@ -96,7 +96,7 @@ function assertAllowedKinds(command, target) {
 
 // ../browser-agent/opencli/clis/zhihu/write-shared.js
 import { readFile, stat } from "node:fs/promises";
-import { CliError as CliError2 } from "@jackwener/opencli/errors";
+
 var RESULT_ROW_RESERVED_KEYS = /* @__PURE__ */ new Set(["status", "outcome", "message", "target_type", "target"]);
 var NAV_SCOPE_SELECTOR = 'header, nav, [role="banner"], [role="navigation"]';
 var PROFILE_LINK_SELECTOR = 'a[href^="/people/"]';
@@ -119,14 +119,14 @@ function defaultFileReaderDeps() {
 }
 function requireExecute(kwargs) {
   if (!kwargs.execute) {
-    throw new CliError2("INVALID_INPUT", "This Zhihu write command requires --execute");
+    throw new CliError("INVALID_INPUT", "This Zhihu write command requires --execute");
   }
 }
 async function resolvePayload(kwargs, deps = defaultFileReaderDeps()) {
   const text = typeof kwargs.text === "string" ? kwargs.text : void 0;
   const file = typeof kwargs.file === "string" ? kwargs.file : void 0;
   if (text && file) {
-    throw new CliError2("INVALID_INPUT", "Use either <text> or --file, not both");
+    throw new CliError("INVALID_INPUT", "Use either <text> or --file, not both");
   }
   let resolved = text ?? "";
   if (file) {
@@ -134,25 +134,25 @@ async function resolvePayload(kwargs, deps = defaultFileReaderDeps()) {
     try {
       fileStat = await deps.stat(file);
     } catch {
-      throw new CliError2("INVALID_INPUT", `File not found: ${file}`);
+      throw new CliError("INVALID_INPUT", `File not found: ${file}`);
     }
     if (!fileStat.isFile()) {
-      throw new CliError2("INVALID_INPUT", `File must be a readable text file: ${file}`);
+      throw new CliError("INVALID_INPUT", `File must be a readable text file: ${file}`);
     }
     let raw;
     try {
       raw = await deps.readFile(file);
     } catch {
-      throw new CliError2("INVALID_INPUT", `File could not be read: ${file}`);
+      throw new CliError("INVALID_INPUT", `File could not be read: ${file}`);
     }
     try {
       resolved = deps.decodeUtf8(raw);
     } catch {
-      throw new CliError2("INVALID_INPUT", `File could not be decoded as UTF-8 text: ${file}`);
+      throw new CliError("INVALID_INPUT", `File could not be decoded as UTF-8 text: ${file}`);
     }
   }
   if (!resolved.trim()) {
-    throw new CliError2("INVALID_INPUT", "Payload cannot be empty or whitespace only");
+    throw new CliError("INVALID_INPUT", "Payload cannot be empty or whitespace only");
   }
   return resolved;
 }
@@ -232,14 +232,14 @@ function buildResolveCurrentUserIdentityJs() {
 async function resolveCurrentUserIdentity(page) {
   const identity = await page.evaluate(buildResolveCurrentUserIdentityJs());
   if (!identity?.slug) {
-    throw new CliError2("ACTION_NOT_AVAILABLE", "Could not resolve the logged-in Zhihu user identity before write");
+    throw new CliError("ACTION_NOT_AVAILABLE", "Could not resolve the logged-in Zhihu user identity before write");
   }
   return identity.slug;
 }
 function buildResultRow(message, targetType, target, outcome, extra = {}) {
   for (const key of Object.keys(extra)) {
     if (RESULT_ROW_RESERVED_KEYS.has(key)) {
-      throw new CliError2("INVALID_INPUT", `Result extra field cannot overwrite reserved key: ${key}`);
+      throw new CliError("INVALID_INPUT", `Result extra field cannot overwrite reserved key: ${key}`);
     }
   }
   return [{ status: "success", outcome, message, target_type: targetType, target, ...extra }];
@@ -289,7 +289,7 @@ cli({
             return { ok: true, id: data.id, url: data.url };
         })()`);
     if (!apiResult?.ok) {
-      throw new CliError3("COMMAND_EXEC", apiResult?.message || "Failed to create comment");
+      throw new CliError("COMMAND_EXEC", apiResult?.message || "Failed to create comment");
     }
     return buildResultRow(`Commented on ${target.kind} ${target.id}`, target.kind, rawTarget, "created", {
       author_identity: authorIdentity,

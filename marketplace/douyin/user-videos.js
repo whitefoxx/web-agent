@@ -1,12 +1,10 @@
 // ../browser-agent/opencli/clis/douyin/user-videos.js
 import { cli, Strategy } from "@jackwener/opencli/registry";
-import { CliError, CommandExecutionError as CommandExecutionError3, EmptyResultError } from "@jackwener/opencli/errors";
-
+import { AuthRequiredError, CliError, CommandExecutionError, EmptyResultError } from "@jackwener/opencli/errors";
 // ../browser-agent/opencli/clis/douyin/_shared/browser-fetch.js
-import { AuthRequiredError, CommandExecutionError as CommandExecutionError2 } from "@jackwener/opencli/errors";
 
 // ../browser-agent/opencli/clis/douyin/_shared/evaluate-result.js
-import { CommandExecutionError } from "@jackwener/opencli/errors";
+
 function unwrapEvaluateResult(payload) {
   if (payload && !Array.isArray(payload) && typeof payload === "object" && "session" in payload && "data" in payload) {
     return payload.data;
@@ -52,13 +50,13 @@ async function browserFetch(page, method, url, options = {}) {
   try {
     result = unwrapEvaluateResult(await page.evaluate(js));
   } catch (error) {
-    throw new CommandExecutionError2(`Douyin API request failed (${method} ${url}): ${error instanceof Error ? error.message : String(error)}`);
+    throw new CommandExecutionError(`Douyin API request failed (${method} ${url}): ${error instanceof Error ? error.message : String(error)}`);
   }
   if (result == null) {
-    throw new CommandExecutionError2(`Empty response from Douyin API (${method} ${url})`);
+    throw new CommandExecutionError(`Empty response from Douyin API (${method} ${url})`);
   }
   if (Array.isArray(result) || typeof result !== "object") {
-    throw new CommandExecutionError2(`Malformed response from Douyin API (${method} ${url})`);
+    throw new CommandExecutionError(`Malformed response from Douyin API (${method} ${url})`);
   }
   if (result && typeof result === "object" && "status_code" in result) {
     const code = result.status_code;
@@ -67,7 +65,7 @@ async function browserFetch(page, method, url, options = {}) {
       if (isAuthLikeError(code, msg)) {
         throw new AuthRequiredError("creator.douyin.com", `Douyin API auth/permission error ${code} at ${method} ${url}: ${msg}`);
       }
-      throw new CommandExecutionError2(`Douyin API error ${code} at ${method} ${url}: ${msg}`);
+      throw new CommandExecutionError(`Douyin API error ${code} at ${method} ${url}: ${msg}`);
     }
   }
   return result;
@@ -134,7 +132,7 @@ async function fetchTopComments(page, awemeId, count) {
     if (error instanceof CliError) {
       throw error;
     }
-    throw new CommandExecutionError3(`Failed to fetch Douyin comments for video ${awemeId}: ${error instanceof Error ? error.message : String(error)}`);
+    throw new CommandExecutionError(`Failed to fetch Douyin comments for video ${awemeId}: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 cli({

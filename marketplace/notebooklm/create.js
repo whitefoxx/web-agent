@@ -1,14 +1,13 @@
 // ../browser-agent/opencli/clis/notebooklm/create.js
 import { cli, Strategy } from "@jackwener/opencli/registry";
-import { ArgumentError as ArgumentError2, CommandExecutionError as CommandExecutionError2 } from "@jackwener/opencli/errors";
-
+import { ArgumentError, AuthRequiredError, CliError, CommandExecutionError } from "@jackwener/opencli/errors";
 // ../browser-agent/opencli/clis/notebooklm/shared.js
 var NOTEBOOKLM_SITE = "notebooklm";
 var NOTEBOOKLM_DOMAIN = "notebooklm.google.com";
 var NOTEBOOKLM_HOME_URL = "https://notebooklm.google.com/";
 
 // ../browser-agent/opencli/clis/notebooklm/rpc.js
-import { AuthRequiredError, CliError } from "@jackwener/opencli/errors";
+
 function unwrapNotebooklmEvaluateResult(payload) {
   if (payload && typeof payload === "object" && !Array.isArray(payload) && "session" in payload && "data" in payload) {
     return payload.data;
@@ -196,7 +195,7 @@ async function callNotebooklmRpc(page, rpcId, params, options = {}) {
 }
 
 // ../browser-agent/opencli/clis/notebooklm/utils.js
-import { ArgumentError, AuthRequiredError as AuthRequiredError2, CliError as CliError2, CommandExecutionError } from "@jackwener/opencli/errors";
+
 var NOTEBOOKLM_NOTEBOOK_DETAIL_RPC_ID = "rLM1Ne";
 function unwrapNotebooklmSingletonResult(result) {
   let current = result;
@@ -357,7 +356,7 @@ async function verifyNotebooklmNotebookExists(page, notebookId, action) {
     }
     return detail;
   } catch (error) {
-    if (error instanceof AuthRequiredError2 || error instanceof CommandExecutionError)
+    if (error instanceof AuthRequiredError || error instanceof CommandExecutionError)
       throw error;
     throw new CommandExecutionError(`NotebookLM ${action} post-write verification failed: ${error?.message || error}`);
   }
@@ -426,10 +425,10 @@ async function getNotebooklmPageState(page) {
 async function requireNotebooklmSession(page) {
   const state = await getNotebooklmPageState(page);
   if (state.hostname !== NOTEBOOKLM_DOMAIN) {
-    throw new CliError2("NOTEBOOKLM_UNAVAILABLE", "NotebookLM page is not available in the current browser session", `Open Chrome and navigate to ${NOTEBOOKLM_HOME_URL}`);
+    throw new CliError("NOTEBOOKLM_UNAVAILABLE", "NotebookLM page is not available in the current browser session", `Open Chrome and navigate to ${NOTEBOOKLM_HOME_URL}`);
   }
   if (state.loginRequired) {
-    throw new AuthRequiredError2(NOTEBOOKLM_DOMAIN, "NotebookLM requires a logged-in Google session");
+    throw new AuthRequiredError(NOTEBOOKLM_DOMAIN, "NotebookLM requires a logged-in Google session");
   }
   return state;
 }
@@ -441,9 +440,9 @@ var MAX_TITLE_LEN = 200;
 var NOTEBOOK_UUID_RE = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 function parseCreateTitle(value) {
   const title = String(value ?? "").trim();
-  if (!title) throw new ArgumentError2("<title> is required");
+  if (!title) throw new ArgumentError("<title> is required");
   if (title.length > MAX_TITLE_LEN) {
-    throw new ArgumentError2(`Title must be at most ${MAX_TITLE_LEN} characters (got ${title.length})`);
+    throw new ArgumentError(`Title must be at most ${MAX_TITLE_LEN} characters (got ${title.length})`);
   }
   return title;
 }
@@ -484,7 +483,7 @@ cli({
     const rpc = await callNotebooklmRpc(page, NOTEBOOKLM_CREATE_PROJECT_RPC_ID, [title, emoji]);
     const notebookId = parseCreateProjectResult(rpc.result);
     if (!notebookId) {
-      throw new CommandExecutionError2("NotebookLM CreateProject RPC returned no notebook id");
+      throw new CommandExecutionError("NotebookLM CreateProject RPC returned no notebook id");
     }
     await verifyNotebooklmNotebookExists(page, notebookId, "create");
     return [{

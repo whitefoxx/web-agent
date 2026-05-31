@@ -1,9 +1,9 @@
 // ../browser-agent/opencli/clis/wikipedia/summary.js
-import { CliError as CliError2 } from "@jackwener/opencli/errors";
+import { CliError } from "@jackwener/opencli/errors";
 import { cli, Strategy } from "@jackwener/opencli/registry";
 
 // ../browser-agent/opencli/clis/wikipedia/utils.js
-import { CliError } from "@jackwener/opencli/errors";
+
 var EXTRACT_MAX_LEN = 300;
 async function wikiFetch(lang, path) {
   const url = `https://${lang}.wikipedia.org${path}`;
@@ -42,7 +42,7 @@ cli({
     const title = encodeURIComponent(args.title.replace(/ /g, "_"));
     const data = await wikiFetch(lang, `/api/rest_v1/page/summary/${title}`);
     if (!data?.title)
-      throw new CliError2("NOT_FOUND", `Article "${args.title}" not found`, "Try searching first: opencli wikipedia search <keyword>");
+      throw new CliError("NOT_FOUND", `Article "${args.title}" not found`, "Try searching first: opencli wikipedia search <keyword>");
     return [formatSummaryRow(data, lang)];
   }
 });

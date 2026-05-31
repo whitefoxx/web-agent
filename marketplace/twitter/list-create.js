@@ -1,9 +1,8 @@
 // ../browser-agent/opencli/clis/twitter/list-create.js
 import { cli, Strategy } from "@jackwener/opencli/registry";
-import { ArgumentError as ArgumentError3, AuthRequiredError, CommandExecutionError } from "@jackwener/opencli/errors";
-
+import { ArgumentError, AuthRequiredError, CommandExecutionError } from "@jackwener/opencli/errors";
 // ../browser-agent/opencli/clis/twitter/shared.js
-import { ArgumentError } from "@jackwener/opencli/errors";
+
 function unwrapBrowserResult(value) {
   if (value && typeof value === "object" && typeof value.session === "string" && Object.prototype.hasOwnProperty.call(value, "data")) {
     return value.data;
@@ -15,7 +14,7 @@ function unwrapBrowserResult(value) {
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { ArgumentError as ArgumentError2 } from "@jackwener/opencli/errors";
+
 var TWITTER_BEARER_TOKEN = "AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA";
 var MAX_IMAGE_SIZE_BYTES = 20 * 1024 * 1024;
 var ENGAGEMENT_WEIGHTS = Object.freeze({
@@ -43,16 +42,16 @@ function parseListCreateArgs(kwargs) {
   const description = String(kwargs.description || "").trim();
   const modeRaw = String(kwargs.mode || "public").trim().toLowerCase();
   if (!name) {
-    throw new ArgumentError3("List name is required", 'Example: opencli twitter list-create "My List"');
+    throw new ArgumentError("List name is required", 'Example: opencli twitter list-create "My List"');
   }
   if (name.length > NAME_MAX) {
-    throw new ArgumentError3(`List name too long: ${name.length} chars (max ${NAME_MAX})`);
+    throw new ArgumentError(`List name too long: ${name.length} chars (max ${NAME_MAX})`);
   }
   if (description.length > DESCRIPTION_MAX) {
-    throw new ArgumentError3(`Description too long: ${description.length} chars (max ${DESCRIPTION_MAX})`);
+    throw new ArgumentError(`Description too long: ${description.length} chars (max ${DESCRIPTION_MAX})`);
   }
   if (modeRaw !== "public" && modeRaw !== "private") {
-    throw new ArgumentError3(`Invalid mode: ${JSON.stringify(kwargs.mode)}. Expected "public" or "private".`);
+    throw new ArgumentError(`Invalid mode: ${JSON.stringify(kwargs.mode)}. Expected "public" or "private".`);
   }
   return { listName: name, listDescription: description, listMode: modeRaw, privateFlag: modeRaw === "private" };
 }

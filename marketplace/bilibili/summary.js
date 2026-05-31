@@ -1,10 +1,9 @@
 // ../browser-agent/opencli/clis/bilibili/summary.js
 import { cli, Strategy } from "@jackwener/opencli/registry";
-import { ArgumentError, AuthRequiredError as AuthRequiredError2, CommandExecutionError as CommandExecutionError2, EmptyResultError as EmptyResultError2 } from "@jackwener/opencli/errors";
-
+import { ArgumentError, AuthRequiredError, CommandExecutionError, EmptyResultError } from "@jackwener/opencli/errors";
 // ../browser-agent/opencli/clis/bilibili/utils.js
 import https from "node:https";
-import { AuthRequiredError, CommandExecutionError, EmptyResultError } from "@jackwener/opencli/errors";
+
 function resolveBvid(input) {
   const trimmed = String(input).trim();
   if (/^BV[A-Za-z0-9]+$/i.test(trimmed)) {
@@ -219,42 +218,42 @@ async function readBvid(raw) {
 }
 function requireOkPayload(payload, label) {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-    throw new CommandExecutionError2(`Bilibili ${label} API returned a malformed payload`);
+    throw new CommandExecutionError(`Bilibili ${label} API returned a malformed payload`);
   }
   if (payload.code !== 0) {
     const message = payload.message ?? "unknown error";
     if (payload.code === -101 || payload.code === -403 || /登录|权限|forbidden|permission|login/i.test(String(message))) {
-      throw new AuthRequiredError2("bilibili.com", `Bilibili ${label} API requires login or permission: ${message} (${payload.code})`);
+      throw new AuthRequiredError("bilibili.com", `Bilibili ${label} API requires login or permission: ${message} (${payload.code})`);
     }
-    throw new CommandExecutionError2(`Bilibili ${label} API failed: ${message} (${payload.code})`);
+    throw new CommandExecutionError(`Bilibili ${label} API failed: ${message} (${payload.code})`);
   }
   return payload.data;
 }
 function readModelResult(data, bvid) {
   if (!data || typeof data !== "object" || Array.isArray(data)) {
-    throw new CommandExecutionError2("Bilibili conclusion API returned malformed data");
+    throw new CommandExecutionError("Bilibili conclusion API returned malformed data");
   }
   if (data.code !== 0) {
-    throw new EmptyResultError2("bilibili summary", `Bilibili has not generated an AI summary for ${bvid}.`);
+    throw new EmptyResultError("bilibili summary", `Bilibili has not generated an AI summary for ${bvid}.`);
   }
   let modelResult = data.model_result;
   if (typeof modelResult === "string") {
     try {
       modelResult = JSON.parse(modelResult);
     } catch {
-      throw new CommandExecutionError2("Bilibili conclusion API returned malformed model_result JSON");
+      throw new CommandExecutionError("Bilibili conclusion API returned malformed model_result JSON");
     }
   }
   if (!modelResult || typeof modelResult !== "object" || Array.isArray(modelResult)) {
-    throw new CommandExecutionError2("Bilibili conclusion API returned malformed model_result");
+    throw new CommandExecutionError("Bilibili conclusion API returned malformed model_result");
   }
   const summary = String(modelResult.summary ?? "").trim();
   if (!summary) {
-    throw new EmptyResultError2("bilibili summary", `Bilibili has not generated an AI summary for ${bvid}.`);
+    throw new EmptyResultError("bilibili summary", `Bilibili has not generated an AI summary for ${bvid}.`);
   }
   const outline = modelResult.outline ?? [];
   if (!Array.isArray(outline)) {
-    throw new CommandExecutionError2("Bilibili conclusion API returned malformed outline");
+    throw new CommandExecutionError("Bilibili conclusion API returned malformed outline");
   }
   return { summary, outline };
 }
@@ -262,7 +261,7 @@ function rowsFromModel(model) {
   const rows = [{ time: "", content: model.summary }];
   for (const section of model.outline) {
     if (!section || typeof section !== "object" || Array.isArray(section)) {
-      throw new CommandExecutionError2("Bilibili conclusion API returned malformed outline section");
+      throw new CommandExecutionError("Bilibili conclusion API returned malformed outline section");
     }
     const sectionTitle = String(section.title ?? "").trim();
     const sectionTime = formatTime(section.timestamp);
@@ -271,11 +270,11 @@ function rowsFromModel(model) {
     }
     const points = section.part_outline ?? [];
     if (!Array.isArray(points)) {
-      throw new CommandExecutionError2("Bilibili conclusion API returned malformed part outline");
+      throw new CommandExecutionError("Bilibili conclusion API returned malformed part outline");
     }
     for (const point of points) {
       if (!point || typeof point !== "object" || Array.isArray(point)) {
-        throw new CommandExecutionError2("Bilibili conclusion API returned malformed outline point");
+        throw new CommandExecutionError("Bilibili conclusion API returned malformed outline point");
       }
       const content = String(point.content ?? "").trim();
       if (content) {
@@ -298,7 +297,7 @@ var command = cli({
   columns: ["time", "content"],
   func: async (page, kwargs) => {
     if (!page) {
-      throw new CommandExecutionError2("Browser session required for bilibili summary");
+      throw new CommandExecutionError("Browser session required for bilibili summary");
     }
     const bvid = await readBvid(kwargs.bvid);
     const view = await apiGet(page, "/x/web-interface/view", { params: { bvid } });
@@ -306,7 +305,7 @@ var command = cli({
     const cid = viewData?.cid;
     const upMid = viewData?.owner?.mid;
     if (!cid || !upMid) {
-      throw new CommandExecutionError2(`Bilibili view API did not return cid/up_mid for ${bvid}`);
+      throw new CommandExecutionError(`Bilibili view API did not return cid/up_mid for ${bvid}`);
     }
     const conclusion = await apiGet(page, "/x/web-interface/view/conclusion/get", {
       params: { bvid, cid, up_mid: upMid },

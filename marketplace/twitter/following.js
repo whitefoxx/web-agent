@@ -1,9 +1,8 @@
 // ../browser-agent/opencli/clis/twitter/following.js
 import { cli, Strategy } from "@jackwener/opencli/registry";
-import { ArgumentError as ArgumentError3, AuthRequiredError, CommandExecutionError, EmptyResultError } from "@jackwener/opencli/errors";
-
+import { ArgumentError, AuthRequiredError, CommandExecutionError, EmptyResultError } from "@jackwener/opencli/errors";
 // ../browser-agent/opencli/clis/twitter/shared.js
-import { ArgumentError } from "@jackwener/opencli/errors";
+
 var QUERY_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
 var SCREEN_NAME_PATTERN = /^[A-Za-z0-9_]{1,15}$/;
 var SCREEN_NAME_HOSTS = /* @__PURE__ */ new Set(["x.com", "twitter.com", "mobile.twitter.com"]);
@@ -149,7 +148,7 @@ async function resolveTwitterQueryId(page, operationName, fallbackId) {
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { ArgumentError as ArgumentError2 } from "@jackwener/opencli/errors";
+
 var TWITTER_BEARER_TOKEN = "AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA";
 var MAX_IMAGE_SIZE_BYTES = 20 * 1024 * 1024;
 var ENGAGEMENT_WEIGHTS = Object.freeze({
@@ -297,12 +296,12 @@ cli({
   func: async (page, kwargs) => {
     const limit = kwargs.limit === void 0 || kwargs.limit === null ? 50 : Number(kwargs.limit);
     if (!Number.isInteger(limit) || limit <= 0) {
-      throw new ArgumentError3("twitter following --limit must be a positive integer", "Example: opencli twitter following @elonmusk --limit 200");
+      throw new ArgumentError("twitter following --limit must be a positive integer", "Example: opencli twitter following @elonmusk --limit 200");
     }
     const rawUser = String(kwargs.user ?? "").trim();
     let targetUser = normalizeScreenName(rawUser);
     if (rawUser && !targetUser) {
-      throw new ArgumentError3("twitter following user must be a valid Twitter/X handle", "Example: opencli twitter following @elonmusk --limit 200");
+      throw new ArgumentError("twitter following user must be a valid Twitter/X handle", "Example: opencli twitter following @elonmusk --limit 200");
     }
     const cookies = await page.getCookies({ url: "https://x.com" });
     const ct0 = cookies.find((c) => c.name === "ct0")?.value || null;
@@ -322,7 +321,7 @@ cli({
         throw new AuthRequiredError("x.com", "Could not detect logged-in user. Are you logged in?");
     }
     if (!targetUser) {
-      throw new ArgumentError3("twitter following user cannot be empty", "Example: opencli twitter following @elonmusk --limit 200");
+      throw new ArgumentError("twitter following user cannot be empty", "Example: opencli twitter following @elonmusk --limit 200");
     }
     const followingQueryId = await resolveTwitterQueryId(page, "Following", FOLLOWING_QUERY_ID);
     const userByScreenNameQueryId = await resolveTwitterQueryId(page, "UserByScreenName", USER_BY_SCREEN_NAME_QUERY_ID);

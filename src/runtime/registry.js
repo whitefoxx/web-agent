@@ -59,10 +59,15 @@ export function cli(def) {
     );
   }
   // opencli permits func-less commands whose logic lives in a declarative
-  // `pipeline` (these run via runtime/opencli/pipeline.ts). Only warn when a
-  // command has NEITHER a func NOR a pipeline — then it genuinely can't run.
+  // `pipeline` (these run via runtime/opencli/pipeline.ts). Installed func
+  // adapters land here with neither: the captured def can't carry the func
+  // closure across the sandbox→IDB→SW serialization, so dispatcher routes
+  // them to `_userScriptSource` (string source re-evaled in the page). Only
+  // warn when ALL three execution paths are absent — then it genuinely
+  // can't run.
   const hasPipeline = Array.isArray(def.pipeline) && def.pipeline.length > 0;
-  if (typeof def.func !== 'function' && !hasPipeline) {
+  const hasUserScriptSource = typeof def._userScriptSource === 'string' && def._userScriptSource.length > 0;
+  if (typeof def.func !== 'function' && !hasPipeline && !hasUserScriptSource) {
     console.warn(`[registry] ${def.site}/${def.name} registered with neither func nor pipeline — it cannot execute.`);
   }
   // De-dupe on (site, name) so re-importing an adapter (HMR / double _all)

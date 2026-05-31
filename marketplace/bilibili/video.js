@@ -1,10 +1,9 @@
 // ../browser-agent/opencli/clis/bilibili/video.js
 import { cli, Strategy } from "@jackwener/opencli/registry";
-import { CommandExecutionError as CommandExecutionError2 } from "@jackwener/opencli/errors";
-
+import { AuthRequiredError, CommandExecutionError, EmptyResultError } from "@jackwener/opencli/errors";
 // ../browser-agent/opencli/clis/bilibili/utils.js
 import https from "node:https";
-import { AuthRequiredError, CommandExecutionError, EmptyResultError } from "@jackwener/opencli/errors";
+
 function resolveBvid(input) {
   const trimmed = String(input).trim();
   if (/^BV[A-Za-z0-9]+$/i.test(trimmed)) {
@@ -184,7 +183,7 @@ cli({
   columns: ["field", "value"],
   func: async (page, kwargs) => {
     if (!page) {
-      throw new CommandExecutionError2("Browser session required for bilibili video");
+      throw new CommandExecutionError("Browser session required for bilibili video");
     }
     const input = String(kwargs.bvid ?? "").trim();
     const bilibiliUrlMatch = input.match(/bilibili\.com\/(?:video|bangumi\/play)\/(BV[A-Za-z0-9]+)/i);
@@ -194,7 +193,7 @@ cli({
       params: { bvid }
     });
     if (payload.code !== 0) {
-      throw new CommandExecutionError2(`Bilibili view API failed: ${payload.message} (${payload.code})`);
+      throw new CommandExecutionError(`Bilibili view API failed: ${payload.message} (${payload.code})`);
     }
     const d = payload.data || {};
     const stat = d.stat || {};

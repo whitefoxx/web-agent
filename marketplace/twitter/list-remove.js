@@ -1,9 +1,8 @@
 // ../browser-agent/opencli/clis/twitter/list-remove.js
-import { cli as cli2, Strategy as Strategy2 } from "@jackwener/opencli/registry";
-import { AuthRequiredError as AuthRequiredError2, CommandExecutionError as CommandExecutionError2 } from "@jackwener/opencli/errors";
-
+import { Strategy, cli } from "@jackwener/opencli/registry";
+import { ArgumentError, AuthRequiredError, CommandExecutionError, EmptyResultError } from "@jackwener/opencli/errors";
 // ../browser-agent/opencli/clis/twitter/shared.js
-import { ArgumentError } from "@jackwener/opencli/errors";
+
 var QUERY_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
 function sanitizeQueryId(resolved, fallbackId) {
   return typeof resolved === "string" && QUERY_ID_PATTERN.test(resolved) ? resolved : fallbackId;
@@ -98,14 +97,12 @@ async function resolveTwitterQueryId(page, operationName, fallbackId) {
 }
 
 // ../browser-agent/opencli/clis/twitter/lists.js
-import { cli, Strategy } from "@jackwener/opencli/registry";
-import { AuthRequiredError, CommandExecutionError, EmptyResultError } from "@jackwener/opencli/errors";
 
 // ../browser-agent/opencli/clis/twitter/utils.js
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { ArgumentError as ArgumentError2 } from "@jackwener/opencli/errors";
+
 var TWITTER_BEARER_TOKEN = "AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA";
 var MAX_IMAGE_SIZE_BYTES = 20 * 1024 * 1024;
 var ENGAGEMENT_WEIGHTS = Object.freeze({
@@ -329,13 +326,13 @@ function interpretRemoveResponse(status, json) {
   }
   return { ok: false, error: `HTTP ${status}` };
 }
-cli2({
+cli({
   site: "twitter",
   name: "list-remove",
   access: "write",
   description: "Remove a user from a Twitter/X list you own (toggles via UI; no-op if not currently a member)",
   domain: "x.com",
-  strategy: Strategy2.UI,
+  strategy: Strategy.UI,
   browser: true,
   args: [
     { name: "listId", positional: true, type: "string", required: true, help: "Numeric ID of the list you own (e.g. from `opencli twitter lists`)" },
@@ -346,14 +343,14 @@ cli2({
     const listId = String(kwargs.listId || "").trim();
     const username = String(kwargs.username || "").replace(/^@/, "").trim();
     if (!listId || !/^\d+$/.test(listId)) {
-      throw new CommandExecutionError2(`Invalid listId: ${JSON.stringify(kwargs.listId)}`);
+      throw new CommandExecutionError(`Invalid listId: ${JSON.stringify(kwargs.listId)}`);
     }
-    if (!username) throw new CommandExecutionError2("Username is required");
+    if (!username) throw new CommandExecutionError("Username is required");
     await page.goto("https://x.com");
     await page.wait(3);
     const cookies = await page.getCookies({ url: "https://x.com" });
     const ct0 = cookies.find((c) => c.name === "ct0")?.value || null;
-    if (!ct0) throw new AuthRequiredError2("x.com", "Not logged into x.com (no ct0 cookie)");
+    if (!ct0) throw new AuthRequiredError("x.com", "Not logged into x.com (no ct0 cookie)");
     const userByScreenNameQueryId = await resolveTwitterQueryId(page, "UserByScreenName", USER_BY_SCREEN_NAME_QUERY_ID);
     const headers = JSON.stringify({
       "Authorization": `Bearer ${decodeURIComponent(TWITTER_BEARER_TOKEN)}`,
@@ -368,7 +365,7 @@ cli2({
             const d = await resp.json();
             return d.data?.user?.result?.rest_id || null;
         }`);
-    if (!userId) throw new CommandExecutionError2(`Could not resolve user @${username}`);
+    if (!userId) throw new CommandExecutionError(`Could not resolve user @${username}`);
     const listsQueryId = await resolveTwitterQueryId(page, "ListsManagementPageTimeline", LISTS_MANAGEMENT_QUERY_ID);
     const listsUrl = `/i/api/graphql/${listsQueryId}/ListsManagementPageTimeline?features=${encodeURIComponent(JSON.stringify(LISTS_MANAGEMENT_FEATURES))}`;
     const listsData = await page.evaluate(`async () => {
@@ -377,12 +374,12 @@ cli2({
             return await r.json();
         }`);
     if (listsData && listsData.__error) {
-      throw new CommandExecutionError2(`Could not fetch lists: ${listsData.__error}`);
+      throw new CommandExecutionError(`Could not fetch lists: ${listsData.__error}`);
     }
     const parsedLists = parseListsManagement(listsData, /* @__PURE__ */ new Set());
     const targetList = parsedLists.find((l) => l.id === listId);
     if (!targetList) {
-      throw new CommandExecutionError2(`List ${listId} not found among your lists.`);
+      throw new CommandExecutionError(`List ${listId} not found among your lists.`);
     }
     const targetName = targetList.name;
     await page.goto(`https://x.com/${username}`);
@@ -502,15 +499,15 @@ cli2({
             }
         })()`);
     if (!uiResult.ok) {
-      throw new CommandExecutionError2(`Failed to remove @${username} from list ${listId}: ${uiResult.message}`);
+      throw new CommandExecutionError(`Failed to remove @${username} from list ${listId}: ${uiResult.message}`);
     }
     let verifiedBy = null;
     if (uiResult.needsNativeInteraction) {
       if (typeof page.nativeClick !== "function") {
-        throw new CommandExecutionError2("Requires up-to-date Chrome extension (nativeClick).");
+        throw new CommandExecutionError("Requires up-to-date Chrome extension (nativeClick).");
       }
       if (!uiResult.saveClickX) {
-        throw new CommandExecutionError2("Save button not found in dialog.");
+        throw new CommandExecutionError("Save button not found in dialog.");
       }
       const memberCountBefore = Number(targetList.members) || 0;
       await page.nativeClick(uiResult.rowClickX, uiResult.rowClickY);
@@ -523,21 +520,21 @@ cli2({
                 return await r.json();
             }`);
       if (listsAfter && listsAfter.__error) {
-        throw new CommandExecutionError2(`Could not verify list removal: ${listsAfter.__error}`);
+        throw new CommandExecutionError(`Could not verify list removal: ${listsAfter.__error}`);
       }
       if (!getListsManagementInstructions(listsAfter)) {
-        throw new CommandExecutionError2("Could not verify list removal: unexpected lists payload shape");
+        throw new CommandExecutionError("Could not verify list removal: unexpected lists payload shape");
       }
       const parsedAfter = parseListsManagement(listsAfter, /* @__PURE__ */ new Set());
       const afterList = parsedAfter.find((l) => l.id === listId);
       if (!afterList) {
-        throw new CommandExecutionError2(`Could not verify list removal: list ${listId} missing from post-delete payload`);
+        throw new CommandExecutionError(`Could not verify list removal: list ${listId} missing from post-delete payload`);
       }
       const memberCountAfter = Number(afterList.members) || 0;
       if (memberCountAfter < memberCountBefore) {
         verifiedBy = `member_count ${memberCountBefore} → ${memberCountAfter}`;
       } else {
-        throw new CommandExecutionError2(`Failed to remove @${username} from list ${listId}: member_count unchanged (${memberCountBefore} → ${memberCountAfter}).`);
+        throw new CommandExecutionError(`Failed to remove @${username} from list ${listId}: member_count unchanged (${memberCountBefore} → ${memberCountAfter}).`);
       }
     }
     return [{

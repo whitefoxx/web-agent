@@ -1,9 +1,8 @@
 // ../browser-agent/opencli/clis/twitter/list-add.js
-import { cli as cli2, Strategy as Strategy2 } from "@jackwener/opencli/registry";
-import { ArgumentError as ArgumentError3, AuthRequiredError as AuthRequiredError2, CommandExecutionError as CommandExecutionError2 } from "@jackwener/opencli/errors";
-
+import { Strategy, cli } from "@jackwener/opencli/registry";
+import { ArgumentError, AuthRequiredError, CommandExecutionError, EmptyResultError } from "@jackwener/opencli/errors";
 // ../browser-agent/opencli/clis/twitter/shared.js
-import { ArgumentError } from "@jackwener/opencli/errors";
+
 var QUERY_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
 function sanitizeQueryId(resolved, fallbackId) {
   return typeof resolved === "string" && QUERY_ID_PATTERN.test(resolved) ? resolved : fallbackId;
@@ -98,14 +97,12 @@ async function resolveTwitterQueryId(page, operationName, fallbackId) {
 }
 
 // ../browser-agent/opencli/clis/twitter/lists.js
-import { cli, Strategy } from "@jackwener/opencli/registry";
-import { AuthRequiredError, CommandExecutionError, EmptyResultError } from "@jackwener/opencli/errors";
 
 // ../browser-agent/opencli/clis/twitter/utils.js
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { ArgumentError as ArgumentError2 } from "@jackwener/opencli/errors";
+
 var TWITTER_BEARER_TOKEN = "AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA";
 var MAX_IMAGE_SIZE_BYTES = 20 * 1024 * 1024;
 var ENGAGEMENT_WEIGHTS = Object.freeze({
@@ -330,7 +327,7 @@ function fatalGraphqlErrors(errors) {
 }
 function buildListAddMemberRow({ addResult, memberCountBefore, listId, username, userId }) {
   if (!addResult?.httpOk) {
-    throw new CommandExecutionError2(
+    throw new CommandExecutionError(
       `Failed to add @${username} to list ${listId}: HTTP ${addResult?.status ?? 0}${addResult?.fetchError ? " (" + addResult.fetchError + ")" : ""}${addResult?.raw ? " — " + addResult.raw : ""}`
     );
   }
@@ -338,23 +335,23 @@ function buildListAddMemberRow({ addResult, memberCountBefore, listId, username,
   const fatalErrors = fatalGraphqlErrors(addResult.errors);
   if (!hasMemberCount && fatalErrors.length) {
     const msg = fatalErrors.map((e) => e.message || JSON.stringify(e)).join("; ");
-    throw new CommandExecutionError2(`Failed to add @${username} to list ${listId}: ${msg.slice(0, 300)}`);
+    throw new CommandExecutionError(`Failed to add @${username} to list ${listId}: ${msg.slice(0, 300)}`);
   }
   if (!hasMemberCount) {
-    throw new CommandExecutionError2(`Failed to add @${username} to list ${listId}: no member_count in response`);
+    throw new CommandExecutionError(`Failed to add @${username} to list ${listId}: no member_count in response`);
   }
   const memberCountAfter = Number(addResult.mc);
   if (!Number.isFinite(memberCountAfter)) {
-    throw new CommandExecutionError2(`Failed to add @${username} to list ${listId}: invalid member_count in response`);
+    throw new CommandExecutionError(`Failed to add @${username} to list ${listId}: invalid member_count in response`);
   }
   if (memberCountAfter < memberCountBefore) {
-    throw new CommandExecutionError2(
+    throw new CommandExecutionError(
       `Failed to add @${username} to list ${listId}: member_count decreased unexpectedly (${memberCountBefore} → ${memberCountAfter})`
     );
   }
   const countIncreased = memberCountAfter > memberCountBefore;
   if (!countIncreased && addResult.isMember !== true) {
-    throw new CommandExecutionError2(
+    throw new CommandExecutionError(
       `Failed to add @${username} to list ${listId}: member_count unchanged (${memberCountBefore} → ${memberCountAfter}) and response did not confirm membership`
     );
   }
@@ -368,13 +365,13 @@ function buildListAddMemberRow({ addResult, memberCountBefore, listId, username,
     message: noop ? `@${username} is already a member of list ${listId}` : `Added @${username} to list ${listId} (verified via ${verifiedBy})`
   };
 }
-cli2({
+cli({
   site: "twitter",
   name: "list-add",
   access: "write",
   description: "Add a user to a Twitter/X list you own (no-op if already a member)",
   domain: "x.com",
-  strategy: Strategy2.UI,
+  strategy: Strategy.UI,
   browser: true,
   args: [
     { name: "listId", positional: true, type: "string", required: true, help: "Numeric ID of the list you own (e.g. from `opencli twitter lists`)" },
@@ -385,16 +382,16 @@ cli2({
     const listId = String(kwargs.listId || "").trim();
     const username = String(kwargs.username || "").replace(/^@/, "").trim();
     if (!listId || !/^\d+$/.test(listId)) {
-      throw new ArgumentError3(`Invalid listId: ${JSON.stringify(kwargs.listId)}. Expected numeric ID.`, "Example: opencli twitter list-add 123456789 alice");
+      throw new ArgumentError(`Invalid listId: ${JSON.stringify(kwargs.listId)}. Expected numeric ID.`, "Example: opencli twitter list-add 123456789 alice");
     }
     if (!username) {
-      throw new ArgumentError3("twitter list-add username is required", "Example: opencli twitter list-add 123456789 alice");
+      throw new ArgumentError("twitter list-add username is required", "Example: opencli twitter list-add 123456789 alice");
     }
     await page.goto("https://x.com");
     await page.wait(3);
     const cookies = await page.getCookies({ url: "https://x.com" });
     const ct0 = cookies.find((c) => c.name === "ct0")?.value || null;
-    if (!ct0) throw new AuthRequiredError2("x.com", "Not logged into x.com (no ct0 cookie)");
+    if (!ct0) throw new AuthRequiredError("x.com", "Not logged into x.com (no ct0 cookie)");
     const userByScreenNameQueryId = await resolveTwitterQueryId(page, "UserByScreenName", USER_BY_SCREEN_NAME_QUERY_ID);
     const headers = JSON.stringify({
       "Authorization": `Bearer ${decodeURIComponent(TWITTER_BEARER_TOKEN)}`,
@@ -412,7 +409,7 @@ cli2({
         }`);
     const userId = unwrap(userIdRaw);
     if (!userId) {
-      throw new CommandExecutionError2(`Could not resolve user @${username}`);
+      throw new CommandExecutionError(`Could not resolve user @${username}`);
     }
     const listsQueryId = await resolveTwitterQueryId(page, "ListsManagementPageTimeline", LISTS_MANAGEMENT_QUERY_ID);
     const listsUrl = `/i/api/graphql/${listsQueryId}/ListsManagementPageTimeline?features=${encodeURIComponent(JSON.stringify(LISTS_MANAGEMENT_FEATURES))}`;
@@ -424,11 +421,11 @@ cli2({
     const listsData = listsDataRaw;
     const parsedLists = listsData && !listsData.__error ? parseListsManagement(listsData, /* @__PURE__ */ new Set()) : [];
     if (listsData && listsData.__error) {
-      throw new CommandExecutionError2(`Could not fetch lists: ${listsData.__error}`);
+      throw new CommandExecutionError(`Could not fetch lists: ${listsData.__error}`);
     }
     const targetList = parsedLists.find((l) => l.id === listId);
     if (!targetList) {
-      throw new CommandExecutionError2(`List ${listId} not found among your lists (${parsedLists.length} lists fetched).`);
+      throw new CommandExecutionError(`List ${listId} not found among your lists (${parsedLists.length} lists fetched).`);
     }
     const memberCountBefore = Number(targetList.members) || 0;
     const listAddMemberQueryId = await resolveTwitterQueryId(page, "ListAddMember", LIST_ADD_MEMBER_QUERY_ID);
@@ -468,7 +465,7 @@ cli2({
     try {
       addResultTuple = JSON.parse(addResultJson);
     } catch {
-      throw new CommandExecutionError2(`Failed to add @${username} to list ${listId}: malformed mutation response envelope`);
+      throw new CommandExecutionError(`Failed to add @${username} to list ${listId}: malformed mutation response envelope`);
     }
     const addResult = /* @__PURE__ */ Object.create(null);
     addResult.httpOk = Boolean(addResultTuple?.[0]);

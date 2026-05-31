@@ -72,7 +72,9 @@ describe('fetchAdapterSource', () => {
 
     const text = await fetchAdapterSource(mkAdapter(), 'https://market.example/v1/');
     expect(text).toBe(SAMPLE_SOURCE);
-    expect(fetchMock).toHaveBeenCalledWith('https://market.example/v1/demo/list.js');
+    expect(fetchMock).toHaveBeenCalledWith('https://market.example/v1/demo/list.js', {
+      cache: 'no-store',
+    });
   });
 
   it('returns source verbatim when sha256 matches', async () => {

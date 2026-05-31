@@ -1,10 +1,8 @@
 // ../browser-agent/opencli/clis/linkedin/salesnav-thread.js
-import { cli as cli2, Strategy as Strategy2 } from "@jackwener/opencli/registry";
-import { ArgumentError as ArgumentError2, CommandExecutionError as CommandExecutionError2, EmptyResultError as EmptyResultError2 } from "@jackwener/opencli/errors";
-
-// ../browser-agent/opencli/clis/linkedin/salesnav-inbox.js
-import { cli, Strategy } from "@jackwener/opencli/registry";
+import { Strategy, cli } from "@jackwener/opencli/registry";
 import { ArgumentError, AuthRequiredError, CommandExecutionError, EmptyResultError } from "@jackwener/opencli/errors";
+// ../browser-agent/opencli/clis/linkedin/salesnav-inbox.js
+
 var LINKEDIN_DOMAIN = "www.linkedin.com";
 var SALES_INBOX_URL = "https://www.linkedin.com/sales/inbox/";
 var THREADS_BASE = "https://www.linkedin.com/sales-api/salesApiMessagingThreads";
@@ -207,7 +205,7 @@ function parseThreadInput(value) {
   if (/^2-[A-Za-z0-9+/=_-]+$/.test(raw)) return ["thread_id", raw];
   if (/^urn:li:fs_salesProfile:\(/.test(raw)) {
     const urn = parseSalesProfileUrn(raw);
-    if (!urn) throw new ArgumentError2("Sales Navigator recipient urn must be urn:li:fs_salesProfile:(profileId,authType,authToken)");
+    if (!urn) throw new ArgumentError("Sales Navigator recipient urn must be urn:li:fs_salesProfile:(profileId,authType,authToken)");
     return ["recipient_urn", urn];
   }
   try {
@@ -219,12 +217,12 @@ function parseThreadInput(value) {
     if (leadMatch) {
       const urn = `urn:li:fs_salesProfile:(${decodeURIComponent(leadMatch[1])},${decodeURIComponent(leadMatch[2])},${decodeURIComponent(leadMatch[3])})`;
       if (!parseSalesProfileUrn(urn)) {
-        throw new ArgumentError2("Sales Navigator lead URL must contain resolved profileId, authType, and authToken");
+        throw new ArgumentError("Sales Navigator lead URL must contain resolved profileId, authType, and authToken");
       }
       return ["recipient_urn", urn];
     }
   } catch (err) {
-    if (err instanceof ArgumentError2) throw err;
+    if (err instanceof ArgumentError) throw err;
   }
   return ["name", raw.toLowerCase()];
 }
@@ -249,20 +247,20 @@ function participantIndex(thread) {
 }
 function parseSalesnavThreadMessages(thread) {
   if (!thread || typeof thread !== "object") {
-    throw new CommandExecutionError2("Sales Navigator messaging thread API returned malformed payload");
+    throw new CommandExecutionError("Sales Navigator messaging thread API returned malformed payload");
   }
   const threadId = normalizeWhitespace(thread?.id || "");
   if (!threadId) {
-    throw new CommandExecutionError2("Sales Navigator messaging thread API returned a thread without id");
+    throw new CommandExecutionError("Sales Navigator messaging thread API returned a thread without id");
   }
   if (!Array.isArray(thread?.messages)) {
-    throw new CommandExecutionError2("Sales Navigator messaging thread API returned malformed messages");
+    throw new CommandExecutionError("Sales Navigator messaging thread API returned malformed messages");
   }
   const byUrn = participantIndex(thread);
   const messages = thread.messages;
   const rows = messages.map((message) => {
     if (!message || typeof message !== "object") {
-      throw new CommandExecutionError2("Sales Navigator messaging thread API returned malformed message row");
+      throw new CommandExecutionError("Sales Navigator messaging thread API returned malformed message row");
     }
     const deliveredAt = Number(message?.deliveredAt || 0);
     const senderProfile = byUrn.get(message?.author);
@@ -298,12 +296,12 @@ function threadMatchesInput(row, parsed) {
 }
 async function resolveThreadId(page, input, { maxPages = 30 } = {}) {
   const parsed = parseThreadInput(input);
-  if (parsed[0] === "empty") throw new ArgumentError2("thread or recipient is required");
+  if (parsed[0] === "empty") throw new ArgumentError("thread or recipient is required");
   if (parsed[0] === "thread_id") return parsed[1];
   const inboxRows = await fetchInboxRows(page, { limit: 500, maxPages });
   const match = inboxRows.find((row) => threadMatchesInput(row, parsed));
   if (!match) {
-    throw new EmptyResultError2("linkedin salesnav-thread", `No Sales Navigator thread matched ${input}`);
+    throw new EmptyResultError("linkedin salesnav-thread", `No Sales Navigator thread matched ${input}`);
   }
   return match.thread_id;
 }
@@ -324,17 +322,17 @@ async function fetchThreadWithPagination(page, csrf, threadId, limit = DEFAULT_M
   const total = Number(thread?.totalMessageCount || 0);
   const have = Array.isArray(thread?.messages) ? thread.messages.length : 0;
   if (total && have < total && have < limit) {
-    throw new CommandExecutionError2(`Sales Navigator messaging thread API returned partial history (${have}/${total})`);
+    throw new CommandExecutionError(`Sales Navigator messaging thread API returned partial history (${have}/${total})`);
   }
   return thread;
 }
-cli2({
+cli({
   site: "linkedin",
   name: "salesnav-thread",
   access: "read",
   description: "Return full Sales Navigator message history for a thread id, Sales Navigator inbox URL, lead URL, recipient urn, or exact recipient name",
   domain: LINKEDIN_DOMAIN2,
-  strategy: Strategy2.UI,
+  strategy: Strategy.UI,
   browser: true,
   args: [
     { name: "thread-or-recipient", type: "string", required: true, positional: true, help: "Sales Navigator inbox URL/thread id, Sales Navigator lead URL, recipient urn, or exact participant name" },
@@ -343,9 +341,9 @@ cli2({
   ],
   columns: ["index", "thread_id", "thread_url", "sender", "text", "timestamp", "subject", "message_id", "sender_urn", "delivered_at", "type", "total_message_count"],
   func: async (page, args) => {
-    if (!page) throw new CommandExecutionError2("Browser session required for linkedin salesnav-thread");
+    if (!page) throw new CommandExecutionError("Browser session required for linkedin salesnav-thread");
     const input = normalizeWhitespace(args["thread-or-recipient"]);
-    if (!input) throw new ArgumentError2("thread-or-recipient is required");
+    if (!input) throw new ArgumentError("thread-or-recipient is required");
     const limit = parseLimit(args.limit, DEFAULT_MESSAGE_LIMIT);
     const maxPages = parseLimit(args["max-pages"], 30);
     await page.goto(SALES_INBOX_URL2);
@@ -354,7 +352,7 @@ cli2({
     const csrf = await getCsrf(page);
     const thread = await fetchThreadWithPagination(page, csrf, threadId, limit);
     const messages = parseSalesnavThreadMessages(thread).slice(0, limit);
-    if (messages.length === 0) throw new EmptyResultError2("linkedin salesnav-thread", `No messages found for ${threadId}`);
+    if (messages.length === 0) throw new EmptyResultError("linkedin salesnav-thread", `No messages found for ${threadId}`);
     return messages.map((message) => ({
       ...message,
       thread_url: salesnavThreadUrl2(threadId),

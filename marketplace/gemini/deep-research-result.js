@@ -1,9 +1,8 @@
 // ../browser-agent/opencli/clis/gemini/deep-research-result.js
 import { cli, Strategy } from "@jackwener/opencli/registry";
-import { ArgumentError } from "@jackwener/opencli/errors";
-
+import { ArgumentError, CommandExecutionError } from "@jackwener/opencli/errors";
 // ../browser-agent/opencli/clis/gemini/utils.js
-import { CommandExecutionError } from "@jackwener/opencli/errors";
+
 var GEMINI_DOMAIN = "gemini.google.com";
 var GEMINI_APP_URL = "https://gemini.google.com/app";
 var GEMINI_RESPONSE_NOISE_PATTERNS = [

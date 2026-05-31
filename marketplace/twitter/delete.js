@@ -1,9 +1,8 @@
 // ../browser-agent/opencli/clis/twitter/delete.js
 import { cli, Strategy } from "@jackwener/opencli/registry";
-import { CommandExecutionError } from "@jackwener/opencli/errors";
-
+import { ArgumentError, CommandExecutionError } from "@jackwener/opencli/errors";
 // ../browser-agent/opencli/clis/twitter/shared.js
-import { ArgumentError } from "@jackwener/opencli/errors";
+
 var TWEET_PATH_PATTERN = /^\/(?:[^/]+|i)\/status\/(\d+)\/?$/;
 var TWEET_HOSTS = /* @__PURE__ */ new Set(["x.com", "twitter.com"]);
 function isTwitterHost(hostname) {

@@ -1,9 +1,9 @@
 // ../browser-agent/opencli/clis/twitter/search.js
-import { ArgumentError as ArgumentError3, AuthRequiredError, CommandExecutionError } from "@jackwener/opencli/errors";
+import { ArgumentError, AuthRequiredError, CommandExecutionError } from "@jackwener/opencli/errors";
 import { cli, Strategy } from "@jackwener/opencli/registry";
 
 // ../browser-agent/opencli/clis/twitter/shared.js
-import { ArgumentError } from "@jackwener/opencli/errors";
+
 var QUERY_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
 var SCREEN_NAME_PATTERN = /^[A-Za-z0-9_]{1,15}$/;
 function sanitizeQueryId(resolved, fallbackId) {
@@ -202,7 +202,7 @@ function extractQuotedTweet(tweet) {
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { ArgumentError as ArgumentError2 } from "@jackwener/opencli/errors";
+
 var TWITTER_BEARER_TOKEN = "AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA";
 var MAX_IMAGE_SIZE_BYTES = 20 * 1024 * 1024;
 var ENGAGEMENT_WEIGHTS = Object.freeze({
@@ -313,7 +313,7 @@ function buildSearchQuery(rawQuery, kwargs) {
   if (kwargs.from) {
     const fromUser = String(kwargs.from).trim().replace(/^@+/, "");
     if (fromUser && !FROM_USER_PATTERN.test(fromUser)) {
-      throw new ArgumentError3(
+      throw new ArgumentError(
         `Invalid --from username: ${JSON.stringify(kwargs.from)}`,
         "Use a Twitter/X handle with 1-15 letters, numbers, or underscores; omit @ or pass @handle."
       );
@@ -444,10 +444,10 @@ cli({
   func: async (page, kwargs) => {
     const finalQuery = buildSearchQuery(kwargs.query, kwargs);
     if (!finalQuery) {
-      throw new ArgumentError3("twitter search query is empty", "Provide a non-empty <query>, or use at least one of --from / --has / --exclude.");
+      throw new ArgumentError("twitter search query is empty", "Provide a non-empty <query>, or use at least one of --from / --has / --exclude.");
     }
     if (!Number.isInteger(Number(kwargs.limit)) || Number(kwargs.limit) <= 0) {
-      throw new ArgumentError3("twitter search --limit must be a positive integer", "Example: opencli twitter search opencli --limit 15");
+      throw new ArgumentError("twitter search --limit must be a positive integer", "Example: opencli twitter search opencli --limit 15");
     }
     const cookies = await page.getCookies({ url: "https://x.com" });
     const ct0 = cookies.find((c) => c.name === "ct0")?.value || null;

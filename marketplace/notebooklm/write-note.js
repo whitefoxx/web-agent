@@ -1,14 +1,13 @@
 // ../browser-agent/opencli/clis/notebooklm/write-note.js
 import { cli, Strategy } from "@jackwener/opencli/registry";
-import { ArgumentError as ArgumentError2, CommandExecutionError as CommandExecutionError2 } from "@jackwener/opencli/errors";
-
+import { ArgumentError, AuthRequiredError, CliError, CommandExecutionError } from "@jackwener/opencli/errors";
 // ../browser-agent/opencli/clis/notebooklm/shared.js
 var NOTEBOOKLM_SITE = "notebooklm";
 var NOTEBOOKLM_DOMAIN = "notebooklm.google.com";
 var NOTEBOOKLM_HOME_URL = "https://notebooklm.google.com/";
 
 // ../browser-agent/opencli/clis/notebooklm/rpc.js
-import { AuthRequiredError, CliError } from "@jackwener/opencli/errors";
+
 function unwrapNotebooklmEvaluateResult(payload) {
   if (payload && typeof payload === "object" && !Array.isArray(payload) && "session" in payload && "data" in payload) {
     return payload.data;
@@ -196,7 +195,7 @@ async function callNotebooklmRpc(page, rpcId, params, options = {}) {
 }
 
 // ../browser-agent/opencli/clis/notebooklm/utils.js
-import { ArgumentError, AuthRequiredError as AuthRequiredError2, CliError as CliError2, CommandExecutionError } from "@jackwener/opencli/errors";
+
 function parseNotebooklmIdFromUrl(url) {
   const match = url.match(/\/notebook\/([^/?#]+)/);
   return match?.[1] ?? "";
@@ -204,28 +203,28 @@ function parseNotebooklmIdFromUrl(url) {
 var NOTEBOOK_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function ensureNotebookUuid(candidate) {
   if (!NOTEBOOK_UUID_RE.test(candidate)) {
-    throw new CliError2("NOTEBOOKLM_INVALID_NOTEBOOK", `NotebookLM notebook id "${candidate}" is not a valid UUID`, "Pass a notebook id from `opencli notebooklm list` or a full notebook URL like https://notebooklm.google.com/notebook/<uuid>.");
+    throw new CliError("NOTEBOOKLM_INVALID_NOTEBOOK", `NotebookLM notebook id "${candidate}" is not a valid UUID`, "Pass a notebook id from `opencli notebooklm list` or a full notebook URL like https://notebooklm.google.com/notebook/<uuid>.");
   }
   return candidate;
 }
 function parseNotebooklmNotebookTarget(value) {
   const normalized = value.trim();
   if (!normalized) {
-    throw new CliError2("NOTEBOOKLM_INVALID_NOTEBOOK", "NotebookLM notebook id is required", "Pass a notebook id from `opencli notebooklm list` or a full notebook URL.");
+    throw new CliError("NOTEBOOKLM_INVALID_NOTEBOOK", "NotebookLM notebook id is required", "Pass a notebook id from `opencli notebooklm list` or a full notebook URL.");
   }
   if (/^https?:\/\//i.test(normalized)) {
     let parsed;
     try {
       parsed = new URL(normalized);
     } catch {
-      throw new CliError2("NOTEBOOKLM_INVALID_NOTEBOOK", "NotebookLM notebook URL is invalid", "Pass a full NotebookLM notebook URL like https://notebooklm.google.com/notebook/<uuid>.");
+      throw new CliError("NOTEBOOKLM_INVALID_NOTEBOOK", "NotebookLM notebook URL is invalid", "Pass a full NotebookLM notebook URL like https://notebooklm.google.com/notebook/<uuid>.");
     }
     if (parsed.protocol !== "https:" || parsed.hostname !== NOTEBOOKLM_DOMAIN || parsed.username || parsed.password || parsed.port) {
-      throw new CliError2("NOTEBOOKLM_INVALID_NOTEBOOK", "NotebookLM notebook URL must be a canonical https://notebooklm.google.com URL", "Pass a notebook id from `opencli notebooklm list` or a full NotebookLM notebook URL.");
+      throw new CliError("NOTEBOOKLM_INVALID_NOTEBOOK", "NotebookLM notebook URL must be a canonical https://notebooklm.google.com URL", "Pass a notebook id from `opencli notebooklm list` or a full NotebookLM notebook URL.");
     }
     const notebookId = parseNotebooklmIdFromUrl(normalized);
     if (!notebookId) {
-      throw new CliError2("NOTEBOOKLM_INVALID_NOTEBOOK", "NotebookLM notebook URL is invalid", "Pass a full NotebookLM notebook URL like https://notebooklm.google.com/notebook/<uuid>.");
+      throw new CliError("NOTEBOOKLM_INVALID_NOTEBOOK", "NotebookLM notebook URL is invalid", "Pass a full NotebookLM notebook URL like https://notebooklm.google.com/notebook/<uuid>.");
     }
     return ensureNotebookUuid(notebookId);
   }
@@ -334,10 +333,10 @@ async function getNotebooklmPageState(page) {
 async function requireNotebooklmSession(page) {
   const state = await getNotebooklmPageState(page);
   if (state.hostname !== NOTEBOOKLM_DOMAIN) {
-    throw new CliError2("NOTEBOOKLM_UNAVAILABLE", "NotebookLM page is not available in the current browser session", `Open Chrome and navigate to ${NOTEBOOKLM_HOME_URL}`);
+    throw new CliError("NOTEBOOKLM_UNAVAILABLE", "NotebookLM page is not available in the current browser session", `Open Chrome and navigate to ${NOTEBOOKLM_HOME_URL}`);
   }
   if (state.loginRequired) {
-    throw new AuthRequiredError2(NOTEBOOKLM_DOMAIN, "NotebookLM requires a logged-in Google session");
+    throw new AuthRequiredError(NOTEBOOKLM_DOMAIN, "NotebookLM requires a logged-in Google session");
   }
   return state;
 }
@@ -350,17 +349,17 @@ var MAX_CONTENT_LEN = 1e6;
 var NOTE_UUID_RE = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 function parseNoteTitle(value) {
   const title = String(value ?? "").trim();
-  if (!title) throw new ArgumentError2("--title is required");
+  if (!title) throw new ArgumentError("--title is required");
   if (title.length > MAX_TITLE_LEN) {
-    throw new ArgumentError2(`--title must be at most ${MAX_TITLE_LEN} characters (got ${title.length})`);
+    throw new ArgumentError(`--title must be at most ${MAX_TITLE_LEN} characters (got ${title.length})`);
   }
   return title;
 }
 function parseNoteContent(value) {
   const content = String(value ?? "");
-  if (!content) throw new ArgumentError2("--content is required");
+  if (!content) throw new ArgumentError("--content is required");
   if (content.length > MAX_CONTENT_LEN) {
-    throw new ArgumentError2(`--content exceeds ${MAX_CONTENT_LEN} characters; split into smaller notes.`);
+    throw new ArgumentError(`--content exceeds ${MAX_CONTENT_LEN} characters; split into smaller notes.`);
   }
   return content;
 }
@@ -414,7 +413,7 @@ cli({
     const shellRpc = await callNotebooklmRpc(page, NOTEBOOKLM_CREATE_NOTE_RPC_ID, buildCreateNoteShellArgs(notebookId));
     const noteId = parseNoteIdFromResult(shellRpc.result, [notebookId]);
     if (!noteId) {
-      throw new CommandExecutionError2("NotebookLM CreateNote RPC returned no note id");
+      throw new CommandExecutionError("NotebookLM CreateNote RPC returned no note id");
     }
     await callNotebooklmRpc(page, NOTEBOOKLM_MUTATE_NOTE_RPC_ID, buildMutateNoteArgs(notebookId, noteId, content, title));
     return [{

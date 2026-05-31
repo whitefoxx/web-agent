@@ -1,12 +1,11 @@
 // ../browser-agent/opencli/clis/twitter/bookmark-folder.js
 import { cli, Strategy } from "@jackwener/opencli/registry";
-import { ArgumentError as ArgumentError3, AuthRequiredError, CommandExecutionError } from "@jackwener/opencli/errors";
-
+import { ArgumentError, AuthRequiredError, CommandExecutionError } from "@jackwener/opencli/errors";
 // ../browser-agent/opencli/clis/twitter/utils.js
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { ArgumentError } from "@jackwener/opencli/errors";
+
 var TWITTER_BEARER_TOKEN = "AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA";
 var MAX_IMAGE_SIZE_BYTES = 20 * 1024 * 1024;
 var ENGAGEMENT_WEIGHTS = Object.freeze({
@@ -35,7 +34,7 @@ function applyTopByEngagement(rows, topN) {
 }
 
 // ../browser-agent/opencli/clis/twitter/shared.js
-import { ArgumentError as ArgumentError2 } from "@jackwener/opencli/errors";
+
 var QUERY_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
 function sanitizeQueryId(resolved, fallbackId) {
   return typeof resolved === "string" && QUERY_ID_PATTERN.test(resolved) ? resolved : fallbackId;
@@ -257,13 +256,13 @@ cli({
   func: async (page, kwargs) => {
     const folderId = String(kwargs["folder-id"] || "").trim();
     if (!folderId || !FOLDER_ID_PATTERN.test(folderId)) {
-      throw new ArgumentError3(
+      throw new ArgumentError(
         `Invalid folder-id: ${JSON.stringify(kwargs["folder-id"])}. Expected a safe folder ID from \`opencli twitter bookmark-folders\`.`
       );
     }
     const limit = Number(kwargs.limit ?? 20);
     if (!Number.isInteger(limit) || limit < 1) {
-      throw new ArgumentError3(`Invalid --limit: ${JSON.stringify(kwargs.limit)}. Expected a positive integer.`);
+      throw new ArgumentError(`Invalid --limit: ${JSON.stringify(kwargs.limit)}. Expected a positive integer.`);
     }
     const cookies = await page.getCookies({ url: "https://x.com" });
     const ct0 = cookies.find((c) => c.name === "ct0")?.value || null;

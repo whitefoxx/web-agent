@@ -1,17 +1,15 @@
 // ../browser-agent/opencli/clis/notebooklm/current.js
 import { cli, Strategy } from "@jackwener/opencli/registry";
-import { EmptyResultError } from "@jackwener/opencli/errors";
-
+import { ArgumentError, AuthRequiredError, CliError, CommandExecutionError, EmptyResultError } from "@jackwener/opencli/errors";
 // ../browser-agent/opencli/clis/notebooklm/shared.js
 var NOTEBOOKLM_SITE = "notebooklm";
 var NOTEBOOKLM_DOMAIN = "notebooklm.google.com";
 var NOTEBOOKLM_HOME_URL = "https://notebooklm.google.com/";
 
 // ../browser-agent/opencli/clis/notebooklm/utils.js
-import { ArgumentError, AuthRequiredError as AuthRequiredError2, CliError as CliError2, CommandExecutionError } from "@jackwener/opencli/errors";
 
 // ../browser-agent/opencli/clis/notebooklm/rpc.js
-import { AuthRequiredError, CliError } from "@jackwener/opencli/errors";
+
 function unwrapNotebooklmEvaluateResult(payload) {
   if (payload && typeof payload === "object" && !Array.isArray(payload) && "session" in payload && "data" in payload) {
     return payload.data;
@@ -155,10 +153,10 @@ async function readCurrentNotebooklm(page) {
 async function requireNotebooklmSession(page) {
   const state = await getNotebooklmPageState(page);
   if (state.hostname !== NOTEBOOKLM_DOMAIN) {
-    throw new CliError2("NOTEBOOKLM_UNAVAILABLE", "NotebookLM page is not available in the current browser session", `Open Chrome and navigate to ${NOTEBOOKLM_HOME_URL}`);
+    throw new CliError("NOTEBOOKLM_UNAVAILABLE", "NotebookLM page is not available in the current browser session", `Open Chrome and navigate to ${NOTEBOOKLM_HOME_URL}`);
   }
   if (state.loginRequired) {
-    throw new AuthRequiredError2(NOTEBOOKLM_DOMAIN, "NotebookLM requires a logged-in Google session");
+    throw new AuthRequiredError(NOTEBOOKLM_DOMAIN, "NotebookLM requires a logged-in Google session");
   }
   return state;
 }

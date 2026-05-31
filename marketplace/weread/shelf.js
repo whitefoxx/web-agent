@@ -1,10 +1,10 @@
 // ../browser-agent/opencli/clis/weread/shelf.js
 import { cli, Strategy } from "@jackwener/opencli/registry";
-import { CliError as CliError2 } from "@jackwener/opencli/errors";
+import { CliError } from "@jackwener/opencli/errors";
 import { log } from "@jackwener/opencli/logger";
 
 // ../browser-agent/opencli/clis/weread/utils.js
-import { CliError } from "@jackwener/opencli/errors";
+
 var WEREAD_DOMAIN = "weread.qq.com";
 var WEREAD_WEB_ORIGIN = `https://${WEREAD_DOMAIN}`;
 var WEREAD_SHELF_URL = `${WEREAD_WEB_ORIGIN}/web/shelf`;
@@ -238,7 +238,7 @@ cli({
       const data = await fetchPrivateApi(page, "/shelf/sync", { synckey: "0", lectureSynckey: "0" });
       return normalizePrivateApiRows(data, limit);
     } catch (error) {
-      if (!(error instanceof CliError2) || error.code !== "AUTH_REQUIRED") {
+      if (!(error instanceof CliError) || error.code !== "AUTH_REQUIRED") {
         throw error;
       }
       const snapshot = await loadWebShelfSnapshot(page);

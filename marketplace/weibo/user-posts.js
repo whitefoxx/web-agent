@@ -1,9 +1,8 @@
 // ../browser-agent/opencli/clis/weibo/user-posts.js
 import { cli, Strategy } from "@jackwener/opencli/registry";
-import { ArgumentError, AuthRequiredError as AuthRequiredError2, CommandExecutionError as CommandExecutionError2, EmptyResultError } from "@jackwener/opencli/errors";
-
+import { ArgumentError, AuthRequiredError, CommandExecutionError, EmptyResultError } from "@jackwener/opencli/errors";
 // ../browser-agent/opencli/clis/weibo/utils.js
-import { AuthRequiredError, CommandExecutionError } from "@jackwener/opencli/errors";
+
 function unwrapEvaluateResult(payload) {
   if (payload && !Array.isArray(payload) && typeof payload === "object" && "session" in payload && "data" in payload) {
     return payload.data;
@@ -62,12 +61,12 @@ function validateRange(start, end) {
 function mapError(error) {
   const message = String(error ?? "").trim();
   if (!message) {
-    throw new CommandExecutionError2("weibo user-posts failed without an error message");
+    throw new CommandExecutionError("weibo user-posts failed without an error message");
   }
   if (/login|cookie|登录|auth|forbidden|permission|权限|unauthorized/i.test(message)) {
-    throw new AuthRequiredError2("weibo.com", message);
+    throw new AuthRequiredError("weibo.com", message);
   }
-  throw new CommandExecutionError2(message);
+  throw new CommandExecutionError(message);
 }
 var testInternals = {
   readRequiredId,
@@ -198,14 +197,14 @@ cli({
       mapError(payload.error);
     }
     if (!Array.isArray(payload) || payload.length !== 4 || !Array.isArray(payload[1])) {
-      throw new CommandExecutionError2("weibo user-posts returned malformed extraction payload");
+      throw new CommandExecutionError("weibo user-posts returned malformed extraction payload");
     }
     const [resolvedUid, rows, sawList, sawPostCandidates] = payload;
     if (!sawList && rows.length === 0) {
-      throw new CommandExecutionError2("weibo user-posts did not observe a valid posts list");
+      throw new CommandExecutionError("weibo user-posts did not observe a valid posts list");
     }
     if (sawPostCandidates && rows.length === 0) {
-      throw new CommandExecutionError2("weibo user-posts found post candidates but could not extract valid rows");
+      throw new CommandExecutionError("weibo user-posts found post candidates but could not extract valid rows");
     }
     if (rows.length === 0) {
       throw new EmptyResultError("weibo user-posts", "No Weibo posts found for this user/date range");

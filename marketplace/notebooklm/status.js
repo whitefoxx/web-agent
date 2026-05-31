@@ -7,10 +7,9 @@ var NOTEBOOKLM_DOMAIN = "notebooklm.google.com";
 var NOTEBOOKLM_HOME_URL = "https://notebooklm.google.com/";
 
 // ../browser-agent/opencli/clis/notebooklm/utils.js
-import { ArgumentError, AuthRequiredError as AuthRequiredError2, CliError as CliError2, CommandExecutionError } from "@jackwener/opencli/errors";
-
+import { ArgumentError, AuthRequiredError, CliError, CommandExecutionError } from "@jackwener/opencli/errors";
 // ../browser-agent/opencli/clis/notebooklm/rpc.js
-import { AuthRequiredError, CliError } from "@jackwener/opencli/errors";
+
 function unwrapNotebooklmEvaluateResult(payload) {
   if (payload && typeof payload === "object" && !Array.isArray(payload) && "session" in payload && "data" in payload) {
     return payload.data;
