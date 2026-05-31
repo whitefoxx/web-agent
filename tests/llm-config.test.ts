@@ -1,15 +1,32 @@
 /**
- * llm-config — single-branch storage + migration from legacy shapes.
+ * llm-config — multi-profile storage + migration from legacy shapes.
  *
- * Pre-history: this file used to lock in a dual-branch storage hack so a
- * connector-mode save didn't clobber the api branch. The connector mode is
- * gone, so the only thing left to verify is the legacy-shape migration path
- * (so existing installs don't lose their saved API credentials when they
- * upgrade to the api-only build).
+ * Two surfaces:
+ *  - `loadLlmConfig` / `saveLlmConfig` — legacy single-config API consumed by
+ *    api-engine. Resolves the active profile (or treats as "update active /
+ *    create first" on save).
+ *  - `loadProfiles` / `upsertProfile` / `deleteProfile` / `setActiveProfile` —
+ *    new multi-profile manager API consumed by the SidePanel UI.
+ *
+ * Pre-history: this file used to verify a dual-branch storage hack so a
+ * removed connector-mode save didn't clobber the api branch. The legacy
+ * migrations (dual-branch + discriminated-union shapes) still need to roll
+ * forward so upgrading users don't lose their saved API credentials.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { loadLlmConfig, saveLlmConfig, DEFAULT_CONFIG } from '../src/config/llm-config';
+import {
+  loadLlmConfig,
+  saveLlmConfig,
+  loadProfiles,
+  upsertProfile,
+  deleteProfile,
+  setActiveProfile,
+  newProfileId,
+  autoLabel,
+  DEFAULT_CONFIG,
+  type LlmProfile,
+} from '../src/config/llm-config';
 
 const STORAGE_KEY = 'webchat_llm_config';
 
@@ -48,14 +65,16 @@ beforeEach(() => {
   stub.reset();
 });
 
-describe('loadLlmConfig', () => {
+/* ───────── legacy single-config surface (consumed by api-engine) ───────── */
+
+describe('loadLlmConfig (active-profile resolver)', () => {
   it('returns the empty defaults when nothing is stored', async () => {
     const c = await loadLlmConfig();
     expect(c).toEqual(DEFAULT_CONFIG);
-    expect(c.apiKey).toBe(''); // explicit: not a working default
+    expect(c.apiKey).toBe('');
   });
 
-  it('round-trips a saved api config', async () => {
+  it('round-trips a config saved through saveLlmConfig', async () => {
     const cfg = {
       provider: 'openai',
       baseUrl: 'https://api.openai.com/v1',
@@ -66,7 +85,42 @@ describe('loadLlmConfig', () => {
     expect(await loadLlmConfig()).toEqual(cfg);
   });
 
-  it('migrates the legacy discriminated-union api shape', async () => {
+  it('save creates the first profile when the store is empty', async () => {
+    await saveLlmConfig({
+      provider: 'deepseek',
+      baseUrl: 'https://api.deepseek.com',
+      apiKey: 'sk-1',
+      model: 'deepseek-chat',
+    });
+    const store = await loadProfiles();
+    expect(store.profiles).toHaveLength(1);
+    expect(store.activeId).toBe(store.profiles[0]!.id);
+  });
+
+  it('save mutates the active profile in place (no duplicate entries)', async () => {
+    await saveLlmConfig({
+      provider: 'openai',
+      baseUrl: 'https://api.openai.com/v1',
+      apiKey: 'sk-old',
+      model: 'gpt-4o',
+    });
+    await saveLlmConfig({
+      provider: 'deepseek',
+      baseUrl: 'https://api.deepseek.com',
+      apiKey: 'sk-new',
+      model: 'deepseek-chat',
+    });
+    const store = await loadProfiles();
+    expect(store.profiles).toHaveLength(1);
+    expect(store.profiles[0]!.apiKey).toBe('sk-new');
+    expect(store.profiles[0]!.provider).toBe('deepseek');
+  });
+});
+
+/* ───────── legacy migration paths ───────── */
+
+describe('legacy-shape migration on read', () => {
+  it('migrates discriminated-union api shape (mode:"api", ...)', async () => {
     await chrome.storage.local.set({
       [STORAGE_KEY]: {
         mode: 'api',
@@ -82,9 +136,12 @@ describe('loadLlmConfig', () => {
       apiKey: 'sk-old',
       model: 'deepseek-chat',
     });
+    const store = await loadProfiles();
+    expect(store.profiles).toHaveLength(1);
+    expect(store.profiles[0]!.apiKey).toBe('sk-old');
   });
 
-  it('migrates the dual-branch transitional shape (adopts the api branch)', async () => {
+  it('migrates dual-branch transitional shape (adopts the api branch)', async () => {
     await chrome.storage.local.set({
       [STORAGE_KEY]: {
         mode: 'connector',
@@ -103,11 +160,31 @@ describe('loadLlmConfig', () => {
     expect(c.model).toBe('kimi-k2');
   });
 
-  it('legacy connector-only shape falls back to defaults (no api creds to recover)', async () => {
+  it('migrates pre-multi-profile single shape (just {provider, baseUrl, apiKey, model})', async () => {
+    await chrome.storage.local.set({
+      [STORAGE_KEY]: {
+        provider: 'glm',
+        baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+        apiKey: 'sk-glm',
+        model: 'glm-4-plus',
+      },
+    });
+    const c = await loadLlmConfig();
+    expect(c.apiKey).toBe('sk-glm');
+    expect(c.provider).toBe('glm');
+    const store = await loadProfiles();
+    expect(store.profiles).toHaveLength(1);
+    expect(store.profiles[0]!.label).toContain('GLM');
+  });
+
+  it('legacy connector-only shape falls back to empty store (no api creds to recover)', async () => {
     await chrome.storage.local.set({
       [STORAGE_KEY]: { mode: 'connector', chatbot: 'deepseek' },
     });
     expect(await loadLlmConfig()).toEqual(DEFAULT_CONFIG);
+    const store = await loadProfiles();
+    expect(store.profiles).toHaveLength(0);
+    expect(store.activeId).toBe('');
   });
 
   it('save overwrites previously-stored legacy shape with the current shape', async () => {
@@ -126,12 +203,171 @@ describe('loadLlmConfig', () => {
       apiKey: 'sk-new',
       model: 'deepseek-chat',
     });
-    // Second load goes through the current-shape branch directly.
     expect(await loadLlmConfig()).toEqual({
       provider: 'deepseek',
       baseUrl: 'https://api.deepseek.com',
       apiKey: 'sk-new',
       model: 'deepseek-chat',
     });
+  });
+});
+
+/* ───────── multi-profile manager surface ───────── */
+
+function makeProfile(overrides: Partial<LlmProfile> = {}): LlmProfile {
+  const cfg = {
+    provider: 'deepseek',
+    baseUrl: 'https://api.deepseek.com',
+    apiKey: 'sk-1',
+    model: 'deepseek-chat',
+  };
+  return {
+    id: newProfileId(),
+    label: autoLabel(cfg),
+    ...cfg,
+    ...overrides,
+  };
+}
+
+describe('upsertProfile', () => {
+  it('inserts a new profile and activates it when store is empty', async () => {
+    const p = makeProfile();
+    const store = await upsertProfile(p);
+    expect(store.profiles).toEqual([p]);
+    expect(store.activeId).toBe(p.id);
+  });
+
+  it('adds a second profile WITHOUT switching active by default', async () => {
+    const p1 = makeProfile({ apiKey: 'sk-a' });
+    const p2 = makeProfile({ provider: 'openai', apiKey: 'sk-b' });
+    await upsertProfile(p1);
+    const store = await upsertProfile(p2);
+    expect(store.profiles).toHaveLength(2);
+    expect(store.activeId).toBe(p1.id);
+  });
+
+  it('promotes the upserted profile to active when activate:true', async () => {
+    const p1 = makeProfile({ apiKey: 'sk-a' });
+    const p2 = makeProfile({ provider: 'openai', apiKey: 'sk-b' });
+    await upsertProfile(p1);
+    const store = await upsertProfile(p2, { activate: true });
+    expect(store.activeId).toBe(p2.id);
+  });
+
+  it('updates an existing profile in place when ids match', async () => {
+    const p = makeProfile({ apiKey: 'sk-old', label: 'My Key' });
+    await upsertProfile(p);
+    const updated = { ...p, apiKey: 'sk-new', label: 'My Key (rotated)' };
+    const store = await upsertProfile(updated);
+    expect(store.profiles).toHaveLength(1);
+    expect(store.profiles[0]!.apiKey).toBe('sk-new');
+    expect(store.profiles[0]!.label).toBe('My Key (rotated)');
+  });
+});
+
+describe('deleteProfile', () => {
+  it('removes the profile; picks the first remaining as active if the deleted one was active', async () => {
+    const p1 = makeProfile({ apiKey: 'sk-a' });
+    const p2 = makeProfile({ apiKey: 'sk-b' });
+    await upsertProfile(p1);
+    await upsertProfile(p2);
+    await setActiveProfile(p2.id);
+    const store = await deleteProfile(p2.id);
+    expect(store.profiles.map((p) => p.id)).toEqual([p1.id]);
+    expect(store.activeId).toBe(p1.id);
+  });
+
+  it('clears activeId when the last profile is deleted', async () => {
+    const p = makeProfile();
+    await upsertProfile(p);
+    const store = await deleteProfile(p.id);
+    expect(store.profiles).toHaveLength(0);
+    expect(store.activeId).toBe('');
+  });
+
+  it('leaves activeId alone when an inactive profile is deleted', async () => {
+    const p1 = makeProfile({ apiKey: 'sk-a' });
+    const p2 = makeProfile({ apiKey: 'sk-b' });
+    await upsertProfile(p1);
+    await upsertProfile(p2);
+    // p1 stays active by default; delete p2.
+    const store = await deleteProfile(p2.id);
+    expect(store.activeId).toBe(p1.id);
+    expect(store.profiles).toHaveLength(1);
+  });
+});
+
+describe('setActiveProfile', () => {
+  it('switches activeId to a known profile', async () => {
+    const p1 = makeProfile({ apiKey: 'sk-a' });
+    const p2 = makeProfile({ apiKey: 'sk-b' });
+    await upsertProfile(p1);
+    await upsertProfile(p2);
+    const store = await setActiveProfile(p2.id);
+    expect(store.activeId).toBe(p2.id);
+  });
+
+  it('ignores unknown ids', async () => {
+    const p = makeProfile();
+    await upsertProfile(p);
+    const store = await setActiveProfile('bogus');
+    expect(store.activeId).toBe(p.id);
+  });
+});
+
+describe('autoLabel', () => {
+  it('uses the provider preset label when available', () => {
+    expect(
+      autoLabel({
+        provider: 'deepseek',
+        baseUrl: 'x',
+        apiKey: 'x',
+        model: 'deepseek-chat',
+      }),
+    ).toBe('DeepSeek · deepseek-chat');
+  });
+
+  it('falls back to provider id for custom presets and omits model when absent', () => {
+    expect(
+      autoLabel({
+        provider: 'my-provider',
+        baseUrl: 'x',
+        apiKey: 'x',
+        model: '',
+      }),
+    ).toBe('my-provider');
+  });
+});
+
+describe('multi-profile shape round-trips', () => {
+  it('preserves activeId and all profiles across save+load', async () => {
+    const p1 = makeProfile({ apiKey: 'sk-a', label: 'work' });
+    const p2 = makeProfile({ provider: 'openai', apiKey: 'sk-b', label: 'personal' });
+    await upsertProfile(p1);
+    await upsertProfile(p2, { activate: true });
+    const store = await loadProfiles();
+    expect(store.activeId).toBe(p2.id);
+    expect(store.profiles).toHaveLength(2);
+    expect(store.profiles.find((p) => p.id === p1.id)!.label).toBe('work');
+  });
+
+  it('drops the activeId pointer if the referenced profile is missing on load', async () => {
+    await chrome.storage.local.set({
+      [STORAGE_KEY]: {
+        activeId: 'ghost',
+        profiles: [
+          {
+            id: 'real',
+            label: 'Real',
+            provider: 'deepseek',
+            baseUrl: 'https://api.deepseek.com',
+            apiKey: 'sk-real',
+            model: 'deepseek-chat',
+          },
+        ],
+      },
+    });
+    const store = await loadProfiles();
+    expect(store.activeId).toBe('real');
   });
 });

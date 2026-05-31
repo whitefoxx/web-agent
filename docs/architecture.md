@@ -180,7 +180,7 @@ webchat-agent/
 │   │   ├── session.ts                  # SessionState 类型 + 状态 transitions
 │   │   └── session-store.ts            # IndexedDB 会话持久化(跨 Chrome 重启幸存)
 │   ├── config/
-│   │   └── llm-config.ts               # LLM 后端配置(provider/model/baseUrl/apiKey),存 chrome.storage.local
+│   │   └── llm-config.ts               # LLM 后端多 profile 配置(每条 = provider/model/baseUrl/apiKey/label/id;active 一条),存 chrome.storage.local
 │   ├── messages.ts                     # 跨上下文 message 协议(SidePanel ↔ SW)
 │   ├── runtime/
 │   │   ├── page.ts                     # PageShim(CDP Runtime.evaluate → MAIN world + chrome.cookies/tabs/debugger)

@@ -46,9 +46,16 @@ import {
   DEFAULT_CONFIG,
   PROVIDERS,
   loadLlmConfig,
+  loadProfiles,
+  upsertProfile,
+  deleteProfile,
+  setActiveProfile,
+  newProfileId,
+  autoLabel,
   providerById,
-  saveLlmConfig,
   type LlmConfig,
+  type LlmProfile,
+  type LlmProfileStore,
 } from '../config/llm-config';
 
 interface ProgressState {
@@ -846,28 +853,203 @@ function previewResult(r: unknown): string {
   }
 }
 
+/** Multi-profile LLM backend manager.
+ *
+ * Two view states:
+ *   - 'list' (default): status card + every saved profile as a card with
+ *     「切换 / 编辑 / 删除」 + a "+ 新建配置" button.
+ *   - editing (when `editing !== null`): the form, prefilled either with a
+ *     blank new profile or an existing profile being edited.
+ *
+ * Source of truth is the chrome.storage profile store; this component re-loads
+ * it after every mutation and pushes the **active** profile up to the parent
+ * via `onSave` so the topbar status pill stays current. */
 function LlmBackendSection({
-  config,
+  config: _config,
   onSave,
 }: {
   config: LlmConfig;
   onSave: (c: LlmConfig) => void;
 }) {
-  const [provider, setProvider] = useState<string>(config.provider);
-  const [baseUrl, setBaseUrl] = useState<string>(config.baseUrl);
-  const [apiKey, setApiKey] = useState<string>(config.apiKey);
-  const [model, setModel] = useState<string>(config.model);
-  const [saved, setSaved] = useState(false);
+  const [store, setStore] = useState<LlmProfileStore>({ activeId: '', profiles: [] });
+  const [loading, setLoading] = useState(true);
+  /** null = list view, 'new' = create form, profile = edit form prefilled. */
+  const [editing, setEditing] = useState<LlmProfile | 'new' | null>(null);
 
-  // Re-sync from the saved config when it arrives (parent's loadLlmConfig is
-  // async; on first mount the prop is still DEFAULT_CONFIG). After save the
-  // local state already matches → no-op.
+  async function refresh(): Promise<void> {
+    const s = await loadProfiles();
+    setStore(s);
+    setLoading(false);
+    const cfg = await loadLlmConfig();
+    onSave(cfg);
+  }
+
   useEffect(() => {
-    setProvider(config.provider);
-    setBaseUrl(config.baseUrl);
-    setApiKey(config.apiKey);
-    setModel(config.model);
-  }, [config]);
+    void refresh();
+  }, []);
+
+  async function handleActivate(id: string): Promise<void> {
+    await setActiveProfile(id);
+    await refresh();
+  }
+
+  async function handleDelete(p: LlmProfile): Promise<void> {
+    if (!confirm(`删除配置「${p.label}」?这无法撤销。`)) return;
+    await deleteProfile(p.id);
+    await refresh();
+  }
+
+  async function handleSave(profile: LlmProfile, activate: boolean): Promise<void> {
+    await upsertProfile(profile, { activate });
+    setEditing(null);
+    await refresh();
+  }
+
+  if (editing !== null) {
+    const isNew = editing === 'new';
+    const blank: LlmProfile = {
+      id: newProfileId(),
+      label: '',
+      provider: DEFAULT_CONFIG.provider,
+      baseUrl: DEFAULT_CONFIG.baseUrl,
+      apiKey: '',
+      model: DEFAULT_CONFIG.model,
+    };
+    return (
+      <ProfileEditForm
+        initial={isNew ? blank : (editing as LlmProfile)}
+        isNew={isNew}
+        onSave={(p) => handleSave(p, isNew)}
+        onCancel={() => setEditing(null)}
+      />
+    );
+  }
+
+  const active = store.profiles.find((p) => p.id === store.activeId);
+  const ready = !!active?.apiKey;
+  const activeLabel = active ? active.label : '未配置 API Key';
+  const activeMeta = active
+    ? `${providerById(active.provider)?.label ?? active.provider} · ${active.model || '(未填 model)'}`
+    : '';
+
+  return (
+    <>
+      <div class="status-card">
+        <span class={`dot ${ready ? '' : 'warn'}`} />
+        <div style="flex:1;min-width:0">
+          <div class="label">当前生效</div>
+          <div class="value">{activeLabel}</div>
+          {activeMeta && (
+            <div style="font-size:11.5px;color:var(--muted);margin-top:2px">{activeMeta}</div>
+          )}
+        </div>
+      </div>
+
+      <div class="section">
+        <h4>
+          API Keys
+          {store.profiles.length > 0 && <span class="muted"> · {store.profiles.length} 个</span>}
+        </h4>
+        <p class="section-hint">
+          可保存多套 key,点「切换」即时换用。Key 仅存于本机 chrome.storage。
+        </p>
+        {loading ? (
+          <div style="color:var(--muted);font-size:13px">加载中…</div>
+        ) : store.profiles.length === 0 ? (
+          <div
+            style="padding:20px;text-align:center;color:var(--muted);font-size:13px;border:1px dashed var(--border);border-radius:10px"
+          >
+            还没保存任何 API Key。点下方「+ 新建配置」开始。
+          </div>
+        ) : (
+          <div class="profile-list">
+            {store.profiles.map((p) => (
+              <ProfileCard
+                key={p.id}
+                profile={p}
+                active={p.id === store.activeId}
+                onActivate={() => void handleActivate(p.id)}
+                onEdit={() => setEditing(p)}
+                onDelete={() => void handleDelete(p)}
+              />
+            ))}
+          </div>
+        )}
+        <div style="margin-top:14px">
+          <button class="btn primary full" onClick={() => setEditing('new')}>
+            + 新建配置
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function ProfileCard({
+  profile,
+  active,
+  onActivate,
+  onEdit,
+  onDelete,
+}: {
+  profile: LlmProfile;
+  active: boolean;
+  onActivate: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+}): preact.JSX.Element {
+  const providerLabel = providerById(profile.provider)?.label ?? profile.provider;
+  return (
+    <div class={`profile-card${active ? ' active' : ''}`}>
+      <div class="profile-card-main">
+        <div class="profile-card-head">
+          {active && <span class="active-badge">✓ 在用</span>}
+          <span class="profile-card-label">{profile.label}</span>
+        </div>
+        <div class="profile-card-meta">
+          {providerLabel} · {profile.model || '(未填 model)'}
+        </div>
+        <div class="profile-card-key">{maskApiKey(profile.apiKey)}</div>
+      </div>
+      <div class="profile-card-actions">
+        {!active && (
+          <button class="btn sm outline" onClick={onActivate} title="设为当前生效">
+            切换
+          </button>
+        )}
+        <button class="btn sm outline" onClick={onEdit} title="修改这条配置">
+          编辑
+        </button>
+        <button class="btn sm outline danger" onClick={onDelete} title="删除这条配置">
+          删除
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function maskApiKey(key: string): string {
+  if (!key) return '(未填 key)';
+  if (key.length <= 8) return '•'.repeat(key.length);
+  return `${key.slice(0, 4)}${'•'.repeat(8)}${key.slice(-4)}`;
+}
+
+function ProfileEditForm({
+  initial,
+  isNew,
+  onSave,
+  onCancel,
+}: {
+  initial: LlmProfile;
+  isNew: boolean;
+  onSave: (p: LlmProfile) => void;
+  onCancel: () => void;
+}): preact.JSX.Element {
+  const [label, setLabel] = useState<string>(initial.label);
+  const [provider, setProvider] = useState<string>(initial.provider);
+  const [baseUrl, setBaseUrl] = useState<string>(initial.baseUrl);
+  const [apiKey, setApiKey] = useState<string>(initial.apiKey);
+  const [model, setModel] = useState<string>(initial.model);
 
   function pickProvider(id: string): void {
     setProvider(id);
@@ -878,55 +1060,48 @@ function LlmBackendSection({
     }
   }
 
-  function buildNext(): LlmConfig {
-    return {
-      provider,
-      baseUrl: baseUrl.trim(),
-      apiKey: apiKey.trim(),
-      model: model.trim(),
-    };
-  }
+  const trimmed: LlmConfig = {
+    provider,
+    baseUrl: baseUrl.trim(),
+    apiKey: apiKey.trim(),
+    model: model.trim(),
+  };
+  const effectiveLabel = label.trim() || autoLabel(trimmed);
+  const canSave = !!trimmed.apiKey && !!trimmed.baseUrl && !!trimmed.model;
 
   function save(): void {
-    const next = buildNext();
-    void saveLlmConfig(next);
-    onSave(next);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 1500);
+    onSave({ id: initial.id, label: effectiveLabel, ...trimmed });
   }
-
-  const canSave = !!apiKey.trim() && !!baseUrl.trim() && !!model.trim();
-  const activeReady = !!config.apiKey && !!config.baseUrl && !!config.model;
-  const activeLabel = activeReady ? config.model || config.provider : '未配置 API Key';
-  const activeDotKind: 'ok' | 'warn' = activeReady ? 'ok' : 'warn';
-  // Surfaced as an explicit warning so unsaved edits can't be missed.
-  const dirty = JSON.stringify(buildNext()) !== JSON.stringify(config);
 
   return (
     <>
-      <div class="status-card">
-        <span class={`dot ${activeDotKind === 'ok' ? '' : activeDotKind}`} />
-        <div style="flex:1;min-width:0">
-          <div class="label">当前生效</div>
-          <div class="value">{activeLabel}</div>
-        </div>
-      </div>
-
       <div class="section">
-        <h4>API 供应商</h4>
+        <h4>{isNew ? '新建配置' : '编辑配置'}</h4>
         <p class="section-hint">
           任何 OpenAI 兼容 /chat/completions endpoint 都可。Key 仅存于本机 chrome.storage。
         </p>
-        <div class="pill-row" style="margin-bottom:14px">
-          {PROVIDERS.map((p) => (
-            <button
-              key={p.id}
-              class={`pill ${provider === p.id ? 'selected' : ''}`}
-              onClick={() => pickProvider(p.id)}
-            >
-              {p.label}
-            </button>
-          ))}
+        <div class="field">
+          <label>标签</label>
+          <input
+            value={label}
+            placeholder={autoLabel(trimmed)}
+            onInput={(e) => setLabel((e.target as HTMLInputElement).value)}
+          />
+          <span class="field-hint">不填会自动用「供应商 · model」生成,便于在列表里区分。</span>
+        </div>
+        <div class="field">
+          <label>供应商</label>
+          <div class="pill-row">
+            {PROVIDERS.map((p) => (
+              <button
+                key={p.id}
+                class={`pill ${provider === p.id ? 'selected' : ''}`}
+                onClick={() => pickProvider(p.id)}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
         </div>
         <div class="field">
           <label>Base URL</label>
@@ -953,16 +1128,20 @@ function LlmBackendSection({
             onInput={(e) => setModel((e.target as HTMLInputElement).value)}
           />
           <span class="field-hint">
-            名字按 endpoint 实际支持填(例:deepseek-chat / gpt-4o / claude-sonnet-4-6)。
+            按 endpoint 实际支持的模型名填(例:deepseek-chat / gpt-4o / claude-sonnet-4-6)。
           </span>
         </div>
       </div>
 
       <div class="form-footer">
-        {dirty && !saved && <div class="dirty-note">⚠ 有未保存的改动 —— 点下方按钮后才生效</div>}
-        <button class="btn primary full" disabled={!canSave} onClick={save}>
-          {saved ? '已保存 ✓' : dirty ? '保存并启用' : '保存后端设置'}
-        </button>
+        <div style="display:flex;gap:8px">
+          <button class="btn outline" onClick={onCancel} style="flex:1">
+            取消
+          </button>
+          <button class="btn primary" disabled={!canSave} onClick={save} style="flex:1">
+            {isNew ? '创建并启用' : '保存'}
+          </button>
+        </div>
       </div>
     </>
   );
