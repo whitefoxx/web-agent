@@ -1,85 +1,245 @@
-import { cli, Strategy } from '@jackwener/opencli/registry';
-import { AuthRequiredError, CommandExecutionError, EmptyResultError } from '@jackwener/opencli/errors';
-import { apiGet, resolveBvid } from './utils.js';
+// ../browser-agent/opencli/clis/bilibili/subtitle.js
+import { cli, Strategy } from "@jackwener/opencli/registry";
+import { AuthRequiredError as AuthRequiredError2, CommandExecutionError as CommandExecutionError2, EmptyResultError as EmptyResultError2 } from "@jackwener/opencli/errors";
+
+// ../browser-agent/opencli/clis/bilibili/utils.js
+import https from "node:https";
+import { AuthRequiredError, CommandExecutionError, EmptyResultError } from "@jackwener/opencli/errors";
+function resolveBvid(input) {
+  const trimmed = String(input).trim();
+  if (/^BV[A-Za-z0-9]+$/i.test(trimmed)) {
+    return Promise.resolve(trimmed);
+  }
+  try {
+    const parsed = new URL(trimmed);
+    if (/(\.|^)bilibili\.com$/i.test(parsed.hostname)) {
+      const match = parsed.pathname.match(/\/(?:video|bangumi\/play)\/(BV[A-Za-z0-9]+)/i);
+      if (match) {
+        return Promise.resolve(match[1]);
+      }
+    }
+  } catch {
+  }
+  const shortCode = trimmed.replace(/^https?:\/\//, "").replace(/^(www\.)?b23\.tv\//, "");
+  if (!/^[A-Za-z0-9]+$/.test(shortCode)) {
+    return Promise.reject(new Error(`Cannot resolve BV ID from invalid b23.tv short code: ${trimmed}`));
+  }
+  const url = "https://b23.tv/" + shortCode;
+  return new Promise((resolve, reject) => {
+    const req = https.get(url, (res) => {
+      const location = res.headers.location;
+      if (location) {
+        const match = location.match(/\/video\/(BV[A-Za-z0-9]+)/);
+        if (match) {
+          res.resume();
+          resolve(match[1]);
+          return;
+        }
+      }
+      res.resume();
+      reject(new Error(`Cannot resolve BV ID from short URL: ${trimmed}`));
+    });
+    req.on("error", reject);
+    req.setTimeout(4e3, () => {
+      req.destroy();
+      reject(new Error(`Timeout resolving short URL: ${trimmed}`));
+    });
+  });
+}
+var MIXIN_KEY_ENC_TAB = [
+  46,
+  47,
+  18,
+  2,
+  53,
+  8,
+  23,
+  32,
+  15,
+  50,
+  10,
+  31,
+  58,
+  3,
+  45,
+  35,
+  27,
+  43,
+  5,
+  49,
+  33,
+  9,
+  42,
+  19,
+  29,
+  28,
+  14,
+  39,
+  12,
+  38,
+  41,
+  13,
+  37,
+  48,
+  7,
+  16,
+  24,
+  55,
+  40,
+  61,
+  26,
+  17,
+  0,
+  1,
+  60,
+  51,
+  30,
+  4,
+  22,
+  25,
+  54,
+  21,
+  56,
+  59,
+  6,
+  63,
+  57,
+  62,
+  11,
+  36,
+  20,
+  34,
+  44,
+  52
+];
+async function getNavData(page) {
+  return page.evaluate(`
+    async () => {
+      const res = await fetch('https://api.bilibili.com/x/web-interface/nav', { credentials: 'include' });
+      return await res.json();
+    }
+  `);
+}
+async function getWbiKeys(page) {
+  const nav = await getNavData(page);
+  const wbiImg = nav?.data?.wbi_img ?? {};
+  const imgUrl = wbiImg.img_url ?? "";
+  const subUrl = wbiImg.sub_url ?? "";
+  const imgKey = imgUrl.split("/").pop()?.split(".")[0] ?? "";
+  const subKey = subUrl.split("/").pop()?.split(".")[0] ?? "";
+  return { imgKey, subKey };
+}
+function getMixinKey(imgKey, subKey) {
+  const raw = imgKey + subKey;
+  return MIXIN_KEY_ENC_TAB.map((i) => raw[i] || "").join("").slice(0, 32);
+}
+async function md5(text) {
+  const { createHash } = await import("node:crypto");
+  return createHash("md5").update(text).digest("hex");
+}
+async function wbiSign(page, params) {
+  const { imgKey, subKey } = await getWbiKeys(page);
+  const mixinKey = getMixinKey(imgKey, subKey);
+  const wts = Math.floor(Date.now() / 1e3);
+  const sorted = {};
+  const allParams = { ...params, wts: String(wts) };
+  for (const key of Object.keys(allParams).sort()) {
+    sorted[key] = String(allParams[key]).replace(/[!'()*]/g, "");
+  }
+  const query = new URLSearchParams(sorted).toString().replace(/\+/g, "%20");
+  const wRid = await md5(query + mixinKey);
+  sorted.w_rid = wRid;
+  return sorted;
+}
+async function apiGet(page, path, opts = {}) {
+  const baseUrl = "https://api.bilibili.com";
+  let params = opts.params ?? {};
+  if (opts.signed) {
+    params = await wbiSign(page, params);
+  }
+  const qs = new URLSearchParams(Object.fromEntries(Object.entries(params).map(([k, v]) => [k, String(v)]))).toString().replace(/\+/g, "%20");
+  const url = `${baseUrl}${path}?${qs}`;
+  return fetchJson(page, url);
+}
+async function fetchJson(page, url) {
+  const urlJs = JSON.stringify(url);
+  return page.evaluate(`
+    async () => {
+      const res = await fetch(${urlJs}, { credentials: "include" });
+      return await res.json();
+    }
+  `);
+}
+
+// ../browser-agent/opencli/clis/bilibili/subtitle.js
 cli({
-    site: 'bilibili',
-    name: 'subtitle',
-    access: 'read',
-    description: '获取 Bilibili 视频的字幕',
-    domain: 'www.bilibili.com',
-    strategy: Strategy.COOKIE,
-    args: [
-        { name: 'bvid', required: true, positional: true, help: 'Bilibili 视频 BV ID（如 BV1xx411c7mD），或视频 URL / b23.tv 短链' },
-        { name: 'lang', required: false, help: '字幕语言代码 (如 zh-CN, en-US, ai-zh)，默认取第一个' },
-    ],
-    columns: ['index', 'from', 'to', 'content'],
-    func: async (page, kwargs) => {
-        if (!page)
-            throw new CommandExecutionError('Browser session required for bilibili subtitle');
-        const bvid = await resolveBvid(kwargs.bvid);
-        // 1. 通过 view API 拿 cid。
-        //    以前的实现走 page.goto(/video/<bvid>) + window.__INITIAL_STATE__.videoData.cid，
-        //    bangumi 绑定的 bvid（番剧/纪录片/电影/综艺）页面 state 不在 videoData 而在 epList，
-        //    导致 SELECTOR 错。view API 接受任何 bvid（UGC + PGC 都通），且不依赖 DOM 结构。
-        let view;
-        try {
-            view = await apiGet(page, '/x/web-interface/view', { params: { bvid } });
-        }
-        catch (err) {
-            throw new CommandExecutionError(`获取视频信息失败: ${err?.message || err}`);
-        }
-        if (view?.code !== 0) {
-            throw new CommandExecutionError(`获取视频信息失败: ${view?.message ?? 'unknown'} (${view?.code})`);
-        }
-        const cid = view?.data?.cid;
-        if (!cid) {
-            throw new CommandExecutionError(`无法从 view API 拿到 cid (bvid=${bvid})`);
-        }
-        // 2. 用带 Wbi 签名的 player/v2 拿字幕列表（之前 evaluate 里 fetch 因为没签名会 403）
-        let payload;
-        try {
-            payload = await apiGet(page, '/x/player/wbi/v2', {
-                params: { bvid, cid },
-                signed: true,
-            });
-        }
-        catch (err) {
-            throw new CommandExecutionError(`获取视频播放信息失败: ${err?.message || err}`);
-        }
-        if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-            throw new CommandExecutionError('获取到的视频播放信息对象不符合预期格式');
-        }
-        if (payload.code !== 0) {
-            throw new CommandExecutionError(`获取视频播放信息失败: ${payload.message} (${payload.code})`);
-        }
-        const needLoginSubtitle = payload.data?.need_login_subtitle === true;
-        const subtitles = payload.data?.subtitle?.subtitles;
-        if (!Array.isArray(subtitles)) {
-            throw new CommandExecutionError('获取到的字幕列表对象不符合数组格式');
-        }
-        if (subtitles.length === 0) {
-            if (needLoginSubtitle) {
-                throw new AuthRequiredError('bilibili.com', 'Bilibili subtitles are hidden behind login for this video. Please log in to bilibili.com in Chrome and retry.');
-            }
-            throw new EmptyResultError('bilibili subtitle', '此视频没有发现外挂或智能字幕。');
-        }
-        // 3. 选择目标字幕语言
-        const target = kwargs.lang
-            ? subtitles.find((s) => s.lan === kwargs.lang) || subtitles[0]
-            : subtitles[0];
-        if (!target || typeof target !== 'object' || !Object.hasOwn(target, 'subtitle_url')) {
-            throw new CommandExecutionError('字幕条目缺少 subtitle_url 字段');
-        }
-        const targetSubUrl = typeof target.subtitle_url === 'string' ? target.subtitle_url.trim() : '';
-        if (!targetSubUrl) {
-            throw new AuthRequiredError('bilibili.com', '[风控拦截/未登录] 获取到的 subtitle_url 为空！请确保 CLI 已成功登录且风控未封锁此账号。');
-        }
-        const finalUrl = targetSubUrl.startsWith('//') ? 'https:' + targetSubUrl : targetSubUrl;
-        if (!/^https?:\/\//i.test(finalUrl)) {
-            throw new CommandExecutionError(`字幕 URL 非法: ${finalUrl}`);
-        }
-        // 4. 解析并拉取 CDN 的 JSON 文件
-        const fetchJs = `
+  site: "bilibili",
+  name: "subtitle",
+  access: "read",
+  description: "\u83B7\u53D6 Bilibili \u89C6\u9891\u7684\u5B57\u5E55",
+  domain: "www.bilibili.com",
+  strategy: Strategy.COOKIE,
+  args: [
+    { name: "bvid", required: true, positional: true, help: "Bilibili \u89C6\u9891 BV ID\uFF08\u5982 BV1xx411c7mD\uFF09\uFF0C\u6216\u89C6\u9891 URL / b23.tv \u77ED\u94FE" },
+    { name: "lang", required: false, help: "\u5B57\u5E55\u8BED\u8A00\u4EE3\u7801 (\u5982 zh-CN, en-US, ai-zh)\uFF0C\u9ED8\u8BA4\u53D6\u7B2C\u4E00\u4E2A" }
+  ],
+  columns: ["index", "from", "to", "content"],
+  func: async (page, kwargs) => {
+    if (!page)
+      throw new CommandExecutionError2("Browser session required for bilibili subtitle");
+    const bvid = await resolveBvid(kwargs.bvid);
+    let view;
+    try {
+      view = await apiGet(page, "/x/web-interface/view", { params: { bvid } });
+    } catch (err) {
+      throw new CommandExecutionError2(`\u83B7\u53D6\u89C6\u9891\u4FE1\u606F\u5931\u8D25: ${err?.message || err}`);
+    }
+    if (view?.code !== 0) {
+      throw new CommandExecutionError2(`\u83B7\u53D6\u89C6\u9891\u4FE1\u606F\u5931\u8D25: ${view?.message ?? "unknown"} (${view?.code})`);
+    }
+    const cid = view?.data?.cid;
+    if (!cid) {
+      throw new CommandExecutionError2(`\u65E0\u6CD5\u4ECE view API \u62FF\u5230 cid (bvid=${bvid})`);
+    }
+    let payload;
+    try {
+      payload = await apiGet(page, "/x/player/wbi/v2", {
+        params: { bvid, cid },
+        signed: true
+      });
+    } catch (err) {
+      throw new CommandExecutionError2(`\u83B7\u53D6\u89C6\u9891\u64AD\u653E\u4FE1\u606F\u5931\u8D25: ${err?.message || err}`);
+    }
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+      throw new CommandExecutionError2("\u83B7\u53D6\u5230\u7684\u89C6\u9891\u64AD\u653E\u4FE1\u606F\u5BF9\u8C61\u4E0D\u7B26\u5408\u9884\u671F\u683C\u5F0F");
+    }
+    if (payload.code !== 0) {
+      throw new CommandExecutionError2(`\u83B7\u53D6\u89C6\u9891\u64AD\u653E\u4FE1\u606F\u5931\u8D25: ${payload.message} (${payload.code})`);
+    }
+    const needLoginSubtitle = payload.data?.need_login_subtitle === true;
+    const subtitles = payload.data?.subtitle?.subtitles;
+    if (!Array.isArray(subtitles)) {
+      throw new CommandExecutionError2("\u83B7\u53D6\u5230\u7684\u5B57\u5E55\u5217\u8868\u5BF9\u8C61\u4E0D\u7B26\u5408\u6570\u7EC4\u683C\u5F0F");
+    }
+    if (subtitles.length === 0) {
+      if (needLoginSubtitle) {
+        throw new AuthRequiredError2("bilibili.com", "Bilibili subtitles are hidden behind login for this video. Please log in to bilibili.com in Chrome and retry.");
+      }
+      throw new EmptyResultError2("bilibili subtitle", "\u6B64\u89C6\u9891\u6CA1\u6709\u53D1\u73B0\u5916\u6302\u6216\u667A\u80FD\u5B57\u5E55\u3002");
+    }
+    const target = kwargs.lang ? subtitles.find((s) => s.lan === kwargs.lang) || subtitles[0] : subtitles[0];
+    if (!target || typeof target !== "object" || !Object.hasOwn(target, "subtitle_url")) {
+      throw new CommandExecutionError2("\u5B57\u5E55\u6761\u76EE\u7F3A\u5C11 subtitle_url \u5B57\u6BB5");
+    }
+    const targetSubUrl = typeof target.subtitle_url === "string" ? target.subtitle_url.trim() : "";
+    if (!targetSubUrl) {
+      throw new AuthRequiredError2("bilibili.com", "[\u98CE\u63A7\u62E6\u622A/\u672A\u767B\u5F55] \u83B7\u53D6\u5230\u7684 subtitle_url \u4E3A\u7A7A\uFF01\u8BF7\u786E\u4FDD CLI \u5DF2\u6210\u529F\u767B\u5F55\u4E14\u98CE\u63A7\u672A\u5C01\u9501\u6B64\u8D26\u53F7\u3002");
+    }
+    const finalUrl = targetSubUrl.startsWith("//") ? "https:" + targetSubUrl : targetSubUrl;
+    if (!/^https?:\/\//i.test(finalUrl)) {
+      throw new CommandExecutionError2(`\u5B57\u5E55 URL \u975E\u6CD5: ${finalUrl}`);
+    }
+    const fetchJs = `
       (async () => {
          const url = ${JSON.stringify(finalUrl)};
          const res = await fetch(url);
@@ -91,7 +251,7 @@ cli({
 
          try {
              const subJson = JSON.parse(text);
-             // B站真实返回格式是 { font_size: 0.4, font_color: "#FFFFFF", background_alpha: 0.5, background_color: "#9C27B0", Stroke: "none", type: "json" , body: [{from: 0, to: 0, content: ""}] }
+             // B\u7AD9\u771F\u5B9E\u8FD4\u56DE\u683C\u5F0F\u662F { font_size: 0.4, font_color: "#FFFFFF", background_alpha: 0.5, background_color: "#9C27B0", Stroke: "none", type: "json" , body: [{from: 0, to: 0, content: ""}] }
              if (Array.isArray(subJson?.body)) return { success: true, data: subJson.body };
              if (Array.isArray(subJson)) return { success: true, data: subJson };
              return { error: 'UNKNOWN_JSON', data: subJson };
@@ -100,39 +260,37 @@ cli({
          }
       })()
     `;
-        let items;
-        try {
-            items = await page.evaluate(fetchJs);
-        }
-        catch (err) {
-            throw new CommandExecutionError(`字幕获取失败: ${err?.message || err}`);
-        }
-        if (items?.error) {
-            throw new CommandExecutionError(`字幕获取失败: ${items.error}${items.text ? ' — ' + items.text : ''}`);
-        }
-        if (!items || typeof items !== 'object' || items.success !== true) {
-            throw new CommandExecutionError('字幕获取结果对象不符合预期格式');
-        }
-        const finalItems = items.data;
-        if (!Array.isArray(finalItems)) {
-            throw new CommandExecutionError('解析到的字幕列表对象不符合数组格式');
-        }
-        if (finalItems.length === 0) {
-            throw new EmptyResultError('bilibili subtitle', '字幕文件中没有字幕片段。');
-        }
-        // 5. 数据映射
-        return finalItems.map((item, idx) => {
-            const from = Number(item?.from);
-            const to = Number(item?.to);
-            if (!item || typeof item !== 'object' || !Number.isFinite(from) || !Number.isFinite(to)) {
-                throw new CommandExecutionError('字幕片段缺少有效 from/to 时间戳');
-            }
-            return {
-                index: idx + 1,
-                from: from.toFixed(2) + 's',
-                to: to.toFixed(2) + 's',
-                content: String(item.content ?? '')
-            };
-        });
-    },
+    let items;
+    try {
+      items = await page.evaluate(fetchJs);
+    } catch (err) {
+      throw new CommandExecutionError2(`\u5B57\u5E55\u83B7\u53D6\u5931\u8D25: ${err?.message || err}`);
+    }
+    if (items?.error) {
+      throw new CommandExecutionError2(`\u5B57\u5E55\u83B7\u53D6\u5931\u8D25: ${items.error}${items.text ? " \u2014 " + items.text : ""}`);
+    }
+    if (!items || typeof items !== "object" || items.success !== true) {
+      throw new CommandExecutionError2("\u5B57\u5E55\u83B7\u53D6\u7ED3\u679C\u5BF9\u8C61\u4E0D\u7B26\u5408\u9884\u671F\u683C\u5F0F");
+    }
+    const finalItems = items.data;
+    if (!Array.isArray(finalItems)) {
+      throw new CommandExecutionError2("\u89E3\u6790\u5230\u7684\u5B57\u5E55\u5217\u8868\u5BF9\u8C61\u4E0D\u7B26\u5408\u6570\u7EC4\u683C\u5F0F");
+    }
+    if (finalItems.length === 0) {
+      throw new EmptyResultError2("bilibili subtitle", "\u5B57\u5E55\u6587\u4EF6\u4E2D\u6CA1\u6709\u5B57\u5E55\u7247\u6BB5\u3002");
+    }
+    return finalItems.map((item, idx) => {
+      const from = Number(item?.from);
+      const to = Number(item?.to);
+      if (!item || typeof item !== "object" || !Number.isFinite(from) || !Number.isFinite(to)) {
+        throw new CommandExecutionError2("\u5B57\u5E55\u7247\u6BB5\u7F3A\u5C11\u6709\u6548 from/to \u65F6\u95F4\u6233");
+      }
+      return {
+        index: idx + 1,
+        from: from.toFixed(2) + "s",
+        to: to.toFixed(2) + "s",
+        content: String(item.content ?? "")
+      };
+    });
+  }
 });

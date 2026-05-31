@@ -32,6 +32,7 @@
  */
 
 import { stripModuleSyntax } from '../sandbox/eval-core';
+import { nodeShim } from '../runtime/node-shim';
 
 /** Thrown by page.goto when a navigation is needed. The top-level runner maps
  * this to a "navigating, will resume after reinject" outcome rather than an
@@ -406,6 +407,10 @@ export function evalAdapterKeepingFuncs(
     mapConcurrent: async () => [],
     BROWSER_JSON_SNIFF_FN: '',
     EXIT_CODES: {},
+    // node:* lookup map — stripModuleSyntax rewrites `import x from 'node:y'`
+    // to `const x = __nodeShim['node:y']`, so this name must be in scope.
+    // The shim provides real md5 + clear-error throws for the rest.
+    __nodeShim: nodeShim,
   };
   const names = Object.keys(scope);
   const values = names.map((n) => scope[n]);

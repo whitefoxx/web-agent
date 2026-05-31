@@ -1,34 +1,141 @@
-import { AuthRequiredError, CommandExecutionError } from '@jackwener/opencli/errors';
-import { cli, Strategy } from '@jackwener/opencli/registry';
-import { resolveTwitterQueryId } from './shared.js';
-import { TWITTER_BEARER_TOKEN } from './utils.js';
-const TWEET_RESULT_BY_REST_ID_QUERY_ID = '7xflPyRiUxGVbJd4uWmbfg';
+// ../browser-agent/opencli/clis/twitter/article.js
+import { AuthRequiredError, CommandExecutionError } from "@jackwener/opencli/errors";
+import { cli, Strategy } from "@jackwener/opencli/registry";
+
+// ../browser-agent/opencli/clis/twitter/shared.js
+import { ArgumentError } from "@jackwener/opencli/errors";
+var QUERY_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
+function sanitizeQueryId(resolved, fallbackId) {
+  return typeof resolved === "string" && QUERY_ID_PATTERN.test(resolved) ? resolved : fallbackId;
+}
+function normalizeOperationFallback(fallback) {
+  if (typeof fallback === "string") return { queryId: fallback, features: {}, fieldToggles: {} };
+  return {
+    queryId: fallback?.queryId || null,
+    features: fallback?.features || {},
+    fieldToggles: fallback?.fieldToggles || {}
+  };
+}
+function unwrapBrowserResult(value) {
+  if (value && typeof value === "object" && typeof value.session === "string" && Object.prototype.hasOwnProperty.call(value, "data")) {
+    return value.data;
+  }
+  return value;
+}
+function sanitizeTwitterOperationMetadata(resolved, fallback) {
+  const value = unwrapBrowserResult(resolved);
+  const normalizedFallback = normalizeOperationFallback(fallback);
+  return {
+    queryId: sanitizeQueryId(value?.queryId, normalizedFallback.queryId),
+    features: value?.features && typeof value.features === "object" && Object.keys(value.features).length > 0 ? value.features : normalizedFallback.features,
+    fieldToggles: value?.fieldToggles && typeof value.fieldToggles === "object" && Object.keys(value.fieldToggles).length > 0 ? value.fieldToggles : normalizedFallback.fieldToggles
+  };
+}
+async function resolveTwitterOperationMetadata(page, operationName, fallback) {
+  const resolved = await page.evaluate(`async () => {
+    const operationName = ${JSON.stringify(operationName)};
+    const keysToFlags = (keys) => Object.fromEntries((keys || []).map((key) => [key, true]));
+    const quotedKeys = (source) => source
+      ? Array.from(source.matchAll(/"([^"]+)"/g)).map((match) => match[1])
+      : [];
+    const parseOperation = (text) => {
+      const marker = 'operationName:"' + operationName + '"';
+      const index = text.indexOf(marker);
+      if (index < 0) return null;
+      const start = Math.max(0, text.lastIndexOf('e.exports=', index));
+      const endMarker = text.indexOf('}}}', index);
+      const snippet = text.slice(start, endMarker > index ? endMarker + 3 : index + 2500);
+      const queryId = snippet.match(/queryId:"([A-Za-z0-9_-]+)"/)?.[1] || null;
+      if (!queryId) return null;
+      return {
+        queryId,
+        features: keysToFlags(quotedKeys(snippet.match(/featureSwitches:\\[([^\\]]*)\\]/)?.[1])),
+        fieldToggles: keysToFlags(quotedKeys(snippet.match(/fieldToggles:\\[([^\\]]*)\\]/)?.[1])),
+      };
+    };
+    try {
+      const scripts = Array.from(document.scripts)
+        .map(s => s.src)
+        .filter(Boolean)
+        .concat(performance.getEntriesByType('resource')
+          .map(r => r.name)
+          .filter(r => r.includes('client-web') && r.endsWith('.js')));
+      const uniqueScripts = Array.from(new Set(scripts));
+      for (const scriptUrl of uniqueScripts.slice(-30)) {
+        try {
+          const text = await (await fetch(scriptUrl)).text();
+          const operation = parseOperation(text);
+          if (operation) return operation;
+        } catch {}
+      }
+    } catch {}
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    try {
+      const ghResp = await fetch('https://raw.githubusercontent.com/fa0311/twitter-openapi/refs/heads/main/src/config/placeholder.json', { signal: controller.signal });
+      clearTimeout(timeout);
+      if (ghResp.ok) {
+        const data = await ghResp.json();
+        const entry = data?.[operationName];
+        if (entry && entry.queryId) {
+          return {
+            queryId: entry.queryId,
+            features: keysToFlags(entry.featureSwitches),
+            fieldToggles: keysToFlags(entry.fieldToggles),
+          };
+        }
+      }
+    } catch {
+      clearTimeout(timeout);
+    }
+    return null;
+  }`);
+  return sanitizeTwitterOperationMetadata(resolved, fallback);
+}
+async function resolveTwitterQueryId(page, operationName, fallbackId) {
+  const operation = await resolveTwitterOperationMetadata(page, operationName, fallbackId);
+  return operation.queryId;
+}
+
+// ../browser-agent/opencli/clis/twitter/utils.js
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { ArgumentError as ArgumentError2 } from "@jackwener/opencli/errors";
+var TWITTER_BEARER_TOKEN = "AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA";
+var MAX_IMAGE_SIZE_BYTES = 20 * 1024 * 1024;
+var ENGAGEMENT_WEIGHTS = Object.freeze({
+  likes: 1,
+  retweets: 3,
+  replies: 2,
+  bookmarks: 5,
+  viewsLog: 0.5
+});
+
+// ../browser-agent/opencli/clis/twitter/article.js
+var TWEET_RESULT_BY_REST_ID_QUERY_ID = "7xflPyRiUxGVbJd4uWmbfg";
 cli({
-    site: 'twitter',
-    name: 'article',
-    access: 'read',
-    description: 'Fetch a Twitter Article (long-form content) and export as Markdown',
-    domain: 'x.com',
-    strategy: Strategy.COOKIE,
-    browser: true,
-    args: [
-        { name: 'tweet-id', type: 'string', positional: true, required: true, help: 'Tweet ID or URL containing the article' },
-    ],
-    columns: ['title', 'author', 'content', 'url'],
-    func: async (page, kwargs) => {
-        // Extract tweet ID from URL if needed.
-        // Article URLs (x.com/i/article/{articleId}) use a different ID than
-        // tweet status URLs — the GraphQL endpoint needs the parent tweet ID.
-        let tweetId = kwargs['tweet-id'];
-        const isArticleUrl = /\/article\/\d+/.test(tweetId);
-        const urlMatch = tweetId.match(/\/(?:status|article)\/(\d+)/);
-        if (urlMatch)
-            tweetId = urlMatch[1];
-        if (isArticleUrl) {
-            // Navigate to the article page and resolve the parent tweet ID from DOM
-            await page.goto(`https://x.com/i/article/${tweetId}`);
-            await page.wait(3);
-            const resolvedId = await page.evaluate(`
+  site: "twitter",
+  name: "article",
+  access: "read",
+  description: "Fetch a Twitter Article (long-form content) and export as Markdown",
+  domain: "x.com",
+  strategy: Strategy.COOKIE,
+  browser: true,
+  args: [
+    { name: "tweet-id", type: "string", positional: true, required: true, help: "Tweet ID or URL containing the article" }
+  ],
+  columns: ["title", "author", "content", "url"],
+  func: async (page, kwargs) => {
+    let tweetId = kwargs["tweet-id"];
+    const isArticleUrl = /\/article\/\d+/.test(tweetId);
+    const urlMatch = tweetId.match(/\/(?:status|article)\/(\d+)/);
+    if (urlMatch)
+      tweetId = urlMatch[1];
+    if (isArticleUrl) {
+      await page.goto(`https://x.com/i/article/${tweetId}`);
+      await page.wait(3);
+      const resolvedId = await page.evaluate(`
         (function() {
           var links = document.querySelectorAll('a[href*="/status/"]');
           for (var i = 0; i < links.length; i++) {
@@ -43,21 +150,19 @@ cli({
           return null;
         })()
       `);
-            if (!resolvedId || typeof resolvedId !== 'string') {
-                throw new CommandExecutionError(`Could not resolve article ${tweetId} to a tweet ID. The article page may not contain a linked tweet.`);
-            }
-            tweetId = resolvedId;
-        }
-        // Navigate to the tweet page for cookie context
-        await page.goto(`https://x.com/i/status/${tweetId}`);
-        await page.wait(3);
-        // Read CSRF token directly from the cookie store via CDP — zero page.evaluate round-trip
-        const cookies = await page.getCookies({ url: 'https://x.com' });
-        const ct0 = cookies.find((c) => c.name === 'ct0')?.value || null;
-        if (!ct0)
-            throw new AuthRequiredError('x.com', 'Not logged into x.com (no ct0 cookie)');
-        const queryId = await resolveTwitterQueryId(page, 'TweetResultByRestId', TWEET_RESULT_BY_REST_ID_QUERY_ID);
-        const result = await page.evaluate(`
+      if (!resolvedId || typeof resolvedId !== "string") {
+        throw new CommandExecutionError(`Could not resolve article ${tweetId} to a tweet ID. The article page may not contain a linked tweet.`);
+      }
+      tweetId = resolvedId;
+    }
+    await page.goto(`https://x.com/i/status/${tweetId}`);
+    await page.wait(3);
+    const cookies = await page.getCookies({ url: "https://x.com" });
+    const ct0 = cookies.find((c) => c.name === "ct0")?.value || null;
+    if (!ct0)
+      throw new AuthRequiredError("x.com", "Not logged into x.com (no ct0 cookie)");
+    const queryId = await resolveTwitterQueryId(page, "TweetResultByRestId", TWEET_RESULT_BY_REST_ID_QUERY_ID);
+    const result = await page.evaluate(`
       async () => {
         const tweetId = "${tweetId}";
         const ct0 = ${JSON.stringify(ct0)};
@@ -159,9 +264,9 @@ cli({
         }];
       }
     `);
-        if (result?.error) {
-            throw new CommandExecutionError(result.error + (result.hint ? ` (${result.hint})` : ''));
-        }
-        return result || [];
+    if (result?.error) {
+      throw new CommandExecutionError(result.error + (result.hint ? ` (${result.hint})` : ""));
     }
+    return result || [];
+  }
 });

@@ -138,7 +138,15 @@ async function bundleAdapterSource(entryPath) {
     target: 'esnext',
     write: false,
     legalComments: 'none',
-    external: ['@jackwener/opencli/*'],
+    // `@jackwener/opencli/*` stays external because the runtime injects those
+    // names (cli/Strategy/errors) into the eval scope.
+    // `node:*` stays external because stripModuleSyntax rewrites those imports
+    // to lookups in the __nodeShim object (see src/runtime/node-shim.ts +
+    // hot-plug §10.13). Without this, esbuild errors trying to resolve
+    // node:crypto / node:https etc. and the script falls back to shipping the
+    // raw source — which then errors at runtime with "getSelfUid is not
+    // defined" because the relative-sibling imports never get inlined.
+    external: ['@jackwener/opencli/*', 'node:*'],
     logLevel: 'silent',
   });
   return result.outputFiles[0].text;

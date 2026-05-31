@@ -55,12 +55,33 @@ export interface EvalResult {
  */
 export function stripModuleSyntax(src: string): string {
   return src
+    .replace(
+      // import https from 'node:https';  →  const https = __nodeShim['node:https'];
+      // Adapter NAMES node:* but doesn't necessarily call into it. The shim
+      // (src/runtime/node-shim.ts) injects real impls for the ones we
+      // support (md5) and throws for the rest. See hot-plug §10.13.
+      /^([ \t]*)import\s+(\w+)\s+from\s+['"](node:[^'"]+)['"]\s*;?[ \t]*$/gm,
+      "$1const $2 = __nodeShim['$3'];",
+    )
+    .replace(
+      // import { createHash } from 'node:crypto';  →  const { createHash } = __nodeShim['node:crypto'];
+      /^([ \t]*)import\s+(\{[^}]+\})\s+from\s+['"](node:[^'"]+)['"]\s*;?[ \t]*$/gm,
+      "$1const $2 = __nodeShim['$3'];",
+    )
+    .replace(
+      // import('node:crypto')  →  __nodeShim['node:crypto']
+      // `await` on a non-Promise is a no-op, so `await import(...)` works.
+      /import\s*\(\s*['"](node:[^'"]+)['"]\s*\)/g,
+      "__nodeShim['$1']",
+    )
     .replace(/^[ \t]*import\s+[^;]*;[ \t]*$/gm, '') // import { x } from 'y';
     .replace(/^[ \t]*import\s+['"][^'"]+['"];[ \t]*$/gm, '') // import 'side-effect';
     .replace(/^[ \t]*export\s+default\s+/gm, '')
     .replace(/^([ \t]*)export\s+(?=function|const|let|var|class|async)/gm, '$1')
     .replace(/^[ \t]*export\s*\{[^}]*\}\s*;?[ \t]*$/gm, ''); // export { a, b };
 }
+
+import { nodeShim } from '../runtime/node-shim';
 
 /** Build the curated global scope injected into the eval. A fresh collector
  * array is closed over by `cli`, so each call captures only what THIS source
@@ -124,6 +145,10 @@ function buildScope(collected: Record<string, unknown>[]): Record<string, unknow
     NeedsAttachmentsError: mkErr('NeedsAttachmentsError'),
     selectorError: (sel: string) => new CliError(`selector: ${sel}`),
     getErrorMessage: (e: unknown) => (e instanceof Error ? e.message : String(e)),
+    // node:* lookups — stripModuleSyntax rewrites adapter `import x from 'node:y'`
+    // to `const x = __nodeShim['node:y']`, so this name MUST exist in scope.
+    // See src/runtime/node-shim.ts + hot-plug §10.13.
+    __nodeShim: nodeShim,
     // utils
     isRecord,
     htmlToMarkdown: passthrough,

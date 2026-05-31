@@ -38,6 +38,7 @@
 > - `e20daa0` page.evaluate→MAIN world(§10.7)+ marketplace bundle relative imports(§10.8)
 > - `1648e84` Phase B 三连修(zhihu/answer-detail 端到端): NavigateRestart 改 Error 子类 + deep-scan(§10.10) + `lastNavigatedUrl` 旁路解决 server-redirect 死循环(§10.11) + `getCurrentUrl` 改 async 对齐 PageShim(§10.12)
 > - `<next>` 市场布局 v2:从单 2MB JSON 切到 `marketplace/<site>/<name>.js` per-file + sha256 + 远程友好 schema(§11)
+> - `<next+1>` `node:*` shim:rewriter + 纯 JS MD5,bilibili/zhihu 等需要 node 内建的 adapter 可用(§10.13)
 
 ## 0. 动机(用户原话)
 
@@ -595,6 +596,66 @@ async getCurrentUrl(): Promise<string> {
 **为什么这一类 bug 容易漏过去**:Phase B 的 PageShim 是**两套**——SW 端走 CDP(`src/runtime/page.ts`, 700+ LOC),USER_SCRIPT 端走 DOM(`makeLocalPage`, 200 LOC)。两端方法名一致但**返回类型可以悄悄不一致**:`page.evaluate` 一致(都 async),`getCookies/screenshot/cdp` 一致(都 RPC 出去所以都 async),`wait/scroll` 都一致 async,但 `getCurrentUrl` 一边 async 一边 sync —— TypeScript 不抓,因为 `LocalPageOptions` 的 `page` 是 `Record<string, unknown>`,类型边界处放开了。
 
 **教训**:**两套 shim 实现同一个 interface 时,要让 interface 真的是 ts interface 而不是 `Record<string, unknown>`**——否则签名漂移到 adapter 报 `.catch is not a function` 之前都没人会发现。下一步小修:给 `makeLocalPage` 的返回类型用 PageShim 的子接口,让 tsc 顶住签名漂移。当下先把 getCurrentUrl 这一个修了 + 加单测当 guard。也是同一个家族的教训:**跨实现的"约等于" interface 必须用真 TS 顶住,不能靠 `Record<string, unknown>` 兜底**(同 10.7/10.8 的"隐式假设清单"思想)。
+
+### 10.13 `node:*` 内建无人转译 — bilibili/zhihu 一批 adapter 都死在 module load
+
+**症状**(`bilibili__favorite` 调用):
+
+```
+ReferenceError: getSelfUid is not defined
+```
+
+跟 10.8 同样症状但**完全不是同一回事**。10.8 的根是 marketplace builder 没 bundle 相对 import。这次相对 import 是 bundle 了,但**整个 bundle 阶段悄悄失败**:
+
+```
+⚠ bilibili/favorite.js bundle failed, shipping raw (will error at runtime):
+  Build failed with 2 errors:
+  bilibili/utils.js:4:18: ERROR: Could not resolve "node:https"
+  bilibili/utils.js:84:40: ERROR: Could not resolve "node:crypto"
+```
+
+构建脚本里有兜底:bundle 失败就 ship raw + 打 warning。raw source 里 `import { apiGet, payloadData, getSelfUid } from './utils.js'` 又被 stripModuleSyntax 删掉,运行时 → `getSelfUid` undefined。
+
+**根因**(分两层):
+
+1. **bundle 阶段**:`bilibili/utils.js` 顶层 `import https from 'node:https'` + 函数内 `await import('node:crypto')`(为了 md5)。esbuild 在 `platform: 'browser'` + 没把 `node:*` 标 external 的情况下找不到这两个模块,bundle 整体失败。
+2. **runtime 阶段**:即便 bundle 成功保留了 `import https from 'node:https'`,stripModuleSyntax 把它当普通 import 删了,`https` 变成 ReferenceError。等到 bilibili WBI 签名 → `createHash('md5')` 又因为 SubtleCrypto **故意不支持 MD5** 也走不通。
+
+涉及的 adapter 不止 bilibili:zhihu 的 comment/favorite/follow/like 走 `zhihu/write-shared.js` → `node:fs/promises`(虽然只是名字被引,运行时不一定调到);未来更多 adapter 也会撞。
+
+**修法**(commit `<next+1>`):
+
+1. **esbuild 标 `node:*` external**(`scripts/build-marketplace-index.mjs`)
+   - `external: ['@jackwener/opencli/*', 'node:*']` —— bundle 不再报错,`import https from 'node:https'` 原样保留在输出里。
+   - 单条 `bundle: true` 把相对 sibling 全 inline(`getSelfUid` 就出现在文件里了)。
+
+2. **stripModuleSyntax 升级:不删 `node:*` 而是 rewrite 成 shim 查找**(`src/sandbox/eval-core.ts`)
+
+   ```
+   import https from 'node:https';             →  const https = __nodeShim['node:https'];
+   import { createHash } from 'node:crypto';   →  const { createHash } = __nodeShim['node:crypto'];
+   await import('node:crypto')                 →  await __nodeShim['node:crypto']   (await 在非 Promise 上是 no-op)
+   ```
+
+   非 node 的 import 还是走原来的"全删"路径(那些名字来自注入 scope)。
+
+3. **`src/runtime/node-shim.ts` 提供 `nodeShim` 字典**
+   - `'node:crypto'`:**真实 MD5**(纯 JS,RFC 1321,`src/runtime/md5.ts`,通过 7 个标准 vector 测过)。Browser 的 SubtleCrypto 故意不支持 MD5,所以只能自己写。SHA-\* / 其他算法走 throw 提示"用 SubtleCrypto"。
+   - `'node:fs'` / `'node:fs/promises'` / `'node:https'` / `'node:http'`:throw `not available in the browser` 带提示。Adapter **NAMES** them 没事(rewriter 给个 truthy 对象,destructure 不炸),CALLS them 才报清楚的错。
+   - `'node:path'` / `'node:os'` / `'node:url'`:给 minimal browser-side 实现(string 拼接 / 转发到 browser globals)。
+
+4. **两个 eval venue 都注入 `__nodeShim`**:`src/sandbox/eval-core.ts` 的 buildScope + `src/userscript/run-in-page.ts` 的 evalAdapterKeepingFuncs。`stripModuleSyntax` 是共享的,所以两边的 rewrite 行为自动一致。
+
+**MD5 不是图轻松**:adapter 圈普遍用 MD5 做 legacy API 签名(bilibili WBI、淘宝、知乎一些老接口)。SubtleCrypto 拒绝实现是出于安全(MD5 已经 broken)。要 adapter 兼容必须自己写。纯 JS MD5 ≈60 行,against RFC 1321 vectors 全过(`tests/md5.test.ts`,包括 padding 边界 55/56/57/64/65 byte)。**只用于协议兼容,不当真用作安全 hash**。
+
+**留没解决的**:
+
+- bilibili `resolveBvid`(`b23.tv` 短 URL → BV ID)仍然不能跑:它用 `https.get(url, callback)`,我没造 fetch-based 等价(redirect-manual 在 browser 拿不到 Location header,得用 redirect-follow + 读 `response.url`,够 hacky 不写)。**绝大多数 bilibili adapter 不调 resolveBvid**(用户都是直接传 BV id / 完整 URL),所以不阻塞主路径。需要时再加。
+- zhihu/comment 等写操作走 `node:fs` 读本地文件做附件上传 —— 本来就在 browser 里跑不动,shim throw 出错和不 ship 等价。后续如果做附件流可以接 `page.getAttachments()`。
+
+**端到端测试**(`tests/node-shim.test.ts`):喂一段 bilibili-utils-shape 的源码 → stripModuleSyntax → new Function + 注入 nodeShim → 调出来的 `sign('hello')` 应当 = `md5Hex('hello')`。过。
+
+**教训**:**当上游(opencli)有自己的 runtime 假设(Node、文件系统、特定 crypto),把它搬到 sandbox 不是"装个 polyfill"那么简单——polyfill 必须是 schema 级的**:每个 import 形状要有对应的 rewrite,每个 rewrite 输出的标识符要有对应的 scope 注入,每个被注入的对象要回答 adapter 真实调用模式(`createHash(algo).update(s).digest(enc)` 三层 API,不是单函数)。**rewrite 跟 scope 注入 + 静态/动态两种 import 形状必须一致**,缺一就回到 ReferenceError。这是 10.4(URL 漂移)/10.11(redirect)/10.13(API 形状)的共同形态:**当一个 contract 是分布式的(多个组件分别承担一部分),要保证所有组件互相能对上**——通过共享代码(stripModuleSyntax 是同一份)、通过类型(让 ts 顶住)、或者通过测试(end-to-end 一条龙)。
 
 ## 11. 市场布局 v2:per-file + sha256(为公开市场铺路)
 
