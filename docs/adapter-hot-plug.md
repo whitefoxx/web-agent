@@ -786,6 +786,64 @@ URL 和 frame URL 都是 sandbox.html。意思是 sandbox.html 的 frame **里�
 
 **目前现象**:不影响 adapter 跑(用户已经能成功 fetch subtitle)。先记下,等下次稳定 repro 再下手 —— 没有 stack trace 瞎修风险比留着大。
 
+### 10.18 全量审计:注入 scope 用 stub → 一批 func 静默错 / 错误映射失效
+
+**背景**:用户要求「检查所有 adapters,把能发现的错都修了」。不靠逐个跑,先写一个静态分析脚本(`/tmp/recon-adapters.mjs`)扫全部 marketplace adapter,按 bug 形态分类:
+
+- **A**:从 `@jackwener/opencli/*` import 了一个**运行时 scope 里不存在**的名字 → 跑到就 ReferenceError。
+- **B**:injected 名字的 esbuild `*2` 别名残留(§10.14 的回归)。
+- **C**:import 了一个**运行时被 stub 掉**的 util 且在 func body 里真的调用 → 静默错(不抛,只是结果错)。
+- **D**:`node:*` import(shim 只实现 md5,其余 throw) / 残留相对 import。
+- **E**:func 里调了 in-page 不支持的 `page.*`(captureNetwork)。
+
+扫描结论:B/E = 0(前面已修干净),D 已知且大多只 NAME 不 CALL。真正的新雷在 **A 和 C**,根都是同一个:**注入 scope 有两份手抄、且都用 stub**。
+
+**根因**:adapter 被 eval 时能看到的全局,由两处**各自手写**:
+
+- `src/sandbox/eval-core.ts buildScope()` —— 安装时 CAPTURE(只跑 top-level `cli()`,不跑 func)
+- `src/userscript/run-in-page.ts evalAdapterKeepingFuncs()` —— RUNTIME(真跑 func body)
+
+两份漂了,而且 RUNTIME 那份把 opencli 的 utils 全 stub 成废物:
+
+```js
+htmlToMarkdown: (v) => v,          // 原样返回 HTML,不转 markdown
+mapConcurrent: async () => [],     // 直接返回空数组
+throwIfLoginWall: (v) => v,        // 不做 login-wall 探测
+parseJsonOrThrowLoginWall: (v) => v,
+// createMarkdownConverter —— capture scope 有,runtime scope 根本没有
+// log —— 两份都没有
+// 错误类 —— 都是本地 mkErr 现造的,不是 runtime/errors.js 的真类
+```
+
+后果(全部**测试测不出来**,因为 vitest 走 alias 解析到 `src/runtime/opencli/utils.ts` 真实现,测试用真 util,产线用 stub —— 又是 §10.14 那种「test 过 / 产线挂」的错位):
+
+1. **chatgpt/detail、chatgpt/read** 用 `htmlToMarkdown(html)` → 产线返回原始 HTML 而不是 markdown(错输出,不报错)。
+2. 任何用 `mapConcurrent` 的 func → 拿到 `[]`(静默丢数据)。
+3. **weread/shelf、zhihu/collection、zhihu/collections** 用 `log.warn/.info` → `log` 没注入 → 跑到就 **ReferenceError**(Class A)。
+4. **createMarkdownConverter** 在 func 里调 → runtime scope 没有 → ReferenceError。
+5. **最隐蔽**:dispatcher(`src/tools/dispatcher.ts:294-314`)用 `e instanceof AuthRequiredError / RateLimitedError / EmptyResultError`(`runtime/errors.js` 的真类)判错类型并映射 UX。但 runtime scope 注入的是**本地 mkErr 现造类**,adapter `throw new AuthRequiredError(...)` 抛的是那个冒牌类 → dispatcher 的 `instanceof` **永远 false** → 登录墙 / 限流 / 空结果的 UX 对所有 installed func adapter **从来没生效过**。
+
+**修法**(本次 commit):把「adapter 能看到什么」收敛成**一份**——新建 `src/runtime/adapter-scope.ts` 的 `buildAdapterScope(onRegister)`,注入:
+
+- **真错误类**(从 `runtime/errors.js` import,dispatcher 同一个 module 实例 → `instanceof` 对得上)
+- **真 utils**(turndown-backed `htmlToMarkdown` / `createMarkdownConverter` / 真 `mapConcurrent` / 真 login-wall 探测,从 `runtime/opencli/utils.ts` import)
+- **真 `log`**(`runtime/opencli/logger.ts`,底层 `runtime/log` 用 `safeChrome()` 守 chrome,sandbox 里降级到 console)
+- `__nodeShim` 不变
+
+`eval-core.ts buildScope` 和 `run-in-page.ts evalAdapterKeepingFuncs` 都改成调它。CAPTURE 路径其实用不到真 utils(不跑 func),但共享一份就是为了**杜绝再次漂移**(§10.16 的教训:「adapter 能跑/能看到什么」要写在一处)。
+
+代价:turndown(~50KB)现在进 sandbox IIFE 和 userscript-runner IIFE(runner 46KB→57KB)。两个 venue 都有 DOM,turndown 能跑。可接受。
+
+安全性:utils 全是纯字符串 / DOM 变换(无 fetch / chrome),不破坏 sandbox 的隔离前提。
+
+**附带修**:`marketplace/reddit/.js` —— 一个 **basename 为空**的畸形文件(`ls` 默认不显示 dotfile 所以一直没注意到)。它是 `reddit/subscribed`,但 build 当时把 name 算成了空串,落地成 `reddit/.js`,index 里 `name:""` + `source:"reddit/.js"`。`git mv` 成 `reddit/subscribed.js`,index 条目修 name/source/sha256。内容没变,sha256 值不变(只是挪了位置)。
+
+**教训**:
+
+- **「注入式 eval 的 scope」是一种 API,有两份手抄就一定会漂**。这次跟 §10.14(esbuild alias)、§10.15(cachedIndex)同形:**一个 contract 被复制成多份,复制体之间迟早不一致**。收敛成一份 + 用真实现,比「两份各自打补丁」省后患。
+- **stub 是「为了让 capture 跑通」的临时物,不该泄漏到 runtime**。capture 不跑 func body 所以 stub 无害,但同一套名字被 runtime 复用就把「无害占位」变成了「静默错」。**临时 stub 要在类型 / 命名上跟真实现区分,别让它们共享同一个符号名被无差别复用**。
+- **静态分类扫描**(import 的名字 ∉ 注入 scope?stub util 在 body 里被调?node: 被 call 还是只被 name?)是审计这类「装得上但跑出错」的高性价比手段——一次扫全量,比逐个手跑省几个数量级。脚本留在 `/tmp/recon-adapters.mjs`,下次加站 / 改 scope 后可复跑。
+
 ## 11. 市场布局 v2:per-file + sha256(为公开市场铺路)
 
 > 关键改动 commit:`<next>`(本节描述的整体 schema-v2 切换)。

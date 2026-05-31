@@ -32,7 +32,7 @@
  */
 
 import { stripModuleSyntax } from '../sandbox/eval-core';
-import { nodeShim } from '../runtime/node-shim';
+import { buildAdapterScope } from '../runtime/adapter-scope';
 
 /** Thrown by page.goto when a navigation is needed. The top-level runner maps
  * this to a "navigating, will resume after reinject" outcome rather than an
@@ -356,62 +356,11 @@ export function evalAdapterKeepingFuncs(
   evalFn?: (names: string[], body: string) => (...vals: unknown[]) => void,
 ): Record<string, unknown>[] {
   const collected: Record<string, unknown>[] = [];
-  const Strategy = Object.freeze({
-    PUBLIC: 'public',
-    LOCAL: 'local',
-    COOKIE: 'cookie',
-    INTERCEPT: 'intercept',
-    UI: 'ui',
-    DIRECT: 'direct',
-    AUTO: 'auto',
-  });
-  const cli = (def: Record<string, unknown>) => {
-    if (!def || typeof def !== 'object') throw new Error('cli() expects an object');
-    if (!def.site || !def.name) throw new Error('cli() definition missing site/name');
-    collected.push(def);
-    return def;
-  };
-  class CliError extends Error {}
-  const mkErr = (name: string) =>
-    class extends CliError {
-      constructor(...a: unknown[]) {
-        super(typeof a[0] === 'string' ? a[0] : name);
-        this.name = name;
-      }
-    };
-  const scope: Record<string, unknown> = {
-    cli,
-    Strategy,
-    registerCommand: cli,
-    fullName: (c: { site: string; name: string }) => `${c.site}/${c.name}`,
-    onStartup: () => {},
-    onBeforeExecute: () => {},
-    onAfterExecute: () => {},
-    CliError,
-    ArgumentError: mkErr('ArgumentError'),
-    AuthRequiredError: mkErr('AuthRequiredError'),
-    EmptyResultError: mkErr('EmptyResultError'),
-    RateLimitedError: mkErr('RateLimitedError'),
-    CommandExecutionError: mkErr('CommandExecutionError'),
-    ConfigError: mkErr('ConfigError'),
-    TimeoutError: mkErr('TimeoutError'),
-    LoginWallError: mkErr('LoginWallError'),
-    NeedsAttachmentsError: mkErr('NeedsAttachmentsError'),
-    selectorError: (s: string) => new CliError(`selector: ${s}`),
-    getErrorMessage: (e: unknown) => (e instanceof Error ? e.message : String(e)),
-    isRecord: (v: unknown) => typeof v === 'object' && v !== null && !Array.isArray(v),
-    htmlToMarkdown: (v: unknown) => v,
-    throwIfLoginWall: (v: unknown) => v,
-    parseJsonOrThrowLoginWall: (v: unknown) => v,
-    sleep: () => Promise.resolve(),
-    mapConcurrent: async () => [],
-    BROWSER_JSON_SNIFF_FN: '',
-    EXIT_CODES: {},
-    // node:* lookup map — stripModuleSyntax rewrites `import x from 'node:y'`
-    // to `const x = __nodeShim['node:y']`, so this name must be in scope.
-    // The shim provides real md5 + clear-error throws for the rest.
-    __nodeShim: nodeShim,
-  };
+  // Shared scope: REAL errors (so dispatcher instanceof works), REAL utils
+  // (real htmlToMarkdown / mapConcurrent / login-wall sniffing), real `log`.
+  // See src/runtime/adapter-scope.ts + hot-plug §10.18. This is the venue where
+  // func bodies actually execute, so the real impls matter here.
+  const scope = buildAdapterScope((def) => collected.push(def));
   const names = Object.keys(scope);
   const values = names.map((n) => scope[n]);
   const body = stripModuleSyntax(src);

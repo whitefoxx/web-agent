@@ -24,6 +24,7 @@ import { describe, expect, it } from 'vitest';
 import { readFile, readdir, stat } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { buildAdapterScope } from '../src/runtime/adapter-scope';
 
 const MARKETPLACE_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', 'marketplace');
 
@@ -79,6 +80,40 @@ describe('marketplace source lint', () => {
       for (const [mod, n] of counts) {
         if (n > 1) offenders.push({ file: rel, module: mod, count: n });
       }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('every name imported from @jackwener/opencli/* is provided by the injected runtime scope', async () => {
+    // The runtime strips all imports and injects a fixed scope
+    // (src/runtime/adapter-scope.ts). Any opencli name an adapter imports but
+    // the scope doesn't provide is a ReferenceError the moment that code path
+    // runs — exactly how `log` (weread/shelf, zhihu/collection) slipped through
+    // before §10.18. Derive the allow-set from the real scope so it stays in
+    // sync automatically.
+    const injected = new Set(Object.keys(buildAdapterScope(() => {})));
+    const files = await walkAdapterFiles();
+    const importRe =
+      /import\s*(?:(\w+)|\{([^}]*)\})\s*from\s*["']@jackwener\/opencli\/[^"']+["']/g;
+    const offenders: Array<{ file: string; missing: string[] }> = [];
+    for (const { rel, src } of files) {
+      const missing: string[] = [];
+      let m: RegExpExecArray | null;
+      while ((m = importRe.exec(src))) {
+        if (m[1]) {
+          // default import — `import https from 'node:...'` handled elsewhere;
+          // opencli/* has no default exports, so flag if not injected.
+          if (!injected.has(m[1])) missing.push(m[1]);
+          continue;
+        }
+        for (const part of (m[2] ?? '').split(',').map((s) => s.trim()).filter(Boolean)) {
+          // After §10.14 dedup there should be no `as` aliases left, but resolve
+          // to the canonical (left) name just in case.
+          const name = part.split(/\s+as\s+/)[0].trim();
+          if (!injected.has(name)) missing.push(name);
+        }
+      }
+      if (missing.length) offenders.push({ file: rel, missing: [...new Set(missing)] });
     }
     expect(offenders).toEqual([]);
   });

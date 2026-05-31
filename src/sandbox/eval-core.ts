@@ -81,85 +81,16 @@ export function stripModuleSyntax(src: string): string {
     .replace(/^[ \t]*export\s*\{[^}]*\}\s*;?[ \t]*$/gm, ''); // export { a, b };
 }
 
-import { nodeShim } from '../runtime/node-shim';
+import { buildAdapterScope } from '../runtime/adapter-scope';
 
 /** Build the curated global scope injected into the eval. A fresh collector
  * array is closed over by `cli`, so each call captures only what THIS source
- * registers. */
+ * registers. Delegates to the shared `buildAdapterScope` (one definition for
+ * both the capture and runtime venues — see adapter-scope.ts / hot-plug §10.18).
+ * Capture never runs func bodies, so the real utils/errors are unused here, but
+ * sharing one scope is what stops the two from drifting again. */
 function buildScope(collected: Record<string, unknown>[]): Record<string, unknown> {
-  const Strategy = Object.freeze({
-    PUBLIC: 'public',
-    LOCAL: 'local',
-    COOKIE: 'cookie',
-    INTERCEPT: 'intercept',
-    UI: 'ui',
-    DIRECT: 'direct',
-    AUTO: 'auto',
-  });
-  function cli(def: Record<string, unknown>) {
-    if (!def || typeof def !== 'object') throw new Error('cli() expects an object');
-    if (!def.site || !def.name) throw new Error('cli() definition missing site/name');
-    collected.push(def);
-    return def;
-  }
-  const registerCommand = (d: Record<string, unknown>) => cli(d);
-  const fullName = (c: { site: string; name: string }) => `${c.site}/${c.name}`;
-  const noop = () => {};
-
-  // Error classes: adapters reference these only inside `func` bodies (which we
-  // never execute during capture), but the NAMES must resolve at module-eval
-  // time if referenced at top level. Minimal stand-ins keep eval from throwing.
-  class CliError extends Error {}
-  const mkErr = (name: string) =>
-    class extends CliError {
-      constructor(...args: unknown[]) {
-        super(typeof args[0] === 'string' ? args[0] : name);
-        this.name = name;
-        void args;
-      }
-    };
-
-  // Util stubs: same reasoning — only used inside func bodies. Provide harmless
-  // implementations so top-level references resolve. (No `fetch`, no chrome.)
-  const isRecord = (v: unknown) => typeof v === 'object' && v !== null && !Array.isArray(v);
-  const passthrough = <T>(v: T) => v;
-
-  return {
-    cli,
-    Strategy,
-    registerCommand,
-    fullName,
-    onStartup: noop,
-    onBeforeExecute: noop,
-    onAfterExecute: noop,
-    // errors
-    CliError,
-    ArgumentError: mkErr('ArgumentError'),
-    AuthRequiredError: mkErr('AuthRequiredError'),
-    EmptyResultError: mkErr('EmptyResultError'),
-    RateLimitedError: mkErr('RateLimitedError'),
-    CommandExecutionError: mkErr('CommandExecutionError'),
-    ConfigError: mkErr('ConfigError'),
-    TimeoutError: mkErr('TimeoutError'),
-    LoginWallError: mkErr('LoginWallError'),
-    NeedsAttachmentsError: mkErr('NeedsAttachmentsError'),
-    selectorError: (sel: string) => new CliError(`selector: ${sel}`),
-    getErrorMessage: (e: unknown) => (e instanceof Error ? e.message : String(e)),
-    // node:* lookups — stripModuleSyntax rewrites adapter `import x from 'node:y'`
-    // to `const x = __nodeShim['node:y']`, so this name MUST exist in scope.
-    // See src/runtime/node-shim.ts + hot-plug §10.13.
-    __nodeShim: nodeShim,
-    // utils
-    isRecord,
-    htmlToMarkdown: passthrough,
-    createMarkdownConverter: () => ({ turndown: (s: string) => s }),
-    throwIfLoginWall: passthrough,
-    parseJsonOrThrowLoginWall: passthrough,
-    sleep: () => Promise.resolve(),
-    mapConcurrent: async () => [],
-    BROWSER_JSON_SNIFF_FN: '',
-    EXIT_CODES: {},
-  };
+  return buildAdapterScope((def) => collected.push(def));
 }
 
 /** Classify + strip a captured raw def to serializable `CapturedAdapter`. */

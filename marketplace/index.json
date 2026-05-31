@@ -1779,19 +1779,6 @@
     },
     {
       "site": "reddit",
-      "name": "",
-      "description": "List subreddits you are subscribed to",
-      "access": "read",
-      "domain": "reddit.com",
-      "type": "func",
-      "tier": "official",
-      "author": "opencli",
-      "version": "1.0.0",
-      "source": "reddit/.js",
-      "sha256": "fe0281e68b93f80e2fc36436f230c351dbac232eb13e5315ab3d52b92feb522c"
-    },
-    {
-      "site": "reddit",
       "name": "comment",
       "description": "Post a comment on a Reddit post",
       "access": "write",
@@ -1958,6 +1945,19 @@
       "version": "1.0.0",
       "source": "reddit/subscribe.js",
       "sha256": "86bf2a6d5c767c39faba38ceaee086734854df3ece5cf443ad950f8243b2637b"
+    },
+    {
+      "site": "reddit",
+      "name": "subscribed",
+      "description": "List subreddits you are subscribed to",
+      "access": "read",
+      "domain": "reddit.com",
+      "type": "func",
+      "tier": "official",
+      "author": "opencli",
+      "version": "1.0.0",
+      "source": "reddit/subscribed.js",
+      "sha256": "fe0281e68b93f80e2fc36436f230c351dbac232eb13e5315ab3d52b92feb522c"
     },
     {
       "site": "reddit",
