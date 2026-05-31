@@ -1,6 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { Markdown } from './Markdown';
 import { AdaptersSection } from './Adapters';
+import {
+  IconArrowUp,
+  IconBrand,
+  IconChevronLeft,
+  IconClock,
+  IconCog,
+  IconMenu,
+  IconPlus,
+  IconPuzzle,
+  IconRefresh,
+  IconStop,
+  IconTerminal,
+  IconX,
+} from './Icons';
 import type { UiTurn } from './types';
 import {
   type AbortSessionReq,
@@ -40,6 +54,7 @@ import {
   DEFAULT_CONFIG,
   PROVIDERS,
   loadLlmConfig,
+  loadLlmConfigForm,
   providerById,
   saveLlmConfig,
   type ChatbotId,
@@ -60,6 +75,15 @@ interface PausedState {
   pendingPromptPreview?: string;
 }
 
+type View = 'closed' | 'menu' | 'backend' | 'adapters' | 'history' | 'logs';
+
+const PAGE_LABELS: Record<Exclude<View, 'closed' | 'menu'>, string> = {
+  backend: 'LLM 后端',
+  adapters: 'Adapters',
+  history: '历史会话',
+  logs: '日志',
+};
+
 export function App() {
   const [turns, setTurns] = useState<UiTurn[]>([]);
   const [input, setInput] = useState('');
@@ -69,7 +93,10 @@ export function App() {
   const [paused, setPaused] = useState<PausedState | null>(null);
   const [pendingConfirms, setPendingConfirms] = useState<WriteConfirmReq[]>([]);
   const [tabStatus, setTabStatus] = useState<ChatbotTabStatusEvt | null>(null);
-  const [showDrawer, setShowDrawer] = useState(false);
+  // Header menu state machine. 'closed' = no overlay; 'menu' = dropdown
+  // showing; any other value = a settings page is open. Click outside the
+  // menu/page region drops back to 'closed'.
+  const [view, setView] = useState<View>('closed');
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [logCfg, setLogCfgState] = useState<LogConfig>(() => getLogConfig());
   const [llmConfig, setLlmConfig] = useState<LlmConfig>(DEFAULT_CONFIG);
@@ -128,6 +155,25 @@ export function App() {
       behavior: 'smooth',
     });
   }, [turns.length]);
+
+  /* close menu dropdown on outside click. (Page overlay closes via its own
+   * backdrop click — different model since the page is full-surface.) The
+   * menu lives inside .menu-anchor; any click outside that subtree closes.
+   * Listener attaches on next tick so the click that opened the menu doesn't
+   * immediately re-close it. */
+  useEffect(() => {
+    if (view !== 'menu') return;
+    function onDocClick(e: MouseEvent): void {
+      const t = e.target as Element | null;
+      if (t?.closest('.menu-anchor')) return;
+      setView('closed');
+    }
+    const tid = setTimeout(() => document.addEventListener('mousedown', onDocClick), 0);
+    return () => {
+      clearTimeout(tid);
+      document.removeEventListener('mousedown', onDocClick);
+    };
+  }, [view]);
 
   function onIncomingMessage(m: Message): void {
     if (!m || typeof m !== 'object') return;
@@ -461,37 +507,48 @@ export function App() {
   return (
     <>
       <header>
-        <span class="title">WebChat Agent</span>
-        {isApiMode ? (
-          <span
-            class={`status-pill ${apiReady ? 'ok' : 'warn'}`}
-            onClick={() => setShowDrawer(true)}
-            title="API 模式 · 点击打开设置"
-          >
-            <span class="dot" />
-            {apiReady ? `API · ${apiLabel}` : 'API 未配置'}
+        <span class="brand-row">
+          <span class="brand" title="WebChat Agent">
+            <IconBrand size={22} />
           </span>
-        ) : (
-          <span
-            class={`status-pill ${statusKind}`}
-            onClick={statusKind === 'err' ? onOpenDeepseek : () => void requestEnsureTab()}
-            title={statusKind === 'err' ? '点击打开 chat.deepseek.com' : '点击刷新状态'}
-          >
-            <span class="dot" />
-            {statusText}
-          </span>
-        )}
+          {isApiMode ? (
+            <span
+              class={`status-pill ${apiReady ? 'ok' : 'warn'}`}
+              onClick={() => setView('backend')}
+              title="API 模式 · 点击打开设置"
+            >
+              <span class="dot" />
+              {apiReady ? `API · ${apiLabel}` : 'API 未配置'}
+            </span>
+          ) : (
+            <span
+              class={`status-pill ${statusKind}`}
+              onClick={statusKind === 'err' ? onOpenDeepseek : () => void requestEnsureTab()}
+              title={statusKind === 'err' ? '点击打开 chat.deepseek.com' : '点击刷新状态'}
+            >
+              <span class="dot" />
+              {statusText}
+            </span>
+          )}
+        </span>
         <span class="header-actions">
           <button
-            class="icon-btn"
+            class="ghost-btn round"
             title="开始一个新对话（结束当前对话，DeepSeek 会换新的 conversation）"
             onClick={onNewChat}
           >
-            + 新对话
+            <IconPlus size={18} />
           </button>
-          <button class="icon-btn" title="设置 / 日志" onClick={() => setShowDrawer((v) => !v)}>
-            ⚙
-          </button>
+          <span class="menu-anchor">
+            <button
+              class={`ghost-btn round ${view === 'menu' ? 'active' : ''}`}
+              title="菜单"
+              onClick={() => setView((v) => (v === 'menu' ? 'closed' : 'menu'))}
+            >
+              <IconMenu size={18} />
+            </button>
+            {view === 'menu' && <MenuDropdown onPick={(target) => setView(target)} />}
+          </span>
         </span>
       </header>
 
@@ -512,7 +569,7 @@ export function App() {
       </div>
 
       <footer>
-        <div class="input-row">
+        <div class={`composer ${inputBlocked && !running ? 'disabled' : ''}`}>
           <textarea
             placeholder={
               paused
@@ -520,28 +577,30 @@ export function App() {
                 : isApiMode
                   ? apiReady
                     ? '问我点什么，比如：帮我看看小红书首页最近有什么内容'
-                    : '先在右上角设置里填入 API Key…'
+                    : '先在右上角菜单 → LLM 后端 填入 API Key…'
                   : statusKind === 'err'
-                    ? '先点击右上角连接 DeepSeek…'
+                    ? '先点击上方连接 DeepSeek…'
                     : '问我点什么，比如：帮我看看小红书首页最近有什么内容'
             }
             value={input}
             onInput={(e) => setInput((e.target as HTMLTextAreaElement).value)}
             onKeyDown={onKeyDown}
             disabled={inputBlocked}
-            rows={2}
+            rows={1}
           />
           {running ? (
-            <button class="primary abort" onClick={onAbort}>
-              停止
+            <button class="send-btn stop" onClick={onAbort} title="停止生成" aria-label="停止">
+              <IconStop size={12} />
             </button>
           ) : (
             <button
-              class="primary"
+              class="send-btn"
               onClick={onSend}
               disabled={!input.trim() || inputBlocked}
+              title="发送 (Enter)"
+              aria-label="发送"
             >
-              发送
+              <IconArrowUp size={16} />
             </button>
           )}
         </div>
@@ -551,33 +610,45 @@ export function App() {
         </div>
       </footer>
 
-      {showDrawer && (
-        <SettingsDrawer
-          llmConfig={llmConfig}
-          onSaveLlmConfig={(c) => setLlmConfig(c)}
-          logs={logs}
-          logCfg={logCfg}
-          onChangeLogCfg={async (next) => {
-            setLogCfgState((prev) => ({ ...prev, ...next }));
-            await setLogConfig(next);
-          }}
-          onClearLogs={() => setLogs([])}
-          tabStatus={tabStatus}
-          onOpenDeepseek={onOpenDeepseek}
+      {/* Top-level menu pages. History owns its own overlay because it has a
+       * sub-page (one session's detail). The other three are plain content,
+       * wrapped in the standard PageOverlay (title + close X). */}
+      {view === 'backend' && (
+        <PageOverlay title={PAGE_LABELS.backend} onClose={() => setView('closed')}>
+          <LlmBackendSection config={llmConfig} onSave={(c) => setLlmConfig(c)} />
+          {llmConfig.mode === 'connector' && (
+            <div class="section">
+              <h4>DeepSeek 标签页</h4>
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--surface)">
+                <span style="font-size:12px;color:var(--muted)">
+                  {tabStatus?.tabId === null || !tabStatus
+                    ? '未打开'
+                    : `tab=${tabStatus.tabId} · ${tabStatus.ready ? '已登录' : '未登录'}`}
+                </span>
+                <button class="btn sm outline" onClick={onOpenDeepseek}>
+                  打开 / 切换
+                </button>
+              </div>
+            </div>
+          )}
+        </PageOverlay>
+      )}
+      {view === 'adapters' && (
+        <PageOverlay title={PAGE_LABELS.adapters} onClose={() => setView('closed')}>
+          <AdaptersSection />
+        </PageOverlay>
+      )}
+      {view === 'history' && (
+        <HistoryPage
           currentSessionId={sessionId}
-          onResumeFromHistory={(id) => {
-            // Adopt the historical session as our active session, then ask
-            // SW to resume it.
+          onClose={() => setView('closed')}
+          onResume={(id) => {
             setSessionId(id);
-            setShowDrawer(false);
+            setView('closed');
             const req: ResumeSessionReq = { type: 'RESUME_SESSION', sessionId: id };
             chrome.runtime.sendMessage(req).catch(() => {});
           }}
-          onOpenSession={async (id) => {
-            // Load the saved session into the main chat pane so the user
-            // can read past turns + send follow-ups in the same DeepSeek
-            // conversation. SW's tryReuseSessionTab / reattach logic will
-            // pick the right tab when the next USER_MESSAGE fires.
+          onOpen={async (id) => {
             try {
               const r = (await chrome.runtime.sendMessage({
                 type: 'GET_SESSION',
@@ -598,13 +669,12 @@ export function App() {
                     }
                   : null,
               );
-              setShowDrawer(false);
+              setView('closed');
             } catch {}
           }}
-          onDeleteHistoricalSession={(id) => {
+          onDelete={(id) => {
             const req: DeleteSessionReq = { type: 'DELETE_SESSION', sessionId: id };
             chrome.runtime.sendMessage(req).catch(() => {});
-            // If we just deleted the current session, clear local refs.
             if (id === sessionId) {
               setSessionId(null);
               setTurns([]);
@@ -614,7 +684,152 @@ export function App() {
           }}
         />
       )}
+      {view === 'logs' && (
+        <PageOverlay title={PAGE_LABELS.logs} onClose={() => setView('closed')}>
+          <LogsSection
+            logs={logs}
+            logCfg={logCfg}
+            onChangeLogCfg={async (next) => {
+              setLogCfgState((prev) => ({ ...prev, ...next }));
+              await setLogConfig(next);
+            }}
+            onClear={() => setLogs([])}
+          />
+        </PageOverlay>
+      )}
     </>
+  );
+}
+
+/** Menu items as a flat lucide-icon + label list. The dropdown anchors to its
+ * parent (`.menu-anchor`) — clicking outside the menu OR a menu item closes
+ * it. Order from most-used to least: backend → adapters → history → logs. */
+function MenuDropdown({ onPick }: { onPick: (target: View) => void }): preact.JSX.Element {
+  return (
+    <div class="menu-dropdown" role="menu">
+      <button class="menu-item" role="menuitem" onClick={() => onPick('backend')}>
+        <IconCog size={16} class="menu-icon" />
+        <span>LLM 后端</span>
+      </button>
+      <button class="menu-item" role="menuitem" onClick={() => onPick('adapters')}>
+        <IconPuzzle size={16} class="menu-icon" />
+        <span>Adapters</span>
+      </button>
+      <button class="menu-item" role="menuitem" onClick={() => onPick('history')}>
+        <IconClock size={16} class="menu-icon" />
+        <span>历史会话</span>
+      </button>
+      <button class="menu-item" role="menuitem" onClick={() => onPick('logs')}>
+        <IconTerminal size={16} class="menu-icon" />
+        <span>日志</span>
+      </button>
+    </div>
+  );
+}
+
+/** Full-surface overlay that fades a backdrop on top of the chat panel and
+ * slides a panel in from the right.
+ *
+ * Two header shapes by props:
+ *  - Default (top-level menu page): title on the left, [X] on the right. No
+ *    back arrow — the page has no parent to return to (Esc / backdrop click
+ *    / X all close it).
+ *  - Sub-page (drill-down, e.g. one session detail): pass `onBack` to put a
+ *    ← arrow on the left that pops back to the parent page. Pass
+ *    `rightActions` to render custom buttons (e.g. [打开] [删除]) instead of
+ *    the default X.
+ *
+ * Esc always invokes `onClose` (or `onBack` for sub-pages — whichever the
+ * caller wants to mean "leave this view"); backdrop click does the same. */
+function PageOverlay({
+  title,
+  onClose,
+  onBack,
+  rightActions,
+  children,
+}: {
+  title: string;
+  onClose: () => void;
+  onBack?: () => void;
+  rightActions?: preact.ComponentChildren;
+  children: preact.ComponentChildren;
+}): preact.JSX.Element {
+  // Sub-page Esc bubbles to its own back action; top-level Esc closes.
+  const escTarget = onBack ?? onClose;
+  useEffect(() => {
+    function onKey(e: KeyboardEvent): void {
+      if (e.key === 'Escape') escTarget();
+    }
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [escTarget]);
+  // Backdrop click: top-level page closes everything; sub-page just pops
+  // back to its parent. Matches what Esc does on each.
+  return (
+    <div class="page-overlay" onClick={escTarget}>
+      <div class="page" onClick={(e) => e.stopPropagation()}>
+        <div class="page-header">
+          {onBack && (
+            <button class="ghost-btn round" onClick={onBack} aria-label="返回" title="返回">
+              <IconChevronLeft size={18} />
+            </button>
+          )}
+          <span class="page-title">{title}</span>
+          <span class="page-actions">
+            {rightActions ?? (
+              <button class="ghost-btn round" onClick={onClose} aria-label="关闭" title="关闭">
+                <IconX size={16} />
+              </button>
+            )}
+          </span>
+        </div>
+        <div class="page-body">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+function LogsSection({
+  logs,
+  logCfg,
+  onChangeLogCfg,
+  onClear,
+}: {
+  logs: LogEntry[];
+  logCfg: LogConfig;
+  onChangeLogCfg: (next: Partial<LogConfig>) => Promise<void>;
+  onClear: () => void;
+}): preact.JSX.Element {
+  return (
+    <div class="logs-page">
+      <div class="controls">
+        <label class="toggle-row">
+          <span>详细日志</span>
+          <input
+            type="checkbox"
+            checked={logCfg.enabled}
+            onChange={(e) =>
+              void onChangeLogCfg({ enabled: (e.target as HTMLInputElement).checked })
+            }
+          />
+        </label>
+        <button class="btn sm outline" onClick={onClear} disabled={logs.length === 0}>
+          清空 ({logs.length})
+        </button>
+      </div>
+      <div class="log-viewer">
+        {logs.length === 0 ? (
+          <div class="empty">暂无日志</div>
+        ) : (
+          logs.slice(-200).map((e, i) => (
+            <div key={i} class={`entry ${e.level}`}>
+              <span class="ts">{new Date(e.ts).toLocaleTimeString()} </span>
+              <span class="scope">[{e.scope}]</span> <span>{e.message}</span>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -882,39 +1097,33 @@ function LlmBackendSection({
   config: LlmConfig;
   onSave: (c: LlmConfig) => void;
 }) {
+  // Form state holds BOTH branches' drafts simultaneously, not just the
+  // active one. We load via loadLlmConfigForm() so a previously saved API
+  // key survives a save-as-connector → reopen-and-toggle-back sequence
+  // (the old discriminated-union storage dropped the inactive branch on
+  // save). Defaults are placeholder-y so a brand-new install shows preset
+  // hints rather than empty inputs.
   const [mode, setMode] = useState<'connector' | 'api'>(config.mode);
-  const [chatbot, setChatbot] = useState<ChatbotId>(
-    config.mode === 'connector' ? config.chatbot : 'deepseek',
-  );
-  const [provider, setProvider] = useState(config.mode === 'api' ? config.provider : 'deepseek');
-  const [baseUrl, setBaseUrl] = useState(
-    config.mode === 'api' ? config.baseUrl : (providerById('deepseek')?.baseUrl ?? ''),
-  );
-  const [apiKey, setApiKey] = useState(config.mode === 'api' ? config.apiKey : '');
-  const [model, setModel] = useState(
-    config.mode === 'api' ? config.model : (providerById('deepseek')?.defaultModel ?? ''),
-  );
+  const [chatbot, setChatbot] = useState<ChatbotId>('deepseek');
+  const [provider, setProvider] = useState<string>('deepseek');
+  const [baseUrl, setBaseUrl] = useState<string>(providerById('deepseek')?.baseUrl ?? '');
+  const [apiKey, setApiKey] = useState<string>('');
+  const [model, setModel] = useState<string>(providerById('deepseek')?.defaultModel ?? '');
   const [saved, setSaved] = useState(false);
 
-  // Re-sync local state when the saved config arrives (or changes externally).
-  // useState initializers fire ONCE at mount; the parent's loadLlmConfig() is
-  // async, so on first mount `config` is still DEFAULT_CONFIG and the api-key
-  // / model / baseUrl fields end up empty. Without this effect, the saved key
-  // never makes it back into the form — looked like persistence was broken.
-  // Safe against clobbering user edits: the parent only updates `config` after
-  // save (when local state already matches the new config → effect is a no-op),
-  // or on the initial load.
+  // Load both branches' drafts on mount. Runs once — re-mount on page open
+  // gives us a fresh read so any external storage update (other extension
+  // session, etc.) shows up.
   useEffect(() => {
-    setMode(config.mode);
-    if (config.mode === 'connector') {
-      setChatbot(config.chatbot);
-    } else {
-      setProvider(config.provider);
-      setBaseUrl(config.baseUrl);
-      setApiKey(config.apiKey);
-      setModel(config.model);
-    }
-  }, [config]);
+    void loadLlmConfigForm().then((full) => {
+      setMode(full.mode);
+      setChatbot(full.connector.chatbot);
+      setProvider(full.api.provider);
+      setBaseUrl(full.api.baseUrl);
+      setApiKey(full.api.apiKey);
+      setModel(full.api.model);
+    });
+  }, []);
 
   function pickProvider(id: string): void {
     setProvider(id);
@@ -960,188 +1169,153 @@ function LlmBackendSection({
   // it to take effect — surfaced as an explicit warning so it can't be missed.
   const dirty = JSON.stringify(buildNext()) !== JSON.stringify(config);
 
-  const segStyle = (active: boolean): string =>
-    `flex:1;padding:5px 8px;border-radius:6px;cursor:pointer;font-size:12px;border:1px solid ${active ? 'var(--accent,#4f7cff)' : 'var(--border,#ddd)'};background:${active ? 'var(--accent,#4f7cff)' : 'transparent'};color:${active ? '#fff' : 'inherit'}`;
-  const chipStyle = (active: boolean): string =>
-    `padding:2px 8px;border-radius:4px;font-size:11px;cursor:pointer;border:1px solid ${active ? 'var(--accent,#4f7cff)' : 'var(--border,#ddd)'};background:${active ? 'var(--accent,#4f7cff)' : 'transparent'};color:${active ? '#fff' : 'inherit'}`;
-  const fieldStyle = 'display:flex;flex-direction:column;gap:2px;font-size:12px';
+  // Dot color in the "当前生效" header card — green when running, amber when
+  // API mode but no key yet (config shows as 'api' but won't work until saved).
+  const activeReady =
+    config.mode === 'api' ? !!config.apiKey && !!config.baseUrl && !!config.model : true;
+  const activeDotKind: 'ok' | 'warn' = activeReady ? 'ok' : 'warn';
 
   return (
-    <div class="section">
-      <h4>LLM 后端</h4>
-      <div style="font-size:11px;color:var(--muted);margin:-2px 0 6px">
-        当前生效：<strong style="color:var(--fg)">{activeLabel}</strong>
+    <>
+      <div class="status-card">
+        <span class={`dot ${activeDotKind === 'ok' ? '' : activeDotKind}`} />
+        <div style="flex:1;min-width:0">
+          <div class="label">当前生效</div>
+          <div class="value">{activeLabel}</div>
+        </div>
       </div>
 
-      <div style="font-size:11px;color:var(--muted);margin-bottom:4px">
-        选择推理来源（二选一，改完点最下方保存才生效）：
-      </div>
-      <div style="display:flex;gap:6px;margin-bottom:8px">
-        <button style={segStyle(mode === 'connector')} onClick={() => setMode('connector')}>
-          {mode === 'connector' ? '● ' : '○ '}聊天网页（零 Key）
+      <div class="section">
+        <h4>推理来源</h4>
+        <p class="section-hint">二选一,改完点最下方保存才生效。</p>
+        <button
+          class={`option-card ${mode === 'connector' ? 'selected' : ''}`}
+          onClick={() => setMode('connector')}
+        >
+          <span class="radio" />
+          <span class="body">
+            <span class="title">聊天网页(零 API Key)</span>
+            <span class="desc">
+              复用已登录的 DeepSeek / ChatGPT / Gemini 网页推理,不用 key,也不计费。
+              受聊天网页节奏限制(busy 重试 / 上下文受限)。
+            </span>
+          </span>
         </button>
-        <button style={segStyle(mode === 'api')} onClick={() => setMode('api')}>
-          {mode === 'api' ? '● ' : '○ '}自带 API Key
+        <button
+          class={`option-card ${mode === 'api' ? 'selected' : ''}`}
+          onClick={() => setMode('api')}
+        >
+          <span class="radio" />
+          <span class="body">
+            <span class="title">自带 API Key</span>
+            <span class="desc">
+              任何 OpenAI 兼容 /chat/completions endpoint 都可。Key 仅存于本机 chrome.storage。
+            </span>
+          </span>
         </button>
       </div>
 
       {mode === 'connector' ? (
-        <label style={fieldStyle}>
-          <span>聊天网页</span>
-          <select
-            value={chatbot}
-            onChange={(e) => setChatbot((e.target as HTMLSelectElement).value as ChatbotId)}
-          >
-            {CHATBOTS.map((c) => (
-              <option value={c.id} disabled={!c.implemented}>
-                {c.label}
-              </option>
-            ))}
-          </select>
-          <span style="font-size:11px;color:var(--muted)">
-            用你已登录的聊天网页推理，零 API Key。目前仅 DeepSeek 可用。
-          </span>
-        </label>
+        <div class="section">
+          <h4>聊天网页</h4>
+          <div class="field">
+            <label>选择网页</label>
+            <select
+              value={chatbot}
+              onChange={(e) => setChatbot((e.target as HTMLSelectElement).value as ChatbotId)}
+            >
+              {CHATBOTS.map((c) => (
+                <option value={c.id} disabled={!c.implemented}>
+                  {c.label}
+                  {c.implemented === false ? ' (待实装)' : ''}
+                </option>
+              ))}
+            </select>
+            <span class="field-hint">目前仅 DeepSeek 可用,其它正在接入。</span>
+          </div>
+        </div>
       ) : (
-        <div style="display:flex;flex-direction:column;gap:6px">
-          <div style="display:flex;gap:4px;flex-wrap:wrap">
+        <div class="section">
+          <h4>API 供应商</h4>
+          <div class="pill-row" style="margin-bottom:14px">
             {PROVIDERS.map((p) => (
-              <button style={chipStyle(provider === p.id)} onClick={() => pickProvider(p.id)}>
+              <button
+                key={p.id}
+                class={`pill ${provider === p.id ? 'selected' : ''}`}
+                onClick={() => pickProvider(p.id)}
+              >
                 {p.label}
               </button>
             ))}
           </div>
-          <label style={fieldStyle}>
-            <span>Base URL</span>
+          <div class="field">
+            <label>Base URL</label>
             <input
               value={baseUrl}
               placeholder="https://api.deepseek.com"
               onInput={(e) => setBaseUrl((e.target as HTMLInputElement).value)}
             />
-          </label>
-          <label style={fieldStyle}>
-            <span>API Key</span>
+          </div>
+          <div class="field">
+            <label>API Key</label>
             <input
               type="password"
               value={apiKey}
-              placeholder="sk-…"
+              placeholder="sk-..."
               onInput={(e) => setApiKey((e.target as HTMLInputElement).value)}
             />
-          </label>
-          <label style={fieldStyle}>
-            <span>Model</span>
+          </div>
+          <div class="field">
+            <label>Model</label>
             <input
               value={model}
               placeholder="deepseek-chat"
               onInput={(e) => setModel((e.target as HTMLInputElement).value)}
             />
-          </label>
-          <span style="font-size:11px;color:var(--muted)">
-            任何兼容 OpenAI /chat/completions 的服务都可用。Key 仅存于本机 chrome.storage。
-          </span>
+            <span class="field-hint">
+              名字按 endpoint 实际支持填(例:deepseek-chat / gpt-4o / claude-sonnet-4-6)。
+            </span>
+          </div>
         </div>
       )}
 
-      {dirty && !saved && (
-        <div style="font-size:11px;color:var(--error);margin-top:8px">
-          ⚠ 有未保存的改动 —— 点下方按钮后才会切换 / 生效
-        </div>
-      )}
-      <button
-        class="icon-btn"
-        style={`margin-top:8px${dirty && !saved ? ';border-color:var(--accent);color:var(--accent);font-weight:600' : ''}`}
-        disabled={!canSave}
-        onClick={save}
-      >
-        {saved ? '已保存 ✓' : dirty ? '保存并启用' : '保存后端设置'}
-      </button>
-    </div>
-  );
-}
-
-function SettingsDrawer(props: {
-  logs: LogEntry[];
-  logCfg: LogConfig;
-  onChangeLogCfg: (next: Partial<LogConfig>) => Promise<void>;
-  onClearLogs: () => void;
-  tabStatus: ChatbotTabStatusEvt | null;
-  onOpenDeepseek: () => void;
-  currentSessionId: string | null;
-  onResumeFromHistory: (sessionId: string) => void;
-  onOpenSession: (sessionId: string) => void;
-  onDeleteHistoricalSession: (sessionId: string) => void;
-  llmConfig: LlmConfig;
-  onSaveLlmConfig: (c: LlmConfig) => void;
-}) {
-  return (
-    <div class="drawer">
-      <LlmBackendSection config={props.llmConfig} onSave={props.onSaveLlmConfig} />
-      {props.llmConfig.mode === 'connector' && (
-        <div class="section">
-          <h4>DeepSeek 标签页</h4>
-        <div style="font-size:11px;color:var(--muted)">
-          {props.tabStatus?.tabId === null || !props.tabStatus
-            ? '未打开'
-            : `tab=${props.tabStatus.tabId} · ${props.tabStatus.ready ? '已登录' : '未登录'}`}
-        </div>
-        <button class="icon-btn" style="margin-top:4px" onClick={props.onOpenDeepseek}>
-          打开 / 切换至 chat.deepseek.com
+      <div class="form-footer">
+        {dirty && !saved && (
+          <div class="dirty-note">⚠ 有未保存的改动 —— 点下方按钮后才会切换/生效</div>
+        )}
+        <button class="btn primary full" disabled={!canSave} onClick={save}>
+          {saved ? '已保存 ✓' : dirty ? '保存并启用' : '保存后端设置'}
         </button>
-        </div>
-      )}
-      <AdaptersSection />
-      <HistorySection
-        currentSessionId={props.currentSessionId}
-        onResume={props.onResumeFromHistory}
-        onOpen={props.onOpenSession}
-        onDelete={props.onDeleteHistoricalSession}
-      />
-      <div class="section">
-        <h4>日志</h4>
-        <label class="row">
-          <span>详细日志</span>
-          <input
-            type="checkbox"
-            checked={props.logCfg.enabled}
-            onChange={(e) =>
-              void props.onChangeLogCfg({ enabled: (e.target as HTMLInputElement).checked })
-            }
-          />
-        </label>
-        <button class="icon-btn" onClick={props.onClearLogs}>
-          清空缓冲区
-        </button>
-        <div class="log">
-          {props.logs.length === 0 ? (
-            <div class="entry">（暂无日志）</div>
-          ) : (
-            props.logs.slice(-200).map((e, i) => (
-              <div key={i} class={`entry ${e.level}`}>
-                <span class="ts">{new Date(e.ts).toLocaleTimeString()} </span>
-                <span class="scope">[{e.scope}]</span> <span>{e.message}</span>
-              </div>
-            ))
-          )}
-        </div>
       </div>
-    </div>
+    </>
   );
 }
 
-function HistorySection({
+/** History — two-level navigation:
+ *   - List page (default): every persisted session as a clean card. Click → drill.
+ *   - Detail sub-page: when `selectedId` is set, render the same PageOverlay
+ *     but with `onBack` (← arrow) and `rightActions` ([打开]/[删除]/[恢复]) in
+ *     the header. Backdrop click + Esc pop back to the list, not to the
+ *     chat — that's what `onBack` controls in PageOverlay.
+ *
+ * Detail data is fetched on click (`loadDetail`) — the list summaries don't
+ * carry full turn history. Refetch on every drill so updates land. */
+function HistoryPage({
   currentSessionId,
+  onClose,
   onResume,
   onOpen,
   onDelete,
 }: {
   currentSessionId: string | null;
+  onClose: () => void;
   onResume: (sessionId: string) => void;
   onOpen: (sessionId: string) => void;
   onDelete: (sessionId: string) => void;
-}) {
+}): preact.JSX.Element {
   const [list, setList] = useState<SessionSummary[]>([]);
   const [loading, setLoading] = useState(true);
-  const [expanded, setExpanded] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<SessionState | null>(null);
 
   async function refresh(): Promise<void> {
@@ -1159,8 +1333,8 @@ function HistorySection({
 
   useEffect(() => {
     void refresh();
-    // Auto-refresh when SESSION_DONE / SESSION_PAUSED happens — those are
-    // exactly the moments the list contents change.
+    // Auto-refresh when SESSION_DONE / SESSION_PAUSED / ASSISTANT_TURN happens
+    // — those are exactly the moments the list contents change.
     const handler = (m: unknown) => {
       const t = (m as { type?: string })?.type;
       if (t === 'SESSION_DONE' || t === 'SESSION_PAUSED' || t === 'ASSISTANT_TURN') {
@@ -1171,13 +1345,8 @@ function HistorySection({
     return () => chrome.runtime.onMessage.removeListener(handler);
   }, []);
 
-  async function loadDetail(id: string): Promise<void> {
-    if (expanded === id) {
-      setExpanded(null);
-      setDetail(null);
-      return;
-    }
-    setExpanded(id);
+  async function drillTo(id: string): Promise<void> {
+    setSelectedId(id);
     setDetail(null);
     try {
       const req: GetSessionReq = { type: 'GET_SESSION', sessionId: id };
@@ -1188,109 +1357,174 @@ function HistorySection({
     }
   }
 
+  function backToList(): void {
+    setSelectedId(null);
+    setDetail(null);
+  }
+
+  // ── Sub-page: one session detail ──
+  if (selectedId) {
+    const summary = list.find((s) => s.id === selectedId);
+    const isCurrent = selectedId === currentSessionId;
+    const canResume = summary?.status === 'paused' && !!summary.conversationUrl;
+    const title = summary?.preview?.trim() || '会话详情';
+
+    return (
+      <PageOverlay
+        title={title}
+        onClose={onClose}
+        onBack={backToList}
+        rightActions={
+          <>
+            {canResume && (
+              <button
+                class="btn primary sm"
+                title="重新打开 DeepSeek conversation 并继续这条暂停的会话"
+                onClick={() => onResume(selectedId)}
+              >
+                恢复
+              </button>
+            )}
+            <button
+              class="btn sm outline"
+              disabled={isCurrent}
+              title={isCurrent ? '已经是当前会话' : '把这条会话加载到主聊天面板继续(保留上下文)'}
+              onClick={() => onOpen(selectedId)}
+            >
+              打开
+            </button>
+            <button
+              class="btn sm danger"
+              disabled={isCurrent}
+              title={isCurrent ? '不能删除正在进行的会话,先「+ 新对话」' : '永久删除这条会话'}
+              onClick={() => {
+                if (confirm('确认删除这条历史会话?')) {
+                  onDelete(selectedId);
+                  backToList();
+                }
+              }}
+            >
+              删除
+            </button>
+          </>
+        }
+      >
+        {detail === null ? (
+          <div class="hist-empty">加载详情中...</div>
+        ) : (
+          <SessionDetailView summary={summary} session={detail} isCurrent={isCurrent} />
+        )}
+      </PageOverlay>
+    );
+  }
+
+  // ── List page ──
   return (
-    <div class="section">
-      <h4>
-        历史会话 <span class="muted">({list.length})</span>
-        <button
-          class="icon-btn refresh-btn"
-          title="刷新"
-          onClick={(e) => {
-            e.stopPropagation();
-            void refresh();
-          }}
-        >
-          ⟳
-        </button>
-      </h4>
+    <PageOverlay
+      title={PAGE_LABELS.history}
+      onClose={onClose}
+      rightActions={
+        <>
+          <button
+            class="ghost-btn round"
+            title="刷新"
+            onClick={() => void refresh()}
+            aria-label="刷新"
+          >
+            <IconRefresh size={16} />
+          </button>
+          <button class="ghost-btn round" onClick={onClose} aria-label="关闭" title="关闭">
+            <IconX size={16} />
+          </button>
+        </>
+      }
+    >
       {loading ? (
-        <div class="hist-empty">加载中…</div>
+        <div class="hist-empty">加载中...</div>
       ) : list.length === 0 ? (
-        <div class="hist-empty">（还没有历史会话）</div>
+        <div class="hist-empty">还没有历史会话</div>
       ) : (
-        <ul class="hist-list">
+        <ul class="history-list">
           {list.map((s) => {
             const isCurrent = s.id === currentSessionId;
-            const isExpanded = expanded === s.id;
             return (
-              <li key={s.id} class={`hist-item ${isCurrent ? 'current' : ''}`}>
-                <div class="hist-head" onClick={() => void loadDetail(s.id)}>
-                  <span class={`hist-badge ${badgeClass(s.status)}`}>{badgeText(s.status)}</span>
-                  <span class="hist-preview">
-                    {s.preview || <span class="muted">（无内容）</span>}
-                  </span>
-                  <span class="hist-ts">{relativeTime(s.updatedAt)}</span>
-                </div>
-                <div class="hist-meta">
-                  iter {s.iterations} · {s.turnCount} 轮消息 · {s.toolCallCount} 次工具调用
-                  {isCurrent && <span class="hist-current-tag"> · 当前会话</span>}
-                </div>
-                {isExpanded && (
-                  <div class="hist-detail">
-                    {detail === null ? (
-                      <div class="muted">加载详情中…</div>
-                    ) : (
-                      <SessionDetailView session={detail} />
-                    )}
-                    <div class="hist-actions">
-                      {!isCurrent && (
-                        <button
-                          class="primary"
-                          title="把这条会话加载到主聊天面板，可以继续追问（保留 DeepSeek conversation 上下文）"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onOpen(s.id);
-                          }}
-                        >
-                          打开
-                        </button>
-                      )}
-                      {s.status === 'paused' && s.conversationUrl && (
-                        <button
-                          class="primary"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onResume(s.id);
-                          }}
-                        >
-                          恢复会话
-                        </button>
-                      )}
-                      <button
-                        class="danger"
-                        disabled={isCurrent}
-                        title={
-                          isCurrent
-                            ? '不能删除正在进行的会话，先点 "+ 新对话"'
-                            : '从存储中永久删除这个会话'
-                        }
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (confirm('确认删除这条历史会话？')) onDelete(s.id);
-                        }}
-                      >
-                        删除
-                      </button>
-                    </div>
+              <li key={s.id}>
+                <button
+                  class={`session-card ${isCurrent ? 'current' : ''}`}
+                  onClick={() => void drillTo(s.id)}
+                >
+                  <div class="row">
+                    <span class={`hist-badge ${badgeClass(s.status)}`}>{badgeText(s.status)}</span>
+                    <span class="time">{relativeTime(s.updatedAt)}</span>
                   </div>
-                )}
+                  <div class="preview">{s.preview || '(无内容)'}</div>
+                  <div class="meta">
+                    iter {s.iterations} · {s.turnCount} 轮消息 · {s.toolCallCount} 次工具
+                    {isCurrent && <span class="current-tag"> · 当前会话</span>}
+                  </div>
+                </button>
               </li>
             );
           })}
         </ul>
       )}
-    </div>
+    </PageOverlay>
   );
 }
 
-function SessionDetailView({ session }: { session: SessionState }) {
+function SessionDetailView({
+  summary,
+  session,
+  isCurrent,
+}: {
+  summary: SessionSummary | undefined;
+  session: SessionState;
+  isCurrent: boolean;
+}): preact.JSX.Element {
+  const status = summary?.status ?? 'idle';
   return (
-    <div class="hist-turns">
-      {session.history.length === 0 ? (
-        <div class="muted">（没有消息）</div>
-      ) : (
-        session.history.map((t, i) => <DetailTurn key={i} turn={t} />)
+    <div class="session-detail">
+      <div class="meta-row">
+        <span class={`hist-badge ${badgeClass(status)}`}>{badgeText(status)}</span>
+        <span>iter {summary?.iterations ?? '?'}</span>
+        <span>·</span>
+        <span>{summary?.turnCount ?? session.history.length} 轮消息</span>
+        <span>·</span>
+        <span>{summary?.toolCallCount ?? '?'} 次工具调用</span>
+        {isCurrent && (
+          <span class="current-tag" style="color:var(--accent);font-weight:600">
+            · 当前会话
+          </span>
+        )}
+      </div>
+
+      {session.conversationUrl && (
+        <div class="conv-url">
+          会话 URL:{' '}
+          <a href={session.conversationUrl} target="_blank" rel="noopener noreferrer">
+            {session.conversationUrl.replace('https://chat.deepseek.com', '')}
+          </a>
+        </div>
       )}
+
+      {session.status === 'paused' && session.pendingPrompt && (
+        <div class="pending">
+          <div class="label">未送达的消息</div>
+          <div>
+            {session.pendingPrompt.slice(0, 240)}
+            {session.pendingPrompt.length > 240 ? '...' : ''}
+          </div>
+        </div>
+      )}
+
+      <div class="turns-heading">消息历史</div>
+      <div class="turns">
+        {session.history.length === 0 ? (
+          <div class="hist-empty">(没有消息)</div>
+        ) : (
+          session.history.map((t, i) => <DetailTurn key={i} turn={t} />)
+        )}
+      </div>
     </div>
   );
 }

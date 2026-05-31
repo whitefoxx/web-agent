@@ -3,14 +3,15 @@
  *
  * Two tabs:
  *  - 已安装 — list with enable/disable/uninstall + a paste-to-install panel.
- *  - 市场   — browse the bundled catalog (122 pipeline adapters), with a
- *             featured row up top and a searchable full list below; every row
- *             is a one-click install.
+ *  - 市场   — browse the bundled catalog (count comes from marketplace/index.json
+ *             at fetch time), with a featured row up top and a searchable full
+ *             list below; every row is a one-click install.
  *
  * Install path (same for paste and market): adapter source → eval'd in the
  * SidePanel's hidden sandbox iframe (sandbox-host) → captured defs sent to the
- * SW to persist + register. pipeline adapters become callable immediately;
- * func adapters are stored + listed but marked "needs func support" (Phase B).
+ * SW to persist + register. pipeline + func both register immediately; func
+ * requires the per-extension "Allow User Scripts" toggle to actually execute
+ * (Chrome 138+), which is surfaced in the market panel banner.
  */
 
 import { useEffect, useMemo, useState } from 'preact/hooks';
@@ -139,11 +140,11 @@ export function AdaptersSection() {
       const dUnsup = r.deferredUnsupported ?? 0;
       // 0 registered + something deferred = the user clicked install but nothing
       // actually became a callable tool. Surface it as a WARNING, not a success,
-      // and say why (func/Phase B vs unsupported step) — otherwise the toast
-      // looks like a green tick and the user reasonably expects it to work.
+      // and say why — otherwise the toast looks like a green tick and the user
+      // reasonably expects it to work.
       if (registered === 0 && (dFunc > 0 || dUnsup > 0)) {
         const reasons: string[] = [];
-        if (dFunc > 0) reasons.push(`${dFunc} 个 func 命令暂存(需 Phase B)`);
+        if (dFunc > 0) reasons.push(`${dFunc} 个 func 命令未注册(需在扩展详情开「允许用户脚本」)`);
         if (dUnsup > 0) reasons.push(`${dUnsup} 个 pipeline 命令用了引擎不支持的步骤`);
         setState({
           kind: 'err',
@@ -154,7 +155,7 @@ export function AdaptersSection() {
       }
       const parts = [`已安装 ${name}`];
       if (registered) parts.push(`${registered} 个命令可用`);
-      if (dFunc) parts.push(`${dFunc} 个 func 命令暂存(需 Phase B)`);
+      if (dFunc) parts.push(`${dFunc} 个 func 命令暂存(需开「允许用户脚本」)`);
       if (dUnsup) parts.push(`${dUnsup} 个 pipeline 命令用了不支持的步骤`);
       setState({ kind: 'ok', msg: parts.join(' · ') });
       void refresh();
@@ -213,44 +214,32 @@ export function AdaptersSection() {
     void refresh();
   }
 
-  const linkBtn =
-    'background:transparent;border:none;color:var(--accent,#0ea5e9);cursor:pointer;font-size:12px;padding:0';
-  const chip = (text: string, color: string): preact.JSX.Element => (
-    <span style={`font-size:10px;padding:1px 6px;border-radius:4px;background:${color};color:#fff`}>
-      {text}
-    </span>
-  );
-
-  const tabBtn = (k: Tab, label: string, count?: number): preact.JSX.Element => (
-    <button
-      onClick={() => setTab(k)}
-      style={`background:transparent;border:none;cursor:pointer;font-size:12px;padding:4px 8px;border-bottom:2px solid ${
-        tab === k ? 'var(--accent,#0ea5e9)' : 'transparent'
-      };color:${tab === k ? 'var(--accent,#0ea5e9)' : 'var(--muted)'};font-weight:${
-        tab === k ? '600' : '400'
-      }`}
-    >
-      {label}
-      {typeof count === 'number' && (
-        <span style="margin-left:4px;font-weight:400;opacity:0.75">({count})</span>
-      )}
-    </button>
-  );
-
   return (
-    <div class="section">
-      <h4 style="margin-bottom:6px">Adapters</h4>
-
-      <div style="display:flex;gap:0;border-bottom:1px solid var(--border,#e7e5e4);margin-bottom:8px">
-        {tabBtn('installed', '已安装', list.length)}
-        {tabBtn('market', '市场', market?.count)}
+    <div class="adapters-section">
+      <div class="pill-row" style="margin-bottom:14px">
+        <button
+          class={`pill ${tab === 'installed' ? 'selected' : ''}`}
+          onClick={() => setTab('installed')}
+        >
+          已安装 <span class="count">{list.length}</span>
+        </button>
+        <button
+          class={`pill ${tab === 'market' ? 'selected' : ''}`}
+          onClick={() => setTab('market')}
+        >
+          市场 {typeof market?.count === 'number' && <span class="count">{market.count}</span>}
+        </button>
       </div>
 
       {state.kind === 'ok' && (
-        <div style="font-size:11px;color:var(--ok,#16a34a);margin-bottom:6px">✓ {state.msg}</div>
+        <div class="banner ok" style="margin-bottom:10px">
+          ✓ {state.msg}
+        </div>
       )}
       {state.kind === 'err' && (
-        <div style="font-size:11px;color:var(--err,#dc2626);margin-bottom:6px">✗ {state.msg}</div>
+        <div class="banner err" style="margin-bottom:10px">
+          ✗ {state.msg}
+        </div>
       )}
 
       {tab === 'installed' && (
@@ -268,8 +257,6 @@ export function AdaptersSection() {
           onInstallPaste={onInstallPaste}
           onToggle={onToggle}
           onUninstall={onUninstall}
-          chip={chip}
-          linkBtn={linkBtn}
         />
       )}
 
@@ -306,33 +293,30 @@ interface InstalledPanelProps {
   onInstallPaste: () => Promise<void>;
   onToggle: (a: InstalledAdapterSummary) => Promise<void>;
   onUninstall: (a: InstalledAdapterSummary) => Promise<void>;
-  chip: (text: string, color: string) => preact.JSX.Element;
-  linkBtn: string;
 }
 
 function InstalledPanel(p: InstalledPanelProps): preact.JSX.Element {
   return (
     <div>
-      <div style="display:flex;align-items:center;margin-bottom:6px">
-        <div style="font-size:11px;color:var(--muted);flex:1">
-          ⚠️ 安装会执行第三方脚本(已隔离在沙箱内)。只安装你信任来源的代码。
-        </div>
-        <button style={p.linkBtn} onClick={p.onTogglePaste}>
+      <div class="adapters-paste-bar">
+        <span class="adapters-paste-warning">
+          ⚠️ 安装会执行第三方脚本(已隔离在沙箱内),请只装信任来源的代码。
+        </span>
+        <button class="btn sm outline" onClick={p.onTogglePaste}>
           {p.showPaste ? '取消' : '+ 贴码安装'}
         </button>
       </div>
 
       {p.showPaste && (
-        <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px">
+        <div class="adapters-paste-form">
           <textarea
-            placeholder="粘贴 opencli adapter 源码(import { cli } from '@jackwener/opencli/registry'; cli({...}))"
+            placeholder="粘贴 opencli adapter 源码 (import { cli } from '@jackwener/opencli/registry'; cli({...}))"
             value={p.source}
             onInput={(e) => p.onSourceChange((e.target as HTMLTextAreaElement).value)}
             rows={6}
-            style="width:100%;font-family:monospace;font-size:11px"
           />
           <button
-            class="icon-btn"
+            class="btn primary"
             disabled={!p.source.trim() || p.installing}
             onClick={() => void p.onInstallPaste()}
           >
@@ -342,39 +326,29 @@ function InstalledPanel(p: InstalledPanelProps): preact.JSX.Element {
       )}
 
       {p.loading ? (
-        <div style="font-size:11px;color:var(--muted)">加载中…</div>
+        <div class="hist-empty">加载中…</div>
       ) : p.list.length === 0 ? (
-        <div style="font-size:11px;color:var(--muted)">
-          （还没有安装任何 adapter — 去「市场」tab 一键装几个）
-        </div>
+        <div class="hist-empty">还没有安装任何 adapter — 去「市场」tab 一键装几个</div>
       ) : (
-        <ul style="list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:6px">
+        <ul class="adapters-list">
           {p.list.map((a) => (
-            <li
-              key={a.id}
-              style="border:1px solid var(--border,#e7e5e4);border-radius:6px;padding:6px 8px"
-            >
-              <div style="display:flex;align-items:center;gap:6px">
-                <code style="font-size:12px">{a.title}</code>
-                {a.kind === 'func' && p.chip('func·待 Phase B', '#a16207')}
-                {a.kind === 'mixed' && p.chip('mixed', '#a16207')}
-                {!a.enabled && p.chip('已禁用', '#78716c')}
-                <span style="margin-left:auto;font-size:10px;color:var(--muted)">
-                  {a.commandCount} 命令
-                </span>
+            <li key={a.id} class="adapter-card">
+              <div class="adapter-card-head">
+                <code class="adapter-card-title">{a.title}</code>
+                {a.kind === 'func' && <span class="ad-chip kind-func">func</span>}
+                {a.kind === 'mixed' && <span class="ad-chip kind-mixed">mixed</span>}
+                {!a.enabled && <span class="ad-chip muted">已禁用</span>}
+                <span class="adapter-card-cmd-count">{a.commandCount} 命令</span>
               </div>
-              <div style="display:flex;gap:10px;margin-top:4px">
-                <button style={p.linkBtn} onClick={() => void p.onToggle(a)}>
+              <div class="adapter-card-actions">
+                <button class="btn sm outline" onClick={() => void p.onToggle(a)}>
                   {a.enabled ? '禁用' : '启用'}
                 </button>
-                <button
-                  style={p.linkBtn.replace('var(--accent,#0ea5e9)', 'var(--err,#dc2626)')}
-                  onClick={() => void p.onUninstall(a)}
-                >
+                <button class="btn sm danger outline" onClick={() => void p.onUninstall(a)}>
                   卸载
                 </button>
                 {a.origin.type === 'marketplace' && (
-                  <span style="font-size:10px;color:var(--muted)">来自市场</span>
+                  <span class="adapter-card-origin">来自市场</span>
                 )}
               </div>
             </li>
@@ -403,50 +377,83 @@ interface MarketPanelProps {
 }
 
 function MarketPanel(p: MarketPanelProps): preact.JSX.Element {
+  // The func/Chrome-138 notice is one-time information; surface it on-demand
+  // via the (?) button next to the filter pills so it doesn't perpetually
+  // eat space at the top of every visit.
+  const [showFuncNote, setShowFuncNote] = useState(false);
   if (p.err) {
     return (
-      <div style="font-size:11px;color:var(--err,#dc2626)">
-        市场加载失败:{p.err}
-        <div style="color:var(--muted);margin-top:4px">
-          确保 dist/marketplace/index.json 存在,且 manifest 把 marketplace/* 列在
-          web_accessible_resources。重建:node scripts/build-marketplace-index.mjs --popular
-
+      <div class="banner err">
+        <div>
+          <div style="font-weight:600;margin-bottom:4px">市场加载失败</div>
+          <div style="font-size:11px;line-height:1.5">{p.err}</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:6px;line-height:1.5">
+            确保 dist/marketplace/index.json 存在,且 manifest 把 marketplace/* 列在
+            web_accessible_resources。重建: node scripts/build-marketplace-index.mjs --popular
+          </div>
         </div>
       </div>
     );
   }
   if (!p.market) {
-    return <div style="font-size:11px;color:var(--muted)">加载市场目录…</div>;
+    return <div class="hist-empty">加载市场目录…</div>;
   }
-  const typeBtn = (t: TypeFilter, label: string, n: number): preact.JSX.Element => (
-    <button
-      onClick={() => p.onTypeFilterChange(t)}
-      style={`font-size:10px;padding:2px 8px;border-radius:3px;cursor:pointer;border:1px solid ${
-        p.typeFilter === t ? 'var(--accent,#0ea5e9)' : 'var(--border,#e7e5e4)'
-      };background:${p.typeFilter === t ? 'var(--accent,#0ea5e9)' : 'transparent'};color:${
-        p.typeFilter === t ? '#fff' : 'inherit'
-      }`}
-    >
-      {label} <span style="opacity:0.75">{n}</span>
-    </button>
-  );
   return (
     <div>
-      <div style="font-size:11px;color:var(--muted);margin-bottom:4px">
-        内置 {p.counts.all} 个 opencli adapter ({p.counts.pipeline} pipeline · {p.counts.func} func)
+      <div class="market-search">
+        <input
+          type="text"
+          placeholder="搜索 site / name / 描述(例: reddit、价格、新闻)"
+          value={p.search}
+          onInput={(e) => p.onSearchChange((e.target as HTMLInputElement).value)}
+        />
       </div>
-      {p.counts.func > 0 && (
-        <div style="font-size:10px;color:var(--muted);background:#fef3c7;border:1px solid #fde68a;border-radius:4px;padding:4px 6px;margin-bottom:8px">
-          ⚠️ <strong>func 型</strong>需 Chrome 138+,并在「扩展详情 → 允许用户脚本」开关打开,否则装了也跑不起来(toast 会报红)。
+
+      <div class="market-filters">
+        <button
+          class={`pill ${p.typeFilter === 'all' ? 'selected' : ''}`}
+          onClick={() => p.onTypeFilterChange('all')}
+        >
+          全部 <span class="count">{p.counts.all}</span>
+        </button>
+        <button
+          class={`pill ${p.typeFilter === 'pipeline' ? 'selected' : ''}`}
+          onClick={() => p.onTypeFilterChange('pipeline')}
+        >
+          pipeline <span class="count">{p.counts.pipeline}</span>
+        </button>
+        <button
+          class={`pill ${p.typeFilter === 'func' ? 'selected' : ''}`}
+          onClick={() => p.onTypeFilterChange('func')}
+        >
+          func <span class="count">{p.counts.func}</span>
+        </button>
+        {p.counts.func > 0 && (
+          <button
+            class={`pill info-toggle ${showFuncNote ? 'selected' : ''}`}
+            onClick={() => setShowFuncNote((v) => !v)}
+            title="关于 func 型 adapter 的运行前提"
+            aria-label="func 型说明"
+            aria-expanded={showFuncNote}
+          >
+            ?
+          </button>
+        )}
+      </div>
+
+      {showFuncNote && (
+        <div class="banner warn" style="margin-bottom:14px">
+          <div>
+            <strong>func 型</strong>需 Chrome 138+,并在「扩展详情 → 允许用户脚本」开关打开,
+            否则装了也跑不起来(toast 会报红)。
+          </div>
         </div>
       )}
 
       {p.featured.length > 0 && p.search.trim() === '' && p.typeFilter === 'all' && (
-        <div style="margin-bottom:10px">
-          <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:4px">
-            ⭐ 推荐
-          </div>
-          <ul style="list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:4px">
+        <div class="market-featured">
+          <div class="market-featured-label">⭐ 推荐</div>
+          <ul class="market-list">
             {p.featured.map((a) => (
               <MarketRow
                 key={entryId(a)}
@@ -461,31 +468,14 @@ function MarketPanel(p: MarketPanelProps): preact.JSX.Element {
         </div>
       )}
 
-      <div style="margin-bottom:6px">
-        <input
-          type="text"
-          placeholder="搜索 site / name / 描述(例:reddit、价格、新闻)"
-          value={p.search}
-          onInput={(e) => p.onSearchChange((e.target as HTMLInputElement).value)}
-          style="width:100%;padding:4px 6px;font-size:11px;border:1px solid var(--border,#e7e5e4);border-radius:4px"
-        />
-      </div>
-
-      <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
-        <span style="font-size:11px;color:var(--muted)">类型</span>
-        {typeBtn('all', '全部', p.counts.all)}
-        {typeBtn('pipeline', 'pipeline', p.counts.pipeline)}
-        {typeBtn('func', 'func', p.counts.func)}
-      </div>
-
-      <div style="font-size:11px;color:var(--muted);margin-bottom:4px">
+      <div class="market-result-count">
         显示 {p.filtered.length}
-        {p.filtered.length !== p.counts.all ? `/${p.counts.all}` : ''}
+        {p.filtered.length !== p.counts.all ? ` / ${p.counts.all}` : ''}
       </div>
       {p.filtered.length === 0 ? (
-        <div style="font-size:11px;color:var(--muted)">没有匹配的 adapter</div>
+        <div class="hist-empty">没有匹配的 adapter</div>
       ) : (
-        <ul style="list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:2px;max-height:360px;overflow-y:auto">
+        <ul class="market-list market-list-scroll">
           {p.filtered.map((a) => (
             <MarketRow
               key={entryId(a)}
@@ -509,44 +499,34 @@ interface MarketRowProps {
   accent?: boolean;
 }
 
-function MarketRow({ a, installed, installing, onInstall, accent }: MarketRowProps): preact.JSX.Element {
+function MarketRow({
+  a,
+  installed,
+  installing,
+  onInstall,
+  accent,
+}: MarketRowProps): preact.JSX.Element {
   const id = entryId(a);
-  // pipeline 绿、func 橙(标识 Phase B 前提)。chip 用 inline style 而不是 className
-  // 以避免 sidepanel/style.css 改动。
+  // pipeline 绿、func 橙(orange 提示 func 需要「允许用户脚本」开关)。
   const typeChip =
     a.type === 'pipeline' ? (
-      <span style="font-size:9px;padding:1px 5px;border-radius:3px;background:#dcfce7;color:#166534;font-weight:600">
-        pipeline
-      </span>
+      <span class="ad-chip type-pipeline">pipeline</span>
     ) : a.type === 'func' ? (
-      <span style="font-size:9px;padding:1px 5px;border-radius:3px;background:#ffedd5;color:#9a3412;font-weight:600">
-        func
-      </span>
+      <span class="ad-chip type-func">func</span>
     ) : null;
   return (
-    <li
-      style={`border:1px solid ${accent ? 'var(--accent,#0ea5e9)' : 'var(--border,#e7e5e4)'};border-radius:4px;padding:4px 8px;display:flex;align-items:center;gap:6px`}
-    >
-      <div style="flex:1;min-width:0">
-        <div style="font-size:12px;display:flex;align-items:center;gap:6px">
-          <code>{id}</code>
+    <li class={`market-row ${accent ? 'accent' : ''}`}>
+      <div class="market-row-body">
+        <div class="market-row-head">
+          <code class="market-row-id">{id}</code>
           {typeChip}
         </div>
-        {a.description && (
-          <div style="font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
-            {a.description}
-          </div>
-        )}
+        {a.description && <div class="market-row-desc">{a.description}</div>}
       </div>
       {installed ? (
-        <span style="font-size:10px;color:var(--ok,#16a34a)">✓ 已安装</span>
+        <span class="market-row-installed">✓ 已安装</span>
       ) : (
-        <button
-          class="icon-btn"
-          style="font-size:11px;padding:2px 8px"
-          disabled={installing}
-          onClick={() => void onInstall(a)}
-        >
+        <button class="btn sm primary" disabled={installing} onClick={() => void onInstall(a)}>
           {installing ? '安装中…' : '安装'}
         </button>
       )}
