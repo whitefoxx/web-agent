@@ -936,3 +936,42 @@ SidePanel 打开 → fetchMarketIndex() → index.json (~116KB) 一次性
 - 脚本编辑器 UI(现在只有「贴码安装」 + 市场浏览)
 
 → **架构上不用动**,加这三层就成 Tampermonkey 替代品。但我们目标不是这个,所以不做。
+
+## 13. 适配器测试覆盖:从 opencli 移植(2026-05-31 sweep)
+
+marketplace 改为手动维护(§10 / commit `e9c211c`)后,bundle 后的 adapter 失去了 opencli 仓库里的 `*.test.js` 保护。这次做了一轮全量移植,把 opencli 的测试搬到「我们实际 ship 的 bundle 产物」上,既补回行为护栏,也用「忠实移植的断言能否通过」当 porting bug 探针。
+
+### 13.1 方法
+
+- **先静态审计再补测**:`/tmp/recon-adapters.mjs` 扫全量 adapter 按 bug 形态分类(import 的名字 ∉ 注入 scope / stub util 被调 / `node:` / 残留 alias / captureNetwork),确认系统性的坑在 §10.18 一把修完,剩下的 per-adapter 逻辑 bug 用移植测试来逼出来。
+- **per-site 并行 workflow**:14 个 shipped 且有 opencli 测试的站点,各一个 agent 移植 + 自行 `vitest` 跑绿,只许写 `tests/`,不许动 `marketplace/`/`src/`/`index.json`(避免并发写 index.json 冲突;真 adapter bug 集中由 orchestrator 串行修 + 轮 sha256)。
+- **bilibili 作为参考样板**(§10.14 期间手写的 7 个测试 + `tests/adapters/_helpers/bilibili-page.ts`):agent 照着它学 porting 套路。
+
+### 13.2 移植时的固定 divergence(都是机械适配,不是 bug)
+
+1. `getRegistry().get('site/name')`(opencli 的 Map)→ `findAdapter('site','name')`(我们 registry 是数组,`src/runtime/registry.js`)。
+2. 错误类从 `src/runtime/errors.js` import,不是 `@jackwener/opencli/errors`。
+3. **没有 `./utils.js` 模块边界可 mock**——bundle 把 utils inline 了。改成在 adapter **真正跨的最低边界**拦截,通常是 `page.evaluate(<string>)`:fake page 解析 fetch 的 URL → 路由到 `vi.fn()`(见 bilibili-page.ts);signing 参数(wbi 的 wts/w_rid 之类)在路由层剥掉再断言。
+4. URL query 参数回来都是**字符串**:opencli 断言 `{oid: 123}` → 我们 `{oid: '123'}`。
+5. fake page 作为**第一个实参**传给 inlined apiGet(opencli 在模块级 mock,用 `{}` 当 page);断言 `page.apiGet` 被 `(page, path, opts)` 调用。
+
+### 13.3 发现的 seam 谱系(每站不一样,所以 per-site agent 是对的拆法)
+
+- **API-routing + 签名**:bilibili(wbi)、douyin(`browserFetch`)、weibo —— fake page 解析 fetch URL 路由。
+- **DOM-driven**:linkedin / douban / claude / xiaohongshu —— `goto`/`wait`/`autoScroll` + `page.evaluate(<提取脚本>)` 返回 canned payload。
+- **global fetch**:weread、wikipedia —— adapter 直接用全局 `fetch`(wikipedia 的 func 签名甚至是 `async (args)=>`,根本不收 page),测试 stub `globalThis.fetch`。
+- **pure helper via `__test__`**:notebooklm / youtube/channel / zhihu 部分 —— bundle 通过 `export { __test__ }` 暴露 inlined 纯函数,直接单测。
+
+### 13.4 结果
+
+- **+882 测试,14 站点,全绿**;全量套件从 268 → **1150 tests / 138 files**(本地 `npx vitest run` 实测,非 agent 自报)。
+- **0 个 adapter bug**:pipeline/func adapter 是 opencli 的忠实 esbuild 产物,行为一致;系统性的坑(注入 scope stub / 错误类 instanceof / log 缺失)已在 §10.18 统一修掉,所以移植阶段没再炸出新的逻辑 bug。
+- **跳过(记录在案,非偷懒)**:
+  - 纯 helper 测试,但该 helper 被 inline 成 file-local 且 bundle 没 `__test__` 导出(linkedin/posts 的 activityUrl/parseMetric、xiaohongshu/note 的 parseNoteId 等)——其行为通过 func 间接覆盖了。
+  - **依赖 jsdom 的 DOM 提取测试**(xiaohongshu 4 + linkedin 2):opencli 用 `new JSDOM()` 把生成的 `buildXExtractJs` 脚本喂真 DOM 跑。webchat-agent 没装 jsdom 且 vitest env 是 `node`。这是**唯一真正的覆盖缺口**——那些 DOM 提取脚本整体没被执行过,正是 porting bug 可能藏身处。→ 后续用 happy-dom 补(见下一节 commit)。
+
+### 13.5 教训
+
+- **测「你 ship 的产物」,不是「上游源码」**。opencli 测的是带 `./utils.js` 模块边界的源文件;我们 ship 的是 inline 后的 bundle。同一个断言,mock 的接缝完全不同——直接 copy opencli 测试会全红。
+- **per-site 拆分是对的**:14 站 14 种 seam,没有「一个 generic fake page 通吃」。让每个 agent 读自己站的 adapter + opencli 测试自己推接缝,比预先设计统一 helper 更省、更对。
+- **移植测试 = 廉价的 porting-bug 探针**:忠实搬 opencli 的断言,能过就证明 bundle 行为对;过不了且不是机械适配问题,就是真 bug。这轮 0 bug 本身就是「bundle 管线忠实」的证据。
