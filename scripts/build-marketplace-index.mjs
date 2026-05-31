@@ -1,5 +1,32 @@
 #!/usr/bin/env node
 /**
+ * ⚠️ DEPRECATED / DESTRUCTIVE — DO NOT RUN ON A WHIM.
+ *
+ * As of 2026-05-31 marketplace/<site>/<name>.js is hand-maintained and is the
+ * AUTHORITATIVE source for adapter behavior. Running this script wipes every
+ * site subdirectory under marketplace/ before regenerating from upstream
+ * (../browser-agent/opencli/clis) — any local fix or webchat-specific tweak
+ * gets clobbered, and the user's IDB-installed source goes stale on next
+ * marketplace fetch because every sha256 rotates.
+ *
+ * The script is kept for two narrow use cases:
+ *   1. One-off comparison: regenerate to a throwaway dir with --out, then diff
+ *      against marketplace/ to see what upstream would emit today.
+ *   2. Bootstrapping a brand-new site that's never been ported yet.
+ *
+ * In either case you MUST pass --i-know-this-wipes-local-edits to confirm you
+ * have inspected git status and accepted the loss. The script refuses to run
+ * otherwise.
+ *
+ * Normal workflow for keeping adapters in sync with upstream:
+ *   I (the user) ask Claude to diff a specific upstream file vs marketplace/
+ *   and selectively port changes. After any edit to marketplace/<x>/<y>.js,
+ *   marketplace/index.json's sha256 (and description/access/domain if changed)
+ *   for that entry MUST be updated in the same commit — install path enforces
+ *   sha256 match (src/sidepanel/marketplace.ts:130).
+ *
+ * ─────────────────────────── original docs ─────────────────────────────────
+ *
  * Build a per-file adapter marketplace from a local opencli checkout.
  *
  * Layout produced (committed to repo, also copied verbatim to dist/ at build
@@ -51,6 +78,31 @@ const includeAll = process.argv.includes('--all');
 const popularOnly = process.argv.includes('--popular');
 const clisDir = resolve(arg('--clis', join(ROOT, '..', 'browser-agent', 'opencli', 'clis')));
 const outDir = resolve(arg('--out', join(ROOT, 'marketplace')));
+
+// Refuse to run without explicit consent — see top-of-file banner. The flag
+// name is deliberately ugly so it can't be muscle-memoried.
+if (!process.argv.includes('--i-know-this-wipes-local-edits')) {
+  console.error(
+    [
+      '',
+      '✗ build-marketplace-index.mjs is DEPRECATED in normal use.',
+      '',
+      '  marketplace/<site>/<name>.js is now hand-maintained and authoritative.',
+      '  Running this script wipes every site subdir under the --out path',
+      '  before regenerating from upstream — any local edits are LOST.',
+      '',
+      '  If you really want to do this (one-off upstream comparison or a',
+      "  brand-new site bootstrap), confirm by appending the flag:",
+      '',
+      '      --i-know-this-wipes-local-edits',
+      '',
+      "  For routine sync with upstream, ask Claude to diff a specific upstream",
+      '  file vs marketplace/ and port changes selectively instead.',
+      '',
+    ].join('\n'),
+  );
+  process.exit(2);
+}
 
 /**
  * Curated allowlist used with --popular for the shipped built-in marketplace.
