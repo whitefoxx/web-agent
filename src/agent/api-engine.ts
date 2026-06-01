@@ -22,7 +22,7 @@ import { loadLlmConfig } from '../config/llm-config';
 import { appendTurn, saveSession } from './session';
 import type { AgentEngine, EngineContext, SessionDoneReason } from './engine';
 import type { ApiMessage, ContentPart, ToolCall } from './api-types';
-import { collectImageRefs, stripDataUrls } from './tool-images';
+import { collectImageRefs, stripDataUrls, isDataUrl } from './tool-images';
 import { log, warn, error as logError } from '../runtime/log';
 
 const DEFAULT_MAX_ITERATIONS = 12;
@@ -30,6 +30,44 @@ const MAX_TOOL_RESULT_CHARS = 64_000;
 /** Cap images fed to the model per turn (vision tokens are expensive, and a
  * turn with several image-returning tools could otherwise balloon). */
 const MAX_VISION_IMAGES_PER_TURN = 8;
+
+/** Model-driven vision: a pseudo-tool offered only to vision-capable profiles.
+ * Tool results keep image URLs in their TEXT (as data); when the model decides
+ * the task needs it to actually SEE an image, it calls this with the relevant
+ * URLs. The engine intercepts the call (it doesn't go through the dispatcher),
+ * validates the URLs, and injects them as a vision user message. This is the
+ * "the LLM decides which images + intent" step, expressed as native function
+ * calling instead of an intent-blind auto-scan. */
+const VIEW_IMAGE_TOOL = {
+  type: 'function' as const,
+  function: {
+    name: 'view_image',
+    description:
+      '查看一张或多张图片的实际内容（视觉理解）。**仅当你需要分析/理解图片内容时**才调用：例如用户让你“看看这张图是什么”，或需要根据图片内容来回答。传入要查看的图片完整 http(s) 地址。注意：如果图片地址只是要传递的数据（例如用户让你把某图片链接发到评论里、或保存某链接），**不要**调用本工具——直接把 URL 当文本用即可。不要凭 URL 猜测图片内容；真正要看图才调用。',
+    parameters: {
+      type: 'object',
+      properties: {
+        images: {
+          type: 'array',
+          items: { type: 'string' },
+          description: '要查看的图片 URL 列表（完整 http/https 地址）',
+        },
+        purpose: { type: 'string', description: '可选：为什么要看这些图（便于记录）' },
+      },
+      required: ['images'],
+    },
+  },
+};
+
+/** Appended to the system prompt for vision profiles so the model knows the
+ * view_image affordance exists (otherwise it won't reliably call it). */
+const VISION_SYSTEM_NOTE = `
+
+## 看图能力
+当前模型支持视觉,但你默认看不到图像本身——无论是用户在消息里给的图片地址,还是工具结果里的图片链接,对你来说都只是 URL 文本。
+- 当你**需要分析/理解图片内容**时(例如用户让你“看看这张图是什么”、或需要依据图片内容作答),调用 view_image 工具,传入要查看的图片完整 URL。
+- 如果图片地址只是**要传递的数据**(例如用户让你把某图片链接发到评论里、保存某个链接),**不要**调用 view_image——直接把 URL 当文本用即可。
+- 截图类工具(generic__screenshot)的结果会自动作为图像呈现,无需 view_image。`;
 
 interface ChatCompletionResponse {
   choices: Array<{
@@ -225,9 +263,12 @@ export const apiEngine: AgentEngine = {
     // Persist the user turn for the history drawer, and seed the OpenAI message
     // array (continuing prior turns if any).
     appendTurn(session, { role: 'user', text: ctx.userText, ts: Date.now() });
-    // Repair the replayed history: pad any dangling tool_calls (abort mid-loop)
-    // and flatten prior-turn image messages to text (images live one turn only).
-    // Both would otherwise risk a 400. See sanitizeHistory.
+    // The user's message stays plain TEXT even if it contains image URLs — it's
+    // the model's call (via view_image) whether to actually look at them. A URL
+    // the user only wants passed along (e.g. "把这张图发到评论 https://x.jpg")
+    // must NOT be force-fed as vision. Fully model-driven; see VISION_SYSTEM_NOTE.
+    // sanitizeHistory repairs replayed history (dangling tool_calls, prior-turn
+    // image messages flattened to text).
     const messages: ApiMessage[] = [
       ...sanitizeHistory(session.apiMessages ?? []),
       { role: 'user', content: ctx.userText },
@@ -257,7 +298,10 @@ export const apiEngine: AgentEngine = {
 
         ctx.emit({ type: 'iteration_progress', iteration: iter, iterationId, phase: 'awaiting' });
 
-        const tools = openAiToolsFromRegistry();
+        // Offer view_image only to vision profiles (a text model can't use it).
+        const tools = cfg.vision
+          ? [...openAiToolsFromRegistry(), VIEW_IMAGE_TOOL]
+          : openAiToolsFromRegistry();
         if (tools.length !== lastToolsCount) {
           log(
             'api',
@@ -274,7 +318,13 @@ export const apiEngine: AgentEngine = {
             signal: ctx.signal,
             body: {
               model: cfg.model,
-              messages: [{ role: 'system', content: systemPromptApi() }, ...messages],
+              messages: [
+                {
+                  role: 'system',
+                  content: systemPromptApi() + (cfg.vision ? VISION_SYSTEM_NOTE : ''),
+                },
+                ...messages,
+              ],
               tools,
               tool_choice: 'auto',
               max_tokens: 4096,
@@ -364,18 +414,56 @@ export const apiEngine: AgentEngine = {
             ts: Date.now(),
           });
 
+          // Model-driven vision (view_image): intercepted here — it doesn't go
+          // through the dispatcher. Validate the URLs the model asked to see,
+          // ack via a text tool message, and queue them for the post-loop image
+          // user message. This is the pure-model-driven path for URL images.
+          if (call.function.name === 'view_image') {
+            const reqUrls = Array.isArray((args as { images?: unknown }).images)
+              ? ((args as { images: unknown[] }).images).filter(
+                  (u): u is string => typeof u === 'string',
+                )
+              : [];
+            // Trust the model's intent: accept any http(s) URL it asked to see,
+            // no image-pattern gating (a strict regex would wrongly reject valid
+            // images with unusual hosts/paths — the model decided it's an image).
+            const valid = reqUrls
+              .filter((u) => /^https?:\/\//i.test(u.trim()))
+              .slice(0, MAX_VISION_IMAGES_PER_TURN);
+            turnImages.push(...valid);
+            const dropped = reqUrls.length - valid.length;
+            const ack =
+              valid.length > 0
+                ? `已接收 ${valid.length} 张图片，将作为图像呈现给你查看${dropped > 0 ? `（${dropped} 个非 http/https 地址已忽略）` : ''}。`
+                : '没有可用的图片地址（需为完整 http/https URL）。';
+            messages.push({ role: 'tool', tool_call_id: call.id, content: ack });
+            const vTrace = {
+              id: traceId,
+              action: 'execute_tool' as const,
+              tool: 'view_image',
+              args,
+              status: 'completed' as const,
+              result: { accepted: valid, ignored: dropped },
+              durationMs: 0,
+            };
+            ctx.emit({ type: 'tool_trace', trace: vTrace });
+            appendTurn(session, { role: 'tool_trace', trace: vTrace, ts: Date.now() });
+            session.apiMessages = messages;
+            await saveSession(session);
+            continue;
+          }
+
           const r = await ctx.executeTool({ tool: call.function.name, args });
 
-          // Vision: when the active model is multimodal, pull image refs
-          // (screenshots' data URLs, image URLs like weibo pics) out of the
-          // result and feed them as a follow-up user message of image_url
-          // blocks — OpenAI-compatible APIs only accept image content in user
-          // messages, not tool messages. Gated on the profile's `vision` flag
-          // so text-only models never receive image content (they'd error).
-          // Cap matches the per-turn cap so a single image-rich result can fill
-          // the turn budget.
+          // Auto-attach only DATA URLs (screenshots) from a tool result: their
+          // base64 can't round-trip through a view_image tool-call argument, so
+          // a model can't ask for them by reference. http image URLs are NOT
+          // auto-attached — the model requests those via view_image (above).
+          // Gated on `vision` so text-only models never get image content.
           const images =
-            cfg.vision && r.ok ? collectImageRefs(r.result, MAX_VISION_IMAGES_PER_TURN) : [];
+            cfg.vision && r.ok
+              ? collectImageRefs(r.result, MAX_VISION_IMAGES_PER_TURN).filter(isDataUrl)
+              : [];
 
           let rawResult = r.ok
             ? typeof r.result === 'string'

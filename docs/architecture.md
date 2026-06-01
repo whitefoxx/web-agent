@@ -154,25 +154,23 @@ UI 菜单 → 日志页可以一键关闭 / 开启 + 清空。
 - **CDP 权限**:仅在调 adapter 时 lazy attach,结束即 detach。`chrome.debugger` 的黄色提示条会出现在目标站点 tab。
 - **不存储任何凭据**:复用浏览器已有的登录态,扩展不读 / 不存 password / cookie / api key 之外的内容。API key 走 chrome.storage.local,可在设置面板清空。
 
-## 8.5 视觉 / 多模态工具结果(2026-06)
+## 8.5 视觉 / 多模态(2026-06,模型驱动)
 
-文本模型(如 glm-5)拿到的工具结果是 **JSON.stringify 的纯文本**——图片 URL 只是字符串,模型「看不见」图;截图的 base64 dataUrl 也只是被 64KB 截断的文本噪音。要让模型真读图,必须把图片作为 `image_url` content block 喂给**多模态**模型(如 GLM-5V-Turbo / gpt-4o)。
+OpenAI 兼容 API 里,工具(tool）消息**只能是纯文本**,图片必须放进 **user** 消息的 `image_url` content block 才能喂给多模态模型(GLM-4.6V / gpt-4o 等)。整体**按 profile 开关**:`LlmConfig.vision`(设置页「多模态模型」勾选);关闭时纯文本模型完全不受影响(收到图片内容会 400)。
 
-实现(`src/agent/tool-images.ts` + `api-engine.ts`):
+**核心:URL 图全由模型决定要不要看(纯模型驱动),不靠正则猜。**
 
-- **按 profile 开关**:`LlmConfig.vision`(设置页「多模态模型」勾选)。关闭时行为完全不变,纯文本模型不会收到图片内容(收到会 400)。
-- **抽图**:`collectImageRefs(result, cap)` 递归扫工具结果,收 `data:image/*`(非 svg)和 http 图片 URL(路径带光栅扩展名 **或** 命中已知图床 host:xhscdn/sinaimg/hdslb/zhimg…,因为小红书等图片 URL 无扩展名)。去重、保序、封顶。
-- **注入**:本回合所有工具的图片汇总成**一条** user 消息(`[{type:'text'},{type:'image_url'}...]`),放在**所有 tool 消息之后**——OpenAI/GLM 契约要求 assistant 的每个 tool_call_id 必须被连续的 tool 消息应答,中间插 user 消息会 400。
-- **文本瘦身**:`stripDataUrls` 把结果文本里的 base64 全替成占位符(图已走视觉通道)。
+所有图片 URL——无论是用户在消息里给的,还是工具结果里返回的——都**只作为文本**进入上下文(user 消息原文、tool 结果 JSON)。引擎**不**用正则去抽 + 硬塞图。原因有二:① 正则会漏(用户给的图床地址不一定匹配 pattern);② intent-blind(用户说「把这张图链接发到评论 https://x.jpg」其实不需要看图,硬塞既浪费又可能误导)。
 
-**评审揪出的坑(已修,见 `tool-images.test.ts` / `sanitize-history.test.ts`)**:
+做法:给 vision profile **额外注册一个 `view_image({images, purpose})` 工具** + system prompt 说明(「需要分析图片内容才调;只是传递链接就别调」)。模型读到 URL + 用户意图后,**自己决定**要不要看、看哪几张,调 `view_image` 传 URL。引擎**拦截** `view_image`(不走 dispatcher):只校验是不是 http(s)(**不**做图片 pattern 门控——模型既然要看就信它,避免误拒不常见的图床 URL)→ 回一条 ack tool 消息 → 把 URL 排进 `turnImages`。这一步 = 模型**原生 function-calling** 的参数充当「干净的图片地址 + 意图」,不另起一次抽取 LLM 调用。
 
-1. **SVG**:`image/svg+xml` 多数视觉端点拒收 → 抽图时排除 svg(光栅才发)。
-2. **无扩展名图床**:小红书 `ci.xiaohongshu.com/<id>` / `*.xhscdn.com/<id>` 没有 `.jpg`,只认扩展名会漏 → 加图床 host 白名单。
-3. **跨 profile 重放**:vision turn 的 `image_url` 持久化在 `session.apiMessages`,中途切到文本模型续聊会把图片重放给它 → `sanitizeHistory` 在 seed 时按当前 `vision` 把图片 user 消息**降级为文本**。
-4. **悬空 tool_calls**(评审顺带发现的**既有** bug,非 vision 引入):写操作确认期间 abort,会留下 assistant(tool_calls) 没有对应 tool 应答 → 下一轮重放直接 400,会话**永久卡死**。`sanitizeHistory` 在 seed 时给未应答的 tool_call_id 补占位 tool 消息修复。
+**截图(base64)是例外——仍自动呈现**:`generic__screenshot` 返回的 `data:image/...;base64,...` **没法当 tool 参数回传**(太大,模型没法按引用请求它),所以 data URL 仍由引擎自动收(`collectImageRefs(...).filter(isDataUrl)`)并直接呈现。即「URL 图 → view_image(模型决定);截图 → 自动给」。
 
-**代价/未决**:base64 截图作为 `image_url` 持久化进 IDB 会让 session 变大(多轮反复截图尤甚);http 图 URL 很短无所谓。后续可考虑只在「当回合」带图、历史里换成缩略引用。
+**组装规则**(共用):本回合所有图(view_image 的 + 截图的)汇成**一条** user 消息,放在**所有 tool 消息之后**——assistant 的每个 tool_call_id 必须被连续 tool 消息应答,中间插 user 消息会 400。图片**只活一轮**:`sanitizeHistory` 在下一轮 seed 时把旧图 user 消息降级成文本占位(省 token,且避免重放给中途切换的文本模型)。
+
+**评审揪出的坑(已修)**:SVG 视觉端点拒收→排除;小红书等无扩展名图床→host 白名单;跨 profile 重放/悬空 tool_calls→`sanitizeHistory` 修。见 `tool-images.test.ts` / `sanitize-history.test.ts` / `fetch-image.test.ts`。
+
+**未决**:`fetch-image.ts toVisionDataUrl`(SW 取图转 base64,绕 hotlink)已备好但**未接线**——实测 sina 图 GLM 能直接抓,故 view_image 目前传原始 URL;将来某图床 hotlink 抓不到再接。
 
 ## 9. 已知限制 / 后续工作
 

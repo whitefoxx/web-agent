@@ -51,12 +51,15 @@ function isImageHost(u: string): boolean {
   }
 }
 
+/** True if `s` (a discrete value) is an image ref: a raster data URL, or an
+ * http(s) URL whose path is a raster image OR whose host is a known image CDN
+ * (xhs etc. serve extension-less image URLs). Used by collectImageRefs to find
+ * screenshots' data URLs in tool results. NB: the view_image tool does NOT gate
+ * on this — it trusts whatever URL the model decided to view. */
 function looksLikeImage(s: string): boolean {
   const t = s.trim();
   if (DATA_IMG_RE.test(t)) return !DATA_SVG_RE.test(t); // raster data URLs only
   if (!HTTP_RE.test(t)) return false;
-  // Path ends in a raster extension, OR it's a known image-CDN host (xhs etc.
-  // serve extension-less image URLs).
   return IMG_EXT_RE.test(t) || isImageHost(t);
 }
 
