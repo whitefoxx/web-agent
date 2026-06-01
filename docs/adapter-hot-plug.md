@@ -766,7 +766,9 @@ SidePanel              # 卸载受影响 adapter → 重装
 
 **教训**:**警告条件要跟实际执行路径同步**。dispatcher 有 3 条 routing(func / pipeline / _userScriptSource),registry 只看 2 条,长期信号噪音掩盖真问题。下次加新执行路径时,把 registry 的判定也带上 —— 或者反过来,**把「能跑」的判定写在 dispatcher 一处,registry 调它**。现在分两份,未来再加路径就会再次脱钩。
 
-### 10.17 sandbox.html cross-origin load 错误 —— WAR 与 sandbox.pages 双声明冲突
+### 10.17 sandbox.html cross-origin load 错误 ——【未解决,已知噪音】
+
+> **状态(2026-06 更新)**:**仍未修好**。下面记的「删 WAR 双声明」是一次**合理但无效**的尝试——删掉是对的(sandbox.html 确实不该进 WAR),但**报错照旧**。说明根因不是 WAR/sandbox.pages 双声明。**当前结论:大概率是 Chrome MV3 sandboxed-iframe 的良性内部噪音,extension 代码层面不一定改得掉。不影响功能(install/capture/vision 全正常),暂列已知问题,以后再查。** 别再误信下面那段「修法 → 报错消失」。
 
 **症状**:
 
@@ -789,9 +791,13 @@ SidePanel 用 `iframe.src = chrome.runtime.getURL('sandbox.html')` 嵌它时,Chr
 
 而 **WAR 对 sandbox.html 根本是多余的**:WAR 只在「**web origin**(content script 注入的页面、外部网页)要 fetch 这个资源」时才需要。sandbox.html 的**唯一**加载者是 `sandbox-host.ts`——SidePanel(扩展页)用 iframe 嵌它,而扩展页嵌自己的 `sandbox.pages` **不需要 WAR**。(对照:`userscript-runner.js` 和 `marketplace/*` 确实要 WAR,因为它们从网页 / userScripts 世界加载。)
 
-**修法**(本次 commit):从 `manifest.json` 的 `web_accessible_resources` 删掉 `sandbox.html`,只留 `sandbox.pages`。origin 不再二义 → 报错消失。`sandbox.pages` 仍在(SidePanel 照常嵌),vite 插件照常 emit 自包含的 `dist/sandbox.html`,install/capture 链路不变。顺带:@crxjs 不再因为 WAR 里那个条目去碰 sandbox.html(docs §5 提过它处理 sandbox 页会留占位符),更干净。
+**尝试过的(无效)**:从 `manifest.json` 的 `web_accessible_resources` 删掉 `sandbox.html`(commit `2e486bf`),原以为 WAR 与 sandbox.pages 双声明给了它矛盾 origin 是根因。**实测删完报错照旧**——所以双声明不是根因。这个删除本身**保留**(sandbox.html 的唯一加载者是 SidePanel 用 iframe 嵌它,扩展页嵌自己的 `sandbox.pages` 不需要 WAR;`userscript-runner.js`/`marketplace/*` 才需要 WAR,因为它们从网页世界加载),只是它**没解决报错**。
 
-**教训**:**一个资源的 origin 不能由两套机制各表一次**。WAR 和 sandbox.pages 对「以什么 origin 加载」是冲突的断言,同一个文件别同时进。判断要不要 WAR 的准星很简单:**有没有 web origin 来加载它?** 没有(只有扩展页自己嵌)就不该进 WAR。这条排查也再次印证:**「frame 自己在 load 自己」类报错先别急着往脚本内容里找,先看 manifest 给这个 URL 派了几个互斥身份**。
+**还没查清的方向**(留给下次):
+- 可能是 MV3 sandboxed iframe 从 `about:blank` 导航到 sandbox.html 时,opaque origin 与 chrome-extension:// 的 same-origin 检查冲突,Chrome 记一条警告但仍放行(很多带 sandbox iframe 的 MV3 扩展都见过这条,疑似无害的平台噪音)。
+- 待验证:换成 `chrome.runtime.getURL` 之外的加载方式、或给 iframe 显式 `sandbox` 属性、或干脆不用 sandbox iframe(install 期的 eval 改走别的 venue)是否能消掉。
+
+**教训(关于诊断本身)**:**「改完没立刻在真机复测就宣布修好」是这次的错**。我基于「WAR/sandbox.pages 双声明」的合理推断改了 + 写进 docs「报错消失」+ commit + push,但用户后来的日志显示报错还在。**配置类 / 平台行为类的「修复」尤其要在真浏览器里亲眼确认报错消失再下结论**,推断再合理也不算数。
 
 ### 10.18 全量审计:注入 scope 用 stub → 一批 func 静默错 / 错误映射失效
 

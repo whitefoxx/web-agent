@@ -1053,6 +1053,7 @@ function ProfileEditForm({
   const [baseUrl, setBaseUrl] = useState<string>(initial.baseUrl);
   const [apiKey, setApiKey] = useState<string>(initial.apiKey);
   const [model, setModel] = useState<string>(initial.model);
+  const [vision, setVision] = useState<boolean>(initial.vision ?? false);
 
   function pickProvider(id: string): void {
     setProvider(id);
@@ -1068,6 +1069,7 @@ function ProfileEditForm({
     baseUrl: baseUrl.trim(),
     apiKey: apiKey.trim(),
     model: model.trim(),
+    vision,
   };
   const effectiveLabel = label.trim() || autoLabel(trimmed);
   const canSave = !!trimmed.apiKey && !!trimmed.baseUrl && !!trimmed.model;
@@ -1132,6 +1134,21 @@ function ProfileEditForm({
           />
           <span class="field-hint">
             按 endpoint 实际支持的模型名填(例:deepseek-chat / gpt-4o / claude-sonnet-4-6)。
+          </span>
+        </div>
+        <div class="field">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+            <input
+              type="checkbox"
+              checked={vision}
+              onInput={(e) => setVision((e.target as HTMLInputElement).checked)}
+              style="width:auto;margin:0;flex:none"
+            />
+            <span>多模态模型(支持图片)</span>
+          </label>
+          <span class="field-hint">
+            开启后,截图 / 图片链接等工具结果会作为图片喂给模型。仅在模型本身支持视觉时开启
+            (如 GLM-5V-Turbo / gpt-4o);纯文本模型开了会报错。
           </span>
         </div>
       </div>

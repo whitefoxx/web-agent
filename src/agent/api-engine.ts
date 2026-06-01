@@ -21,11 +21,15 @@ import { systemPromptApi } from './api-system-prompt';
 import { loadLlmConfig } from '../config/llm-config';
 import { appendTurn, saveSession } from './session';
 import type { AgentEngine, EngineContext, SessionDoneReason } from './engine';
-import type { ApiMessage, ToolCall } from './api-types';
+import type { ApiMessage, ContentPart, ToolCall } from './api-types';
+import { collectImageRefs, stripDataUrls } from './tool-images';
 import { log, warn, error as logError } from '../runtime/log';
 
 const DEFAULT_MAX_ITERATIONS = 12;
 const MAX_TOOL_RESULT_CHARS = 64_000;
+/** Cap images fed to the model per turn (vision tokens are expensive, and a
+ * turn with several image-returning tools could otherwise balloon). */
+const MAX_VISION_IMAGES_PER_TURN = 8;
 
 interface ChatCompletionResponse {
   choices: Array<{
@@ -53,6 +57,97 @@ function safeStringify(v: unknown): string {
   }
 }
 
+/** Flatten a multimodal user `content` array down to plain text, for replaying
+ * a vision turn's history to a text-only model (which 400s on image content). */
+function contentPartsToText(parts: ContentPart[]): string {
+  const texts: string[] = [];
+  let imgs = 0;
+  for (const p of parts) {
+    if (p.type === 'text') texts.push(p.text);
+    else if (p.type === 'image_url') imgs++;
+  }
+  let s = texts.join('\n');
+  if (imgs) s += `${s ? '\n' : ''}[${imgs} 张图片，当前模型不支持视觉，已省略]`;
+  return s || '[图片]';
+}
+
+/**
+ * Repair a persisted message history before re-sending it:
+ *   1. Every assistant message with `tool_calls` must be answered by a tool
+ *      message for each id BEFORE any non-tool message — else the API 400s.
+ *      An abort mid tool-loop (e.g. during a write-confirm) can leave dangling
+ *      ids; pad them with placeholder tool messages.
+ *   2. Flatten any PRIOR-turn image-bearing user message (ContentPart[]) down to
+ *      text. The model already saw those images live in the turn they were
+ *      produced (the active messages array that turn), and its response — kept
+ *      in history — carries what it gleaned. Re-sending base64 every subsequent
+ *      turn is pure token/bandwidth cost, and replaying images to a since-
+ *      switched text-only model would 400. So images live for exactly one turn.
+ */
+export function sanitizeHistory(history: ApiMessage[]): ApiMessage[] {
+  const out: ApiMessage[] = [];
+  for (let i = 0; i < history.length; i++) {
+    const m = history[i]!;
+    if (m.role === 'user' && Array.isArray(m.content)) {
+      out.push({ role: 'user', content: contentPartsToText(m.content) });
+      continue;
+    }
+    if (m.role === 'assistant' && m.tool_calls && m.tool_calls.length > 0) {
+      out.push(m);
+      const answered = new Set<string>();
+      let j = i + 1;
+      while (j < history.length && history[j]!.role === 'tool') {
+        const tm = history[j] as { role: 'tool'; tool_call_id: string; content: string };
+        out.push(tm);
+        answered.add(tm.tool_call_id);
+        j++;
+      }
+      for (const tc of m.tool_calls) {
+        if (!answered.has(tc.id)) {
+          out.push({ role: 'tool', tool_call_id: tc.id, content: '[已中断,无结果]' });
+        }
+      }
+      i = j - 1;
+      continue;
+    }
+    out.push(m);
+  }
+  return out;
+}
+
+/** True if any message has array (multimodal) content with an image part. */
+function hasImageContent(messages: unknown): boolean {
+  return (
+    Array.isArray(messages) &&
+    messages.some(
+      (m) =>
+        m &&
+        typeof m === 'object' &&
+        Array.isArray((m as { content?: unknown }).content) &&
+        ((m as { content: unknown[] }).content).some(
+          (p) => p && typeof p === 'object' && (p as { type?: string }).type === 'image_url',
+        ),
+    )
+  );
+}
+
+/** Deep-clone a request body for logging, truncating long base64 data URLs so
+ * the console stays readable while http image URLs stay fully visible. */
+function redactBodyForLog(body: Record<string, unknown>): unknown {
+  return JSON.parse(
+    JSON.stringify(body, (key, value) => {
+      if (key === 'url' && typeof value === 'string' && value.startsWith('data:') && value.length > 120) {
+        return value.slice(0, 80) + `…[${value.length} chars base64]`;
+      }
+      // Trim very long tool/text content so the body is scannable.
+      if ((key === 'content' || key === 'text') && typeof value === 'string' && value.length > 600) {
+        return value.slice(0, 600) + `…[${value.length} chars]`;
+      }
+      return value;
+    }),
+  );
+}
+
 async function chatCompletion(opts: {
   apiKey: string;
   baseUrl: string;
@@ -65,6 +160,13 @@ async function chatCompletion(opts: {
     messages: (opts.body.messages as unknown[])?.length,
     tools: (opts.body.tools as unknown[])?.length,
   });
+  // When the request carries image content, dump the FULL request body (with
+  // base64 data URLs truncated for readability) so the exact shape sent to the
+  // provider can be compared against its docs. Only logs on image turns to keep
+  // normal traffic quiet.
+  if (hasImageContent(opts.body.messages)) {
+    log('api', '→ vision request body', redactBodyForLog(opts.body));
+  }
   const t0 = Date.now();
   const resp = await fetch(url, {
     method: 'POST',
@@ -123,8 +225,11 @@ export const apiEngine: AgentEngine = {
     // Persist the user turn for the history drawer, and seed the OpenAI message
     // array (continuing prior turns if any).
     appendTurn(session, { role: 'user', text: ctx.userText, ts: Date.now() });
+    // Repair the replayed history: pad any dangling tool_calls (abort mid-loop)
+    // and flatten prior-turn image messages to text (images live one turn only).
+    // Both would otherwise risk a 400. See sanitizeHistory.
     const messages: ApiMessage[] = [
-      ...(session.apiMessages ?? []),
+      ...sanitizeHistory(session.apiMessages ?? []),
       { role: 'user', content: ctx.userText },
     ];
     await saveSession(session);
@@ -218,6 +323,12 @@ export const apiEngine: AgentEngine = {
 
         if (!toolCalls || toolCalls.length === 0) return finish('no_more_commands');
 
+        // Images collected from ALL tool results this turn. Pushed as ONE user
+        // message AFTER the loop — interleaving a user message between tool
+        // messages would break the "every tool_call_id answered contiguously
+        // before the next non-tool message" contract when there are ≥2 calls.
+        const turnImages: string[] = [];
+
         for (const call of toolCalls) {
           if (ctx.signal.aborted) return finish('user_abort');
 
@@ -254,11 +365,31 @@ export const apiEngine: AgentEngine = {
           });
 
           const r = await ctx.executeTool({ tool: call.function.name, args });
-          const resultStr = r.ok
-            ? truncate(typeof r.result === 'string' ? r.result : safeStringify(r.result))
+
+          // Vision: when the active model is multimodal, pull image refs
+          // (screenshots' data URLs, image URLs like weibo pics) out of the
+          // result and feed them as a follow-up user message of image_url
+          // blocks — OpenAI-compatible APIs only accept image content in user
+          // messages, not tool messages. Gated on the profile's `vision` flag
+          // so text-only models never receive image content (they'd error).
+          // Cap matches the per-turn cap so a single image-rich result can fill
+          // the turn budget.
+          const images =
+            cfg.vision && r.ok ? collectImageRefs(r.result, MAX_VISION_IMAGES_PER_TURN) : [];
+
+          let rawResult = r.ok
+            ? typeof r.result === 'string'
+              ? r.result
+              : safeStringify(r.result)
             : `错误: ${r.error ?? '(unknown)'}`;
+          // Strip ALL base64 image data URLs from the TEXT (not just the ones we
+          // collected for vision) — they're either sent as vision blocks or
+          // dropped, and raw base64 is pure truncation noise either way.
+          rawResult = stripDataUrls(rawResult);
+          const resultStr = truncate(rawResult);
 
           messages.push({ role: 'tool', tool_call_id: call.id, content: resultStr });
+          if (images.length) turnImages.push(...images);
 
           const traceFinal = {
             id: traceId,
@@ -272,6 +403,27 @@ export const apiEngine: AgentEngine = {
           };
           ctx.emit({ type: 'tool_trace', trace: traceFinal });
           appendTurn(session, { role: 'tool_trace', trace: traceFinal, ts: Date.now() });
+          session.apiMessages = messages;
+          await saveSession(session);
+        }
+
+        // One image-bearing user message for the whole turn (after every tool
+        // response), so a multimodal model can see the images. Sent as raw URLs
+        // (the model's server fetches them — matches GLM's image_url doc).
+        // Capped to bound request size when many tools fire at once.
+        // NOTE: if a CDN is hotlink-protected and the model can't fetch the URL
+        // (e.g. sina → GLM 1210), src/agent/fetch-image.ts (toVisionDataUrl) is
+        // ready to inline the bytes as base64 instead — wire it back in here.
+        if (turnImages.length) {
+          const capped = turnImages.slice(0, MAX_VISION_IMAGES_PER_TURN);
+          messages.push({
+            role: 'user',
+            content: [
+              { type: 'text', text: `（本回合工具结果包含 ${capped.length} 张图片，按顺序如下）` },
+              ...capped.map((url) => ({ type: 'image_url', image_url: { url } }) as const),
+            ],
+          });
+          log('api', `vision: attached ${capped.length} image url(s) this turn`, { urls: capped });
           session.apiMessages = messages;
           await saveSession(session);
         }

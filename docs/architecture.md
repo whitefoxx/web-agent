@@ -154,6 +154,26 @@ UI 菜单 → 日志页可以一键关闭 / 开启 + 清空。
 - **CDP 权限**:仅在调 adapter 时 lazy attach,结束即 detach。`chrome.debugger` 的黄色提示条会出现在目标站点 tab。
 - **不存储任何凭据**:复用浏览器已有的登录态,扩展不读 / 不存 password / cookie / api key 之外的内容。API key 走 chrome.storage.local,可在设置面板清空。
 
+## 8.5 视觉 / 多模态工具结果(2026-06)
+
+文本模型(如 glm-5)拿到的工具结果是 **JSON.stringify 的纯文本**——图片 URL 只是字符串,模型「看不见」图;截图的 base64 dataUrl 也只是被 64KB 截断的文本噪音。要让模型真读图,必须把图片作为 `image_url` content block 喂给**多模态**模型(如 GLM-5V-Turbo / gpt-4o)。
+
+实现(`src/agent/tool-images.ts` + `api-engine.ts`):
+
+- **按 profile 开关**:`LlmConfig.vision`(设置页「多模态模型」勾选)。关闭时行为完全不变,纯文本模型不会收到图片内容(收到会 400)。
+- **抽图**:`collectImageRefs(result, cap)` 递归扫工具结果,收 `data:image/*`(非 svg)和 http 图片 URL(路径带光栅扩展名 **或** 命中已知图床 host:xhscdn/sinaimg/hdslb/zhimg…,因为小红书等图片 URL 无扩展名)。去重、保序、封顶。
+- **注入**:本回合所有工具的图片汇总成**一条** user 消息(`[{type:'text'},{type:'image_url'}...]`),放在**所有 tool 消息之后**——OpenAI/GLM 契约要求 assistant 的每个 tool_call_id 必须被连续的 tool 消息应答,中间插 user 消息会 400。
+- **文本瘦身**:`stripDataUrls` 把结果文本里的 base64 全替成占位符(图已走视觉通道)。
+
+**评审揪出的坑(已修,见 `tool-images.test.ts` / `sanitize-history.test.ts`)**:
+
+1. **SVG**:`image/svg+xml` 多数视觉端点拒收 → 抽图时排除 svg(光栅才发)。
+2. **无扩展名图床**:小红书 `ci.xiaohongshu.com/<id>` / `*.xhscdn.com/<id>` 没有 `.jpg`,只认扩展名会漏 → 加图床 host 白名单。
+3. **跨 profile 重放**:vision turn 的 `image_url` 持久化在 `session.apiMessages`,中途切到文本模型续聊会把图片重放给它 → `sanitizeHistory` 在 seed 时按当前 `vision` 把图片 user 消息**降级为文本**。
+4. **悬空 tool_calls**(评审顺带发现的**既有** bug,非 vision 引入):写操作确认期间 abort,会留下 assistant(tool_calls) 没有对应 tool 应答 → 下一轮重放直接 400,会话**永久卡死**。`sanitizeHistory` 在 seed 时给未应答的 tool_call_id 补占位 tool 消息修复。
+
+**代价/未决**:base64 截图作为 `image_url` 持久化进 IDB 会让 session 变大(多轮反复截图尤甚);http 图 URL 很短无所谓。后续可考虑只在「当回合」带图、历史里换成缩略引用。
+
 ## 9. 已知限制 / 后续工作
 
 | 限制                                | 影响                                                                        | 后续                                                       |
@@ -163,6 +183,8 @@ UI 菜单 → 日志页可以一键关闭 / 开启 + 清空。
 | 跨 worlds 性能开销                  | `page.evaluate` 每次走 RPC → CDP(详 hot-plug §10.7)                         | 用 `page.evaluateMain()` 显式分流;或脚本编排端整段 batch   |
 | 装好的 marketplace adapter 升级路径 | 改 source 序列化方式后用户必须手动 uninstall + reinstall(详 hot-plug §10.8) | 加 "source schema version" 字段 + 启动时自动迁移           |
 | 无 streaming 渲染                   | 整段 assistant 文本一次性显示;tool trace 是即时的                           | 改成 SSE 走流 + 增量推 ASSISTANT_TURN_PATCH                |
+| sandbox.html 控制台报 cross-origin  | 良性噪音,不影响 install/capture/vision;删 WAR 没修掉(详 hot-plug §10.17)   | 疑似 MV3 sandboxed-iframe 平台噪音,待查 |
+| 视觉:图片仅当回合可见 + 8 张/回合上限 | 续聊时旧图降级为文本占位(省 token);超 8 张丢弃                              | 需要时调大上限 / 历史里存缩略引用 |
 
 ## 10. 文件结构速查
 

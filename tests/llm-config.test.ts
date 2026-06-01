@@ -82,7 +82,8 @@ describe('loadLlmConfig (active-profile resolver)', () => {
       model: 'gpt-4o',
     };
     await saveLlmConfig(cfg);
-    expect(await loadLlmConfig()).toEqual(cfg);
+    // loadLlmConfig now resolves the active profile's `vision` flag (default false).
+    expect(await loadLlmConfig()).toEqual({ ...cfg, vision: false });
   });
 
   it('save creates the first profile when the store is empty', async () => {
@@ -135,6 +136,7 @@ describe('legacy-shape migration on read', () => {
       baseUrl: 'https://api.deepseek.com',
       apiKey: 'sk-old',
       model: 'deepseek-chat',
+      vision: false,
     });
     const store = await loadProfiles();
     expect(store.profiles).toHaveLength(1);
@@ -208,6 +210,7 @@ describe('legacy-shape migration on read', () => {
       baseUrl: 'https://api.deepseek.com',
       apiKey: 'sk-new',
       model: 'deepseek-chat',
+      vision: false,
     });
   });
 });

@@ -12,9 +12,16 @@ export interface ToolCall {
   function: { name: string; arguments: string };
 }
 
+/** OpenAI-compatible multimodal content parts. Used in `user` messages to feed
+ * images (from tool results) to a vision-capable model. `image_url.url` may be
+ * an https URL or a `data:image/...;base64,...` data URL. */
+export type ContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string; detail?: 'low' | 'high' | 'auto' } };
+
 export type ApiMessage =
   | { role: 'system'; content: string }
-  | { role: 'user'; content: string }
+  | { role: 'user'; content: string | ContentPart[] }
   | {
       role: 'assistant';
       content: string | null;

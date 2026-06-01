@@ -23,6 +23,10 @@ export interface LlmConfig {
   baseUrl: string;
   apiKey: string;
   model: string;
+  /** This profile's model is multimodal — the engine may feed images from tool
+   * results (screenshots, image URLs) to it as `image_url` content blocks.
+   * Off by default: a text-only model errors on image content. */
+  vision?: boolean;
 }
 
 export interface LlmProfile extends LlmConfig {
@@ -104,6 +108,7 @@ export async function loadLlmConfig(): Promise<LlmConfig> {
     baseUrl: active.baseUrl,
     apiKey: active.apiKey,
     model: active.model,
+    vision: active.vision ?? false,
   };
 }
 
@@ -221,6 +226,7 @@ function normalize(raw: unknown): LlmProfileStore {
         baseUrl: String(pp.baseUrl ?? DEFAULT_CONFIG.baseUrl),
         apiKey: String(pp.apiKey ?? ''),
         model: String(pp.model ?? DEFAULT_CONFIG.model),
+        vision: pp.vision === true,
       };
       const id = typeof pp.id === 'string' && pp.id ? pp.id : newProfileId();
       const label =
