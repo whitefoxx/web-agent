@@ -27,7 +27,6 @@
   "web_accessible_resources": [
     {
       "resources": [
-        "sandbox.html",
         "marketplace/index.json",
         "marketplace/*/*.js",
         "userscript-runner.js"

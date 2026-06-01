@@ -766,25 +766,32 @@ SidePanel              # 卸载受影响 adapter → 重装
 
 **教训**:**警告条件要跟实际执行路径同步**。dispatcher 有 3 条 routing(func / pipeline / _userScriptSource),registry 只看 2 条,长期信号噪音掩盖真问题。下次加新执行路径时,把 registry 的判定也带上 —— 或者反过来,**把「能跑」的判定写在 dispatcher 一处,registry 调它**。现在分两份,未来再加路径就会再次脱钩。
 
-### 10.17 sandbox.html 之间的 cross-origin load 错误(暂存观察)
+### 10.17 sandbox.html cross-origin load 错误 —— WAR 与 sandbox.pages 双声明冲突
 
 **症状**:
 
 ```
-Unsafe attempt to load URL chrome-extension://eciechpekgbkbbhcchmaaohechhmlekb/sandbox.html
-from frame with URL chrome-extension://eciechpekgbkbbhcchmaaohechhmlekb/sandbox.html.
+Unsafe attempt to load URL chrome-extension://<id>/sandbox.html
+from frame with URL chrome-extension://<id>/sandbox.html.
 Domains, protocols and ports must match.
 ```
 
-URL 和 frame URL 都是 sandbox.html。意思是 sandbox.html 的 frame **里头**有人在尝试 load chrome-extension://...sandbox.html。但 sandbox 页是 opaque origin(MV3 `sandbox.pages`),从它里头 load chrome-extension:// 的资源是跨 origin → 被拒。
+URL 和 frame URL 都是 sandbox.html。控制台一直有这条,虽然不影响 adapter 跑(install/capture 正常),但是噪音。
 
-**还没修**。情况不清楚:
-- 看 `dist/sandbox.html` 是纯 inline script,没有 `<iframe>` / `<script src>` / `<a href>` 之类会触发资源加载的元素。
-- 看 `src/sidepanel/sandbox-host.ts`,iframe 只在 `ensureSandbox()` 创建一次,`readyPromise` 缓存,**不会重复创建**。
+**(初版误判)**:一开始以为是 sandbox 脚本自己在 load 资源,或 ext reload 后 iframe 变「断头」自我导航。逐条排掉了:`eval-host.ts` 只 postMessage,`dist/sandbox.html` 纯 inline script(`.src=`/`import(`/`fetch(` 三处都是误报——分别是消息字段 `d.src`、stripModuleSyntax 的正则字符串、和一个从不被调的 utils 函数定义),`sandbox-host.ts` 的 iframe 只建一次。**都不是。**
 
-**假设**(待 repro 时验证):ext reload 后,SidePanel 老页面的 `iframe.contentWindow` 变成了「断头」frame(origin 已经失效)。下次 `evalAdapterInSandbox` 的 postMessage 触发 iframe 用旧 URL 重新 navigate 自己,Chrome 就拒了。如果是这个,fix 是在 `ensureSandbox` 加一层「检测 frame 死了重建」(可以监听 chrome.runtime.onSuspend 或 detect contentWindow.location === 'about:blank')。
+**真根因**:`sandbox.html` 在 manifest 里被**同时**声明进了两处,给了它**互相矛盾的 origin**:
 
-**目前现象**:不影响 adapter 跑(用户已经能成功 fetch subtitle)。先记下,等下次稳定 repro 再下手 —— 没有 stack trace 瞎修风险比留着大。
+- `web_accessible_resources` → 让它以**扩展 origin**(`chrome-extension://<id>`)被加载。
+- `sandbox.pages` → 让它以 **opaque(null)origin** 被加载(MV3 sandbox 的本意)。
+
+SidePanel 用 `iframe.src = chrome.runtime.getURL('sandbox.html')` 嵌它时,Chrome 对「这个 frame 到底算哪个 origin」拿不准:WAR 说扩展 origin,sandbox.pages 说 opaque。enforcement 一来一回(先按一个 resolve,sandbox 规则再把它按 opaque 重定),就报「load X from frame X / origins must match」。
+
+而 **WAR 对 sandbox.html 根本是多余的**:WAR 只在「**web origin**(content script 注入的页面、外部网页)要 fetch 这个资源」时才需要。sandbox.html 的**唯一**加载者是 `sandbox-host.ts`——SidePanel(扩展页)用 iframe 嵌它,而扩展页嵌自己的 `sandbox.pages` **不需要 WAR**。(对照:`userscript-runner.js` 和 `marketplace/*` 确实要 WAR,因为它们从网页 / userScripts 世界加载。)
+
+**修法**(本次 commit):从 `manifest.json` 的 `web_accessible_resources` 删掉 `sandbox.html`,只留 `sandbox.pages`。origin 不再二义 → 报错消失。`sandbox.pages` 仍在(SidePanel 照常嵌),vite 插件照常 emit 自包含的 `dist/sandbox.html`,install/capture 链路不变。顺带:@crxjs 不再因为 WAR 里那个条目去碰 sandbox.html(docs §5 提过它处理 sandbox 页会留占位符),更干净。
+
+**教训**:**一个资源的 origin 不能由两套机制各表一次**。WAR 和 sandbox.pages 对「以什么 origin 加载」是冲突的断言,同一个文件别同时进。判断要不要 WAR 的准星很简单:**有没有 web origin 来加载它?** 没有(只有扩展页自己嵌)就不该进 WAR。这条排查也再次印证:**「frame 自己在 load 自己」类报错先别急着往脚本内容里找,先看 manifest 给这个 URL 派了几个互斥身份**。
 
 ### 10.18 全量审计:注入 scope 用 stub → 一批 func 静默错 / 错误映射失效
 
