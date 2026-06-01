@@ -105,6 +105,13 @@ interface Session {
   resolve: (v: { ok: true; value: unknown } | { ok: false; error: string }) => void;
   /** "navigating" path takes over: orchestrator awaits this and re-executes. */
   resolveNavigate: (url: string) => void;
+  /** Port died before any DONE/navigate signal — the page navigated out from
+   * under the runner on its OWN (server redirect e.g. weibo.com→/newlogin,
+   * meta-refresh, or bfcache eviction), not via a func page.goto. The
+   * orchestrator re-injects on whatever the tab settled to instead of waiting
+   * out the full timeout. Idempotent with resolve/resolveNavigate (the outer
+   * Promise resolves once), so a normal post-DONE disconnect is a no-op. */
+  reportDisconnect: () => void;
 }
 
 /** Anything with the methods RPC server uses; PageShim qualifies via structural
@@ -179,10 +186,14 @@ export function handleRunnerPortConnect(port: chrome.runtime.Port): void {
 
   port.onDisconnect.addListener(() => {
     log('userscript', `runner port disconnected tabId=${tabId}`);
-    // If the port dies before DONE, it's almost always a navigation — the
-    // orchestrator's `Promise.race` against resolveNavigate handles that. We
-    // don't synthesise an error here because that races with legitimate
-    // post-DONE disconnects.
+    // A port death before DONE can be (a) a func-requested navigate (already
+    // signalled via NAVIGATE_RESTART → resolveNavigate), or (b) a navigation
+    // the runner did NOT request — a server redirect (weibo.com→/newlogin when
+    // logged out), a meta-refresh, or bfcache eviction. Case (b) used to hang
+    // until the 60s timeout because nothing settled. reportDisconnect drives a
+    // fast re-inject for it; it's idempotent so case (a) and normal post-DONE
+    // disconnects are no-ops. See adapter-hot-plug.md §10.20.
+    session.reportDisconnect();
   });
 }
 
@@ -288,7 +299,12 @@ export async function runInstalledFuncAdapter(
   }
   log('userscript', `world ready, proceeding to inject runner into tab=${args.tabId}`);
 
-  const maxReinjects = args.maxReinjects ?? 3;
+  // Bumped 3→5: spontaneous-redirect disconnects now consume a cycle too (not
+  // just func-requested navigates), so a logged-out site that bounces through
+  // a login redirect needs a little more headroom to converge on the auth
+  // error. Each cycle is ~1s, so the worst-case fast-fail is ~5s vs the old
+  // 60s hang. See §10.20.
+  const maxReinjects = args.maxReinjects ?? 5;
   const timeoutMs = args.timeoutMs ?? 60_000;
 
   // Threads the most recent navigate-target through to the next runner. Lets
@@ -335,12 +351,44 @@ export async function runInstalledFuncAdapter(
       lastNavigatedUrl = url;
       // Loop continues → next iteration re-executes the runner script.
     }
+    if (outcome.kind === 'reinject') {
+      // The page navigated out from under the runner without the func asking
+      // (server redirect / bfcache). Let the tab settle, then re-execute on
+      // wherever it landed — the func's own goto-trampoline + extraction will
+      // run there (and e.g. detect the login redirect → AuthRequiredError fast)
+      // instead of us waiting out the 60s timeout.
+      log(
+        'userscript',
+        `runner port died before DONE; re-injecting after tab settles (iter ${i + 1}/${maxReinjects + 1})`,
+      );
+      await waitForTabSettled(args.tabId);
+      // Loop continues → next iteration re-executes the runner script.
+    }
   }
   return { ok: false, error: `adapter exceeded ${maxReinjects} navigate-reinject cycles` };
 }
 
+/** Best-effort wait for a tab to reach status 'complete' (so re-injecting the
+ * runner doesn't land mid-redirect and immediately disconnect again). Capped
+ * so a perpetually-loading page can't stall the cycle — we re-inject anyway. */
+async function waitForTabSettled(tabId: number, capMs = 4000): Promise<void> {
+  const start = Date.now();
+  const tabsApi = (globalThis as { chrome?: { tabs?: typeof chrome.tabs } }).chrome?.tabs;
+  if (!tabsApi?.get) return;
+  while (Date.now() - start < capMs) {
+    let status: string | undefined;
+    try {
+      status = (await tabsApi.get(tabId)).status;
+    } catch {
+      return; // tab gone — let the next execute() surface a clear error
+    }
+    if (status === 'complete') return;
+    await new Promise((r) => setTimeout(r, 150));
+  }
+}
+
 interface RunOnceResult {
-  kind: 'done' | 'navigate';
+  kind: 'done' | 'navigate' | 'reinject';
   ok?: boolean;
   value?: unknown;
   error?: string;
@@ -373,6 +421,7 @@ async function runOnceWithPort(args: {
         else settle({ kind: 'done', ok: false, error: r.error });
       },
       resolveNavigate: (url) => settle({ kind: 'navigate', url }),
+      reportDisconnect: () => settle({ kind: 'reinject' }),
     };
     sessionsByTab.set(args.tabId, session);
 

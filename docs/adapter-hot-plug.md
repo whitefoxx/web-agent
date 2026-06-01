@@ -867,6 +867,22 @@ parseJsonOrThrowLoginWall: (v) => v,
 - **恢复路径的承诺要跟代码对账**。banner 写「接着聊(基于历史上下文)」,代码却把 sessionId 清了——**UI 文案和状态机走向必须一致**,不然就是骗用户。续聊的前提是「持久化的是什么、恢复时读的是什么、UI 绑的 id 是不是同一个」三者对齐;这次断在第三环。
 - **持久化要增量、不要只在 finally**。engine 每步 `saveSession` 是对的(所以历史没真丢);`driveApiSession` 的 `finally` save 只是兜底——**SW 被 OS 回收时 `finally` 不保证执行**,真正的耐久性来自循环内的 checkpoint。
 
+### 10.20 func adapter 在未登录站点上**白等 60s** 才报错
+
+**症状**(`weibo__me`,用户没登录微博):第一次调用**整整 60 秒**后报 `runner timed out after 60000ms`,模型重试,第二次 6 秒返回正确的 `AuthRequiredError: Authentication required for weibo.com`。错误结论是对的(§10.18 的错误映射在真机生效了),但第一次那 60s 纯属白等。
+
+**根因**:`src/userscript/sw-runner.ts` 的 runner 编排只有三条出路 settle:收到 `DONE`、收到 `NAVIGATE_RESTART`(func 主动 `page.goto`)、或 60s 超时。`port.onDisconnect` 是个 **no-op**,注释假设「port 在 DONE 前断开 ≈ func 请求了导航,resolveNavigate 会兜住」。
+
+但 weibo 未登录会 **服务端 302 重定向** `weibo.com → weibo.com/newlogin`。这个跳转是**页面自己发起的**,不是 func 调 `page.goto`:刚注入连上、发完 INIT 的 runner 上下文被跳转**销毁** → port 断开,但**既没 NAVIGATE_RESTART 也没 DONE**。于是没有任何东西 settle → 干等到 60s 超时。(日志里还伴随 bfcache 的 "The page keeping the extension port is moved into back/forward cache" —— 同类:页面被移走 → port 断。)第二次之所以快,是因为那时重定向已经落定在登录页,runner 跑起来了,func 拿到 null API 响应 → 抛 AuthRequiredError。
+
+**修法**(本次 commit):
+
+1. **`onDisconnect` 不再 no-op**:调 `session.reportDisconnect()`,settle 出一个新的 `kind:'reinject'`。**幂等**——外层 Promise 只 resolve 一次,所以正常 DONE 后的断开、以及 navigate 路径自带的断开都是 no-op,不会重复处理(`settle` 用 `sessionsByTab.get(tabId)===session` 守住 delete,旧 port 的迟到断开也不会误删新 session)。
+2. **编排循环处理 `reinject`**:`waitForTabSettled(tabId)`(轮询 tab 到 `status:'complete'`,封顶 4s,别 mid-redirect 又注入又断)后**重新执行 runner**。落到哪个页面就在哪跑——func 自己的 goto-trampoline + 抽取逻辑会接管(未登录就快速 null → AuthRequiredError),不再死等超时。
+3. **`maxReinjects` 3→5**:自发重定向现在也吃一个 cycle(以前只有显式 navigate 吃),给登录重定向链留点收敛余量。每 cycle ~1s,最坏 fast-fail ~5s,远好过 60s。
+
+**教训**:**「连接断开」是一个独立的、必须显式处理的 settle 信号,不能假设它总跟某个已知信号同时发生**。这次的洞:编排器把「port 断」默认等价于「func 请求了导航」,但页面有**一万种自己跳走的方式**(302 / meta-refresh / JS location / bfcache),全都断 port 却都不发 NAVIGATE_RESTART。凡是「等一个外部事件、同时持有一个会被外部销毁的连接」的状态机,都要把**连接意外断开**当成一等公民的转移,且转移要**幂等**(因为正常完成路径也会断连)。跟 §10.19「等慢操作时 SW 被回收」同源:**等待态要枚举所有打断方式,逐个给出路**,别只设计 happy path + 一个兜底超时。
+
 ## 11. 市场布局 v2:per-file + sha256(为公开市场铺路)
 
 > 关键改动 commit:`<next>`(本节描述的整体 schema-v2 切换)。
