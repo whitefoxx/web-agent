@@ -278,9 +278,12 @@ export function App() {
     setProgress(null);
     // NOTE: deliberately NOT clearing sessionId on 'no_more_commands' /
     // 'user_abort' — follow-up messages stay in the same session so the LLM
-    // keeps full context. On 'error' we drop the binding since the session
-    // ended unhealthy and the user should start fresh.
-    if (m.reason === 'error') setSessionId(null);
+    // keeps full context. On a real 'error' we drop the binding so the user
+    // starts fresh. EXCEPTION: a `recoverable` error means the SW was just
+    // recycled mid-turn; the history is persisted in IDB and the banner
+    // promises "接着聊（基于历史上下文）", so we KEEP the binding — the next
+    // message resumes the same session with full context.
+    if (m.reason === 'error' && !m.recoverable) setSessionId(null);
     const text =
       m.reason === 'user_abort'
         ? '已停止'

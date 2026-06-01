@@ -96,12 +96,42 @@ const activeSessions = new Map<string, ActiveSession>();
 const pendingConfirmations = new Map<string, { resolve: (approved: boolean) => void }>();
 const WRITE_CONFIRM_TIMEOUT_MS = 5 * 60 * 1000;
 
-/** Open keep-alive ports from extension pages (SidePanel). As long as one
- * is connected, Chrome MV3 won't recycle this service worker, which would
- * otherwise orphan a long-running iteration (LLM thinking phases routinely
- * run >30s with no chrome.* activity → SW killed → activeSessions vanish
- * → the next ASSISTANT_TURN arriving post-wakeup is silently dropped). */
+/** Open keep-alive ports from extension pages (SidePanel). Originally we
+ * relied SOLELY on an open port to pin the SW — but an IDLE connected port
+ * does NOT reliably reset Chrome's 30s idle timer (observed: "keepalive port
+ * connected" logged, yet the SW still got recycled mid-`bilibili__comment`,
+ * which waits on a write-confirm + userScripts RPC with no chrome.* calls of
+ * its own). The reliable mechanism is the active self-ping below; the port is
+ * kept as a secondary signal + so the SW dies promptly when the panel closes. */
 const keepaliveConnections = new Set<chrome.runtime.Port>();
+
+/** Active self-ping: while ANY session is being driven, fire a cheap chrome.*
+ * call every 20s (< the 30s idle timeout) so the worker is never recycled
+ * mid-turn. setInterval only ticks while the SW is alive, and each tick's
+ * chrome.* call resets the idle timer — so an active session keeps the SW
+ * alive indefinitely, and it's released the moment the last session ends.
+ * This is what actually fixes the "会话因扩展后台被回收而中断了" interruptions;
+ * the open port alone did not. */
+let keepalivePingTimer: ReturnType<typeof setInterval> | null = null;
+const KEEPALIVE_PING_MS = 20_000;
+function startKeepalivePing(): void {
+  if (keepalivePingTimer) return;
+  keepalivePingTimer = setInterval(() => {
+    // Any async extension API call counts as activity and resets the 30s
+    // idle timer. getPlatformInfo is cheap and side-effect-free.
+    try {
+      chrome.runtime.getPlatformInfo(() => void chrome.runtime.lastError);
+    } catch {
+      /* SW tearing down; nothing to do */
+    }
+  }, KEEPALIVE_PING_MS);
+}
+function stopKeepalivePingIfIdle(): void {
+  if (keepalivePingTimer && activeSessions.size === 0) {
+    clearInterval(keepalivePingTimer);
+    keepalivePingTimer = null;
+  }
+}
 
 /* ───────── lifecycle ───────── */
 
@@ -166,6 +196,10 @@ async function recoverInterruptedSessionsOnBoot(): Promise<void> {
   try {
     const sessions = await listSessions({ status: 'running' });
     for (const s of sessions) {
+      // If this boot was triggered by a USER_MESSAGE that's already resuming
+      // the session, it's live again — don't mark it errored or pop a spurious
+      // "interrupted" banner over an in-flight turn.
+      if (activeSessions.has(s.id)) continue;
       log(SCOPE, `recovering interrupted session ${s.id}`);
       s.status = 'error';
       await saveSession(s);
@@ -173,6 +207,7 @@ async function recoverInterruptedSessionsOnBoot(): Promise<void> {
         type: 'SESSION_DONE',
         sessionId: s.id,
         reason: 'error',
+        recoverable: true, // history is in IDB; keep the binding so 继续 resumes it
         error: '会话因扩展后台被回收而中断了。再发一句话可以接着聊（基于历史上下文）。',
       } satisfies SessionDoneEvt);
     }
@@ -471,6 +506,7 @@ function makeExecuteTool(
 async function driveApiSession(session: SessionState, userText: string): Promise<void> {
   const abortCtl = new AbortController();
   activeSessions.set(session.id, { session, abort: abortCtl });
+  startKeepalivePing(); // pin the SW for the whole turn (see startKeepalivePing)
   const ctx: EngineContext = {
     session,
     userText,
@@ -490,6 +526,7 @@ async function driveApiSession(session: SessionState, userText: string): Promise
     } satisfies SessionDoneEvt);
   } finally {
     activeSessions.delete(session.id);
+    stopKeepalivePingIfIdle(); // release the SW once no session is running
     await saveSession(session);
   }
 }

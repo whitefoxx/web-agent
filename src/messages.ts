@@ -150,6 +150,12 @@ export interface SessionDoneEvt {
   sessionId: string;
   reason: 'no_more_commands' | 'done_signal' | 'max_iterations' | 'error' | 'user_abort';
   error?: string;
+  /** True when the session ended only because the SW was recycled, NOT a real
+   * failure. The history is persisted in IDB, so the SidePanel must KEEP the
+   * sessionId binding — sending another message resumes the same thread with
+   * full context. Without this the panel dropped the binding on every `error`
+   * and the promised "接着聊（基于历史上下文）" started a fresh, empty session. */
+  recoverable?: boolean;
 }
 
 /** Iteration entered a specific phase — drives the grey progress banner. */

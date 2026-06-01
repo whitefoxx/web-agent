@@ -243,6 +243,8 @@ webchat-agent/
 | `page.evaluate` 从 CDP MAIN 换到 USER_SCRIPT 本地后,所有 `window.<global>` 静默返回空 | **换执行环境时必须逐条对照旧语义**                                             | hot-plug §10.7(2026-05 修) |
 | marketplace 存 source 原文 → 相对 import 运行时 ReferenceError                        | **marketplace 化 = 自包含化**,隐式依赖必须显式 inline                          | hot-plug §10.8(2026-05 修) |
 | 改 source 序列化方式后老用户必须手动重装                                              | 加 "source schema version" 字段 + 启动时自动迁移                               | hot-plug §10.8(后续)       |
+| 注入 scope 两份手抄、runtime 那份全是 stub → htmlToMarkdown/mapConcurrent 静默错、错误类 instanceof 失效 | **「能跑/能看到什么」写一处**;stub 别泄漏到 runtime                  | hot-plug §10.18(2026-05 修) |
+| SW 才一会就被回收 + 「继续」丢上下文                                                   | **保活靠主动 chrome.\* 活动而非空闲 port**;恢复路径 UI 文案要跟 sessionId 走向对账 | hot-plug §10.19(2026-06 修) |
 
 ## 12. 关于 chat-tab 模式(已移除)
 

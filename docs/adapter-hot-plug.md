@@ -844,6 +844,29 @@ parseJsonOrThrowLoginWall: (v) => v,
 - **stub 是「为了让 capture 跑通」的临时物,不该泄漏到 runtime**。capture 不跑 func body 所以 stub 无害,但同一套名字被 runtime 复用就把「无害占位」变成了「静默错」。**临时 stub 要在类型 / 命名上跟真实现区分,别让它们共享同一个符号名被无差别复用**。
 - **静态分类扫描**(import 的名字 ∉ 注入 scope?stub util 在 body 里被调?node: 被 call 还是只被 name?)是审计这类「装得上但跑出错」的高性价比手段——一次扫全量,比逐个手跑省几个数量级。脚本留在 `/tmp/recon-adapters.mjs`,下次加站 / 改 scope 后可复跑。
 
+### 10.19 SW 才一会就被回收 + 「继续」丢上下文(两个独立 bug,连环出现)
+
+**症状**(用户跑 `bilibili__comment`,一个 **write** adapter):
+1. 工具「执行中」没多久 → 红字「**会话因扩展后台被回收而中断了。再发一句话可以接着聊(基于历史上下文)**」。
+2. 用户发「继续」→ 模型回「**我这边没有看到之前的对话记录**」,完全没上下文。提示里承诺的「接着聊」是假的。
+
+两个 bug 独立,但连环触发(1 把 SW 杀了,2 在恢复路径上把历史丢了)。
+
+**Bug 1 根因:keepalive 只靠「开着一个 port」,不够**。`src/sidepanel/App.tsx` 开了 `chrome.runtime.connect({name:'webchat-keepalive'})`,注释写「An open Port keeps the SW pinned per MV3 spec」。**这个假设过时了**:当前 Chrome 里一个**空闲**的连接 port **不会重置 30s idle 计时器**。日志甚至打了「keepalive port connected (total=1)」,SW 照样被回收。`bilibili__comment` 期间 SW 在等 write-confirm + userScripts RPC,自己**不发任何 `chrome.*` 调用** → 30s 到点被杀 → in-memory `activeSessions` 蒸发。
+
+**Bug 1 修法**:加**主动自 ping**(`src/background/service-worker.ts`)。有任何 session 在跑时,`setInterval` 每 20s(< 30s)调一次廉价 `chrome.runtime.getPlatformInfo()`——异步扩展 API 调用算「活动」,重置 idle 计时器。`setInterval` 只在 SW 活着时 tick,所以「有活跃 session → SW 永不被回收;最后一个 session 结束 → 立即释放」。在 `driveApiSession` 开头 `startKeepalivePing()`,`finally` 里 `stopKeepalivePingIfIdle()`(gated on `activeSessions.size===0`)。原 port 留着当次要信号 + 面板一关就放 SW 走。
+
+**Bug 2 根因:错误路径把 sessionId 扔了,跟「接着聊」的承诺自相矛盾**。`App.tsx:283` 原本 `if (m.reason === 'error') setSessionId(null)`。而被回收的恢复路径(`recoverInterruptedSessionsOnBoot`)发的正是 `reason:'error'` → SidePanel **把 sessionId 置空**。用户发「继续」时 `sid = sessionId ?? makeSessionId()` → sessionId 是 null → **新开一个 session** → `loadSession(新id)` 返回 null → `makeSession` 空历史。**历史其实一直在 IDB**(engine 每个 turn 增量 `saveSession`:user 消息一进来就存、每个 assistant turn 存、每个 tool 结果存),是 SidePanel 在恢复时把线头丢了。
+
+**Bug 2 修法**:`SessionDoneEvt` 加 `recoverable?: boolean`。恢复路径发 `recoverable:true`(历史在 IDB,可续)。`App.tsx` 改成 `if (m.reason === 'error' && !m.recoverable) setSessionId(null)` —— 可恢复中断**保留 sessionId**,下一条消息 `loadSession` 拿回带 `apiMessages` 的 session,engine 从 `session.apiMessages` 续种 → 上下文回来了。真·fatal error 仍然清掉、重开。
+
+**附带修 race**:`recoverInterruptedSessionsOnBoot()` 在 SW 顶层 boot 时跑(line 139),会跟「唤醒这次 boot 的那条 USER_MESSAGE」并发。若 `handleUserMessage` 已经把 session 放进 `activeSessions` 在续跑,recover 的 `listSessions({status:'running'})` 可能又把它标 'error' + 弹个假 banner 盖在进行中的 turn 上。加一行 `if (activeSessions.has(s.id)) continue;` 跳过正在驱动的 session。
+
+**教训**:
+- **「开着 port 就能保活」是 MV3 的老都市传说**。可靠的保活是**主动产生 chrome.* 活动**(自 ping / 周期消息),不是被动持有连接。任何「等外部慢操作(用户确认 / 远端 RPC)」的 SW 路径都得在等待期间自己制造活动,否则 30s 一到就没。
+- **恢复路径的承诺要跟代码对账**。banner 写「接着聊(基于历史上下文)」,代码却把 sessionId 清了——**UI 文案和状态机走向必须一致**,不然就是骗用户。续聊的前提是「持久化的是什么、恢复时读的是什么、UI 绑的 id 是不是同一个」三者对齐;这次断在第三环。
+- **持久化要增量、不要只在 finally**。engine 每步 `saveSession` 是对的(所以历史没真丢);`driveApiSession` 的 `finally` save 只是兜底——**SW 被 OS 回收时 `finally` 不保证执行**,真正的耐久性来自循环内的 checkpoint。
+
 ## 11. 市场布局 v2:per-file + sha256(为公开市场铺路)
 
 > 关键改动 commit:`<next>`(本节描述的整体 schema-v2 切换)。
