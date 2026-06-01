@@ -157,15 +157,27 @@ export function handleRunnerPortConnect(port: chrome.runtime.Port): void {
   }
   log('userscript', `runner port connected tabId=${tabId} — sending INIT`);
 
+  // Post to the runner port, swallowing the throw that happens if it
+  // disconnected (tab navigated / bfcached) between the message arriving and
+  // our reply. The onDisconnect handler drives the reinject/navigate path;
+  // here we just avoid an unhandled rejection in this async listener.
+  const safePost = (m: unknown): void => {
+    try {
+      port.postMessage(m);
+    } catch {
+      /* port already torn down — disconnect handler takes over */
+    }
+  };
+
   port.onMessage.addListener(async (msg: RunnerToServer) => {
     if (!msg || typeof msg !== 'object') return;
     if (msg.type === 'READY') {
-      port.postMessage(session.init);
+      safePost(session.init);
       return;
     }
     if (msg.type === 'RPC_REQ') {
       const reply = await handleRpcReq(msg, session);
-      port.postMessage(reply);
+      safePost(reply);
       return;
     }
     if (msg.type === 'NAVIGATE_RESTART') {
@@ -185,6 +197,13 @@ export function handleRunnerPortConnect(port: chrome.runtime.Port): void {
   });
 
   port.onDisconnect.addListener(() => {
+    // Consume the disconnect's lastError. When the tab navigates (goto
+    // trampoline), the old page holding this port enters bfcache and Chrome
+    // tears the channel down with lastError set to "The page keeping the
+    // extension port is moved into back/forward cache, so the message channel
+    // is closed." Reading it here marks it handled; otherwise Chrome logs an
+    // "Unchecked runtime.lastError" warning for every navigation.
+    void chrome.runtime.lastError;
     log('userscript', `runner port disconnected tabId=${tabId}`);
     // A port death before DONE can be (a) a func-requested navigate (already
     // signalled via NAVIGATE_RESTART → resolveNavigate), or (b) a navigation

@@ -890,6 +890,15 @@ parseJsonOrThrowLoginWall: (v) => v,
 
 **教训**:**「连接断开」是一个独立的、必须显式处理的 settle 信号,不能假设它总跟某个已知信号同时发生**。这次的洞:编排器把「port 断」默认等价于「func 请求了导航」,但页面有**一万种自己跳走的方式**(302 / meta-refresh / JS location / bfcache),全都断 port 却都不发 NAVIGATE_RESTART。凡是「等一个外部事件、同时持有一个会被外部销毁的连接」的状态机,都要把**连接意外断开**当成一等公民的转移,且转移要**幂等**(因为正常完成路径也会断连)。跟 §10.19「等慢操作时 SW 被回收」同源:**等待态要枚举所有打断方式,逐个给出路**,别只设计 happy path + 一个兜底超时。
 
+**附带(同一处 port 断开的另一面)**:控制台还有一条
+
+```
+Unchecked runtime.lastError: The page keeping the extension port is moved into
+back/forward cache, so the message channel is closed.
+```
+
+每次 goto 导航都刷一条。**无害**(就是上面那个 bfcache 断 port),但是噪音。根因:goto 把旧页面塞进 bfcache → 持有 runner `connect()` port 的那个页面被缓存 → Chrome **带着 `lastError` 拆掉 channel**;我们的 `onDisconnect` 没读 `lastError` → Chrome 报「Unchecked」。修法:`onDisconnect` 里 `void chrome.runtime.lastError;` 把它**消费掉**(这是 Chrome 文档给的标准姿势——「想知道断开是不是出错,在 onDisconnect 回调里读 lastError」)。顺带:SW 侧给 runner port 的 `postMessage`(INIT / RPC 回复)包了 `safePost` try/catch,免得对一个刚断的 port post 在 async 监听器里抛未捕获;keepalive port 的 onDisconnect 同样读一下 lastError。**教训**:port 异常断开会 set `lastError`,**onDisconnect 回调有义务读它**,否则每次断开都是一条「Unchecked」噪音。
+
 ## 11. 市场布局 v2:per-file + sha256(为公开市场铺路)
 
 > 关键改动 commit:`<next>`(本节描述的整体 schema-v2 切换)。

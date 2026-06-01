@@ -160,6 +160,7 @@ chrome.runtime.onConnect.addListener((port) => {
     keepaliveConnections.add(port);
     log(SCOPE, `keepalive port connected (total=${keepaliveConnections.size})`);
     port.onDisconnect.addListener(() => {
+      void chrome.runtime.lastError; // consume bfcache/disconnect lastError
       keepaliveConnections.delete(port);
       log(SCOPE, `keepalive port disconnected (remaining=${keepaliveConnections.size})`);
     });
