@@ -313,20 +313,41 @@ sleep / toolCallKey / ThrashTracker`),`tests/resilience.test.ts` 全覆盖;
 - **教训**:func/pipeline 混装时"装了 ≠ 能用",环境前提(userScripts 开关)要对用户和模型
   都显式化;`npm run build` 重载后该开关常被 Chrome 重置。
 
+### 10.12 Round 2 — 补齐剩余计划项(R1–R7)
+
+一轮把之前刻意暂缓 / 欠的都补上:
+
+- **R1 引擎可测化 + 集成测**:`run()` 抽成 `runApiSession(ctx, deps?)`,deps 可注入
+  `complete`(LLM)/ `slots` / `budget`,**production 路径不变**(三者默认回退真实实现)。
+  新增 `tests/api-engine.test.ts`:mock session-store,用假 LLM 驱动真实循环,10 个金标
+  场景覆盖 chat / 工具 / thrash / budget-checkpoint / plan 审批 / 拒绝 / 只读规划 / 子
+  agent / steering。
+- **R2 工具子集化**:`tool-select.ts` `selectTools`——工具数 > 阈值(40)时保留 generic +
+  **任务文本点名的站点**;没点到任何站点则**全保留**(绝不 strand 模型)。纯函数可测。
+- **R3 逐字渲染**:流式 `onText` → `assistant_delta` → `ASSISTANT_TURN_PATCH` → App.tsx
+  实时把部分 assistant 文本渲染进气泡,最终 `ASSISTANT_TURN` 落定。
+- **R4 记忆管理 UI**:菜单「🧠 记忆」页,`LIST_MEMORIES` / `DELETE_MEMORY` 列出 + 删除。
+- **R5 no-progress 熔断(谨慎版)**:`NoProgressTracker`——有 approved plan 且连续 N(8)轮
+  **既无 plan 进展又无成功工具调用**才 checkpoint(双条件,不误杀长步骤)。
+- **R6 场景 eval 框架**:即 R1 的 `runScenario` 金标场景集,作为 harness 行为回归护栏。
+- **R7 prompt 版本常量**:`PROMPT_VERSION`,run() 启动日志带上,变更可追踪。
+- **教训**:用"可注入 deps + 默认回退真实实现"加测试缝,比整段抽 `driveLoop` 风险小得多
+  (production 零行为变化,测试 1281→1291 全绿);工具子集化的安全底线=点不到站点就全保留。
+
 ---
 
 ## 11. 完成状态(2026-06-02)
 
-Phase 0–4 + 三个选项(流式 / 指标-lite / 长期记忆)**全部落地**。typecheck 干净,
-**1273 vitest 全绿**(从基线 1214 +59),改动文件 eslint/prettier 干净(仓库历史遗留的
-lint/format 问题在 `tests/adapters/*` 等未触及文件,与本次无关)。
+Phase 0–4 + 三个选项(流式 / 指标-lite / 长期记忆)+ Round 2 补齐项(R1–R7)**全部落地**。
+typecheck 干净,**1291 vitest 全绿**(从基线 1214 +77),改动文件 eslint/prettier 干净
+(仓库历史遗留的 lint/format 问题在 `tests/adapters/*` 等未触及文件,与本次无关)。
 
-**新增模块**:`resilience` `budget` `compaction` `plan` `stream` `metrics` `memory-store`
-(均纯函数可测)+ 引擎内 `runPlanningPhase` / `runSubagent` / `compactIfNeeded` 编排。
-**新工具**:`update_plan` `submit_plan` `spawn_subagent` `remember`(全部引擎拦截,不走
-dispatcher)。
+**新增纯模块**:`resilience` `budget` `compaction` `plan` `stream` `metrics` `memory-store`
+`tool-select`,均单测;**引擎集成测** `tests/api-engine.test.ts`(假 LLM 驱动真实循环)。
+**新工具**:`update_plan` `submit_plan` `spawn_subagent` `remember`(全部引擎拦截)。
 
-**仍欠/暂缓**:引擎级集成测(`run()` 需先与 `resolveSlots`/IDB 解耦,见 §10.2)、场景
-eval 框架、记忆管理 UI、逐字渲染进气泡、no-plan-progress 熔断。**两个写 adapter 之外**,
-本次纯 harness 改动建议在真浏览器里跑一遍 plan 模式 + 流式 + 子 agent 做一次冒烟验证
-(单测覆盖逻辑,但 SSE 解析 / IDB / 审批门 UI 等集成路径值得一看)。
+**真正不做(技术理由,非遗漏)**:完整 OTel(metrics-lite 替代)、LLM 响应缓存(任意端点
+不可依赖)、并行步骤执行(tab 并发 = ping-pong 风险)。
+
+**建议**:在真浏览器里把 plan 模式 + 流式逐字 + 子 agent + 记忆 跑一遍冒烟验证(单测覆盖
+逻辑,但 SSE / IDB / 审批门 UI 等集成路径值得一看)。
