@@ -1292,7 +1292,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "linkedin/jobs-preferences.js",
-      "sha256": "7f1e376848486c344d5985bf52a521aabb527bad0c0dbf0857ab3eaa21355f6e"
+      "sha256": "75952d15e01ce6187558bcf89d8fb345c666e09ed06911611298dde37d2352b8"
     },
     {
       "site": "linkedin",
@@ -1382,7 +1382,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "linkedin/profile-read.js",
-      "sha256": "1b294c94d9f7e699428b77a90392952f1ff6365bbf4adec12da152ada11c0d3c"
+      "sha256": "a0350542ca2a88b8c4f7359dd2167653f648119162074bc6b42ee43b2b4266af"
     },
     {
       "site": "linkedin",
@@ -1406,7 +1406,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "linkedin/salesnav-message.js",
-      "sha256": "40d281a88be95eb113cd0e290af2cf74ee6180b410c539d4832f1ce96689eb70"
+      "sha256": "15df558505e8872e5a6a51e589b020548205134236deb144e953bcff25d53012"
     },
     {
       "site": "linkedin",
@@ -1443,7 +1443,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "linkedin/search.js",
-      "sha256": "d06229e85d586203a42cd1552d41bf8f1c70302ab37e9bc7882545de2eb5cd1f"
+      "sha256": "1e93587fd648bfb3323302ba2ba5d1c3db88e4132ace6cc4eaba64cf28aa4712"
     },
     {
       "site": "linkedin",
@@ -1468,7 +1468,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "linkedin/services-read.js",
-      "sha256": "4a6deb758157924280e9423e7571a715bc65fe5a1ec8d98a62255976c3db8b9c"
+      "sha256": "9d9ad369760697dc28f16b402a993d6e8858d9f0bfe21ba3a8306018f21bc948"
     },
     {
       "site": "linkedin",
@@ -2464,7 +2464,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "twitter/reply-dm.js",
-      "sha256": "05b84cbb7c32c5ef0abd6011e14ae87f4e555befce37e646a45d101d1fa75302"
+      "sha256": "8341768d8a0ee3ee9cd94cd607bbbe9e4294f4e487687fe1807c00eb1124850c"
     },
     {
       "site": "twitter",

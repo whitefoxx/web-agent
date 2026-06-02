@@ -1,5 +1,27 @@
 import { CommandExecutionError } from '@jackwener/opencli/errors';
 import { cli, Strategy } from '@jackwener/opencli/registry';
+
+// Cross-navigation scratchpad (hot-plug trampoline). Installed func adapters run
+// in-page and are re-executed from the top after every page.goto, so local vars
+// don't survive a navigation. This WRITE-LOOP adapter navigates to one DM
+// conversation per send; without state it would re-scrape the inbox and restart
+// the loop on every reinject (ping-pong) and risk DOUBLE-SENDING. To make the
+// loop trampoline-safe we drive it as a URL/stash state machine: the inbox list
+// + cursor + accumulated results live in the tab's sessionStorage (same-origin
+// x.com survives same-site navigation+reinject). Each replay processes exactly
+// the conversation at `cursor`, advances the cursor, stashes, then navigates to
+// the next — so a reinject resumes (monotonic forward) instead of restarting.
+// See docs/adapter-hot-plug.md §10.22. Scripts are guarded so a page that blocks
+// storage degrades to a clear error rather than throwing.
+function buildScratchSetScript(key, jsonValue) {
+    return `(() => { try { sessionStorage.setItem(${JSON.stringify(key)}, ${JSON.stringify(jsonValue)}); return true; } catch (e) { return false; } })()`;
+}
+function buildScratchGetScript(key) {
+    return `(() => { try { return sessionStorage.getItem(${JSON.stringify(key)}); } catch (e) { return null; } })()`;
+}
+function buildScratchClearScript(key) {
+    return `(() => { try { sessionStorage.removeItem(${JSON.stringify(key)}); return true; } catch (e) { return false; } })()`;
+}
 cli({
     site: 'twitter',
     name: 'reply-dm',
@@ -21,14 +43,12 @@ cli({
         const messageText = kwargs.text;
         const maxSend = kwargs.max ?? 20;
         const skipReplied = kwargs['skip-replied'] !== false;
-        const results = [];
-        let sentCount = 0;
-        // Step 1: Navigate to messages to get conversation list
-        await page.goto('https://x.com/messages');
-        await page.wait({ selector: '[data-testid="primaryColumn"]' });
-        // Step 2: Collect conversations with scroll-to-load
-        const needed = maxSend + 10; // extra buffer for skips
-        const convList = await page.evaluate(`(async () => {
+        // Per-adapter scratch key (§10.22): unique so it can't collide with any
+        // other adapter's stash in the same tab's sessionStorage.
+        const SCRATCH_KEY = '__webchat_twitter_reply_dm__';
+
+        // -- Inbox list scrape script (unchanged extraction logic) -------------
+        const buildConvListScript = (needed) => `(async () => {
       try {
         // Wait for initial items
         let attempts = 0;
@@ -93,23 +113,12 @@ cli({
       } catch(e) {
         return { ok: false, error: String(e), conversations: [], total: 0 };
       }
-    })()`);
-        if (!convList?.ok || !convList.conversations?.length) {
-            return [{ index: 1, status: 'info', user: 'System', message: 'No conversations found' }];
-        }
-        const conversations = convList.conversations;
-        // Step 3: Iterate through conversations and send message
-        for (const conv of conversations) {
-            if (sentCount >= maxSend)
-                break;
-            const convUrl = conv.convId
-                ? `https://x.com/messages/${conv.convId}`
-                : conv.href;
-            if (!convUrl)
-                continue;
-            await page.goto(convUrl);
-            await page.wait(3);
-            const sendResult = await page.evaluate(`(async () => {
+    })()`;
+
+        // -- Per-conversation send script (unchanged: skip-replied PRE-SEND gate
+        //    reads the live DOM for our own message text, the per-conversation
+        //    double-send guard). ----------------------------------------------
+        const buildSendScript = (conv) => `(async () => {
         try {
           const messageText = ${JSON.stringify(messageText)};
           const skipReplied = ${skipReplied};
@@ -118,7 +127,7 @@ cli({
           const dmHeader = document.querySelector('[data-testid="DmActivityContainer"] [dir="ltr"] span') ||
                            document.querySelector('[data-testid="conversation-header"]') ||
                            document.querySelector('[data-testid="DmActivityContainer"] h2');
-          const username = dmHeader ? dmHeader.innerText.trim().split('\\\\n')[0] : '${conv.user}';
+          const username = dmHeader ? dmHeader.innerText.trim().split('\\\\n')[0] : ${JSON.stringify(conv.user)};
 
           // Check if we already sent this message
           if (skipReplied) {
@@ -155,26 +164,104 @@ cli({
         } catch(e) {
           return { status: 'error', user: 'system', message: String(e) };
         }
-      })()`);
+      })()`;
+
+        const convUrlFor = (conv) =>
+            conv.convId ? `https://x.com/messages/${conv.convId}` : conv.href;
+
+        // ---- State recovery (§10.22) ----------------------------------------
+        // The stash is the single source of truth for "are we mid-loop?". If it
+        // exists, a prior stage already built the inbox list + initialized the
+        // cursor, and we must NOT re-goto /messages or re-scrape (that would
+        // ping-pong and reorder the inbox). If it's absent, we are at stage 0.
+        const stashedRaw = await page.evaluate(buildScratchGetScript(SCRATCH_KEY));
+        let state = null;
+        if (stashedRaw) {
+            try {
+                state = JSON.parse(stashedRaw);
+            } catch {
+                state = null;
+            }
+        }
+
+        if (!state) {
+            // Stage 0: build the conversation list ONCE. This goto + scrape only
+            // run on the initial entry (no stash yet); per-conversation replays
+            // recover the list from the stash and never re-run this block.
+            await page.goto('https://x.com/messages');
+            await page.wait({ selector: '[data-testid="primaryColumn"]' });
+            const needed = maxSend + 10; // extra buffer for skips
+            const convList = await page.evaluate(buildConvListScript(needed));
+            if (!convList?.ok || !convList.conversations?.length) {
+                // Nothing to do — no stash to leave behind.
+                return [{ index: 1, status: 'info', user: 'System', message: 'No conversations found' }];
+            }
+            // Filter to addressable conversations up front so the cursor walks a
+            // stable, replay-identical list.
+            const conversations = convList.conversations.filter((c) => !!convUrlFor(c));
+            state = { conversations, cursor: 0, sentCount: 0, results: [] };
+            await page.evaluate(buildScratchSetScript(SCRATCH_KEY, JSON.stringify(state)));
+        }
+
+        // ---- Loop body: process exactly ONE conversation per replay ----------
+        // Each iteration: goto conv[cursor] (no-op on the replay already there),
+        // send-with-skip-check, record, advance cursor, STASH the advanced
+        // cursor, then goto the next conv (reinject → resume at cursor+1). The
+        // stash is written BEFORE the next navigation so a reinject can never
+        // reprocess an already-counted conversation. And the send is guarded by
+        // skip-replied (reads our own delivered message in the live DOM), so
+        // even a mis-stepped cursor cannot double-send. SINGLE-SHOT.
+        while (state.cursor < state.conversations.length && state.sentCount < maxSend) {
+            const conv = state.conversations[state.cursor];
+            const convUrl = convUrlFor(conv);
+
+            await page.goto(convUrl); // reinject → func restarts, recovers stash, lands here on `conv`
+            await page.wait(3);
+
+            const sendResult = await page.evaluate(buildSendScript(conv));
+
             if (sendResult?.status === 'sent') {
-                sentCount++;
-                results.push({
-                    index: sentCount,
+                state.sentCount++;
+                state.results.push({
+                    index: state.sentCount,
                     status: 'sent',
                     user: sendResult.user || conv.user,
                     message: sendResult.message,
                 });
-            }
-            else if (sendResult?.status === 'skipped') {
-                results.push({
-                    index: results.length + 1,
+            } else if (sendResult?.status === 'skipped') {
+                state.results.push({
+                    index: state.results.length + 1,
                     status: 'skipped',
                     user: sendResult.user || conv.user,
                     message: sendResult.message,
                 });
             }
+
+            // Advance + persist BEFORE the next navigation so the reinject that
+            // lands on the next conversation skips this (already-done) one.
+            state.cursor++;
+            await page.evaluate(buildScratchSetScript(SCRATCH_KEY, JSON.stringify(state)));
+
             await page.wait(1);
         }
+
+        // ---- Done: recover final results, clear the stash, return ------------
+        // Re-read the stash (it's the authoritative accumulator across reinjects)
+        // then clear the key so a fresh invocation starts clean.
+        const finalRaw = await page.evaluate(buildScratchGetScript(SCRATCH_KEY));
+        await page.evaluate(buildScratchClearScript(SCRATCH_KEY));
+        let finalState = state;
+        if (finalRaw) {
+            try {
+                finalState = JSON.parse(finalRaw);
+            } catch {
+                finalState = state;
+            }
+        }
+        if (!finalState) {
+            throw new CommandExecutionError('twitter reply-dm lost its conversation cursor across navigation (sessionStorage unavailable?).');
+        }
+        const results = finalState.results || [];
         if (results.length === 0) {
             results.push({ index: 0, status: 'info', user: 'System', message: 'No conversations processed' });
         }

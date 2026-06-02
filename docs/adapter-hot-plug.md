@@ -991,6 +991,10 @@ URL 守卫救不了——它们真的需要「页面外的 CDP 控制器」那�
 的模型,而 installed adapter 没有。**先记下来、留作后续**(要么改成用 `page.evaluate`
 里 `fetch` 同源取数据避免导航,要么单独给 installed adapter 接一条 CDP 执行路)。
 
+> **更新**:这 6 个已在 **§10.22** 全部修掉——用第三条路:**`sessionStorage` 同源状态机**
+> (这些导航全是同源,snapshot 跨 reinject 存活)。读 adapter 直接做;写 adapter
+> (`twitter/reply-dm`、`linkedin/salesnav-message`)额外加幂等门防重发(详见 §10.22)。
+
 **回归护栏**:`tests/run-in-page.test.ts` 加了一个 `driveTrampoline` 驱动器,真把
 「跑 func → navigating 就挪 location.href + 重跑」的 SW reinject 循环模拟出来,
 断言:**无守卫的两跳 func 一定打到 reinject 上限**(复现 bug),**有守卫的一跳收敛
@@ -1016,6 +1020,145 @@ page 工厂没补。修法:照 `zhihu-page.ts` 的既有约定,给相关 fake-pa
 所以 func 照旧导航,既有断言全保。**教训**:**给 adapter 加了新的 `page.*` 调用,
 等于改了 page 契约,所有 fake page 都得跟着补全**;fake 的「最小可用」会在契约扩张时
 变成「不完整」(同 §10.8/§10.14「测样要覆盖真实形态多样性」)。
+
+### 10.22 INTERLEAVED func:用 `sessionStorage` 状态机把「跨页读」做成 trampoline-safe
+
+**背景**:§10.21 把 6 个 `INTERLEAVED_NEEDS_CDP` adapter(`linkedin/{jobs-preferences,
+profile-read,salesnav-message,search,services-read}`、`twitter/reply-dm`)留作后续——
+它们在两次导航之间**读了页面 DOM 且那份数据进了返回结果**(`goto A; r1=读A; goto B;
+r2=读B; return merge(r1,r2)`)。纯 URL 守卫救不了:落到 B 的那次 replay 跳过 `读A`
+就丢了 A 的数据,不跳过又会把 B 的 DOM 当 A 读。
+
+**修法**:把 func 改写成**URL 驱动的状态机**,把每页 snapshot 暂存进**本 tab 的
+`sessionStorage`**(同源导航 + reinject 都存活),在最终页恢复并合并。本轮这些 adapter
+的导航**全是同源**(`www.linkedin.com` 内部 / `twitter.com` 内部),所以 sessionStorage
+能跨 reinject 存活。范式:
+
+- 顶部读 `page.getCurrentUrl()`;**不在最终页**就跑前置 stage(scrape → `buildScratchSetScript`
+  暂存 → goto 下一页),goto 触发 reinject;**最终 stage** scrape 自己的页、用
+  `buildScratchGetScript`(`JSON.parse`)恢复暂存、`buildScratchClearScript` 清键、返回合并。
+- 三段以上就链式:每个非最终 stage scrape+stash+navigate,各自用「我是否已越过本 stage 的页」
+  做 URL 守卫(单调前进,§10.21 的不变量照旧成立)。
+- `SCRATCH_KEY` 每 adapter 唯一:`"__webchat_<site>_<name>__"`。
+- **硬约束**:single-goto / arg 提供 / 已安全的路径**逐字节不变**——只有 interleaved 多跳
+  路径变状态机(如 `services-read` 只在「读自己 owner-edit」即无 services-url 且无 profile-url
+  时才 4 段 interleaved;`profile-read` 只在读自己 profile 时;`search` 只在 `--details` 时)。
+- 复用既有 scrape 脚本 + normalize helper **不变**,只改 func 控制流。
+
+helper 三件套(inline 在 adapter unwrap helper 之后),发出**带 guard** 的 sessionStorage
+脚本喂 `page.evaluate`,被存储拦截的页降级为 clear error 而非 throw:
+
+```js
+function buildScratchSetScript(key, jsonValue) { return `(() => { try { sessionStorage.setItem(${JSON.stringify(key)}, ${JSON.stringify(jsonValue)}); return true; } catch (e) { return false; } })()`; }
+function buildScratchGetScript(key)   { return `(() => { try { return sessionStorage.getItem(${JSON.stringify(key)}); } catch (e) { return null; } })()`; }
+function buildScratchClearScript(key) { return `(() => { try { sessionStorage.removeItem(${JSON.stringify(key)}); return true; } catch (e) { return false; } })()`; }
+```
+
+**测试范式**:单测里 `page.goto` 不 throw,状态机**线性**跑完一遍(stage1→stage2…)。
+fake page 须:`getCurrentUrl: vi.fn().mockResolvedValue('')`(空串 → 进 stage 1);
+`page.evaluate = withSessionScratch((script)=>{ /* 既有 per-script scrape */ })`
+(`tests/adapters/_helpers/session-scratch.ts` 用内存 Map 模拟那 3 个 storage 脚本、其余
+落到你的 scrape)。既有断言全保,合并结果与改写前逐字一致。
+
+**本轮抓到的真 bug(`linkedin/services-read`,owner-edit 4 段路径)**
+
+- **症状**:`fails closed on the media page when the stash is lost` 测试期望
+  `CommandExecutionError`,实际抛 `TypeError: Invalid URL`(`code: ERR_INVALID_URL,
+  input: ""`)。即 sessionStorage 被禁(set/get 全 no-op)时,fail-closed 走的是裸
+  `TypeError` 而非约定的 clear error。
+- **根因**:owner-edit 路径 discover 出 `servicesUrl` 后 `mergeScratch` 暂存,但存储被禁
+  → stage 2 里 `const stashUrl = (await readScratch(page)).servicesUrl` 取回 `undefined`;
+  fake `getCurrentUrl()` 恒返回 `''` → `baseServicesUrl = stashUrl ||
+  (isServicesPageUrl('') ? ... : '')` = `''`。随后 `deriveEditUrl('' || '')` →
+  `new URL("")` → **抛 `TypeError`**。约束 #3 要求「最终页暂存丢失须抛 clear
+  CommandExecutionError」,这里在**进入最终页之前**就被 `new URL("")` 抢先炸了,错误类型错。
+- **修法**:在 `deriveEditUrl/deriveMediaUrl` **之前**对 `baseServicesUrl` 加守卫——空就抛
+  `CommandExecutionError("... lost its Services page URL across the edit navigation
+  (sessionStorage unavailable?)")`;并把后面 `deriveMediaUrl(baseServicesUrl || hereServices)`
+  里现已成死代码的 `|| hereServices` 兜底去掉(守卫已保证非空)。改完测试 9/9 绿,esbuild exit 0。
+- **教训**:state machine 里**任何「从暂存恢复出来、再喂给 `new URL()`/`deriveXxx()` 的值」
+  都要先判空再用**——存储被禁是 fail-closed 的合法触发路径,不能让它绕过你精心写的 clear
+  error 从一个**更底层、更难懂**的构造函数(`new URL`)里漏出来。fail-closed 的错误类型本身
+  就是契约的一部分(上层按 `CommandExecutionError` 决定降级),裸 `TypeError` 会击穿它。
+
+**`linkedin/search`(`--details` 是 LOOP 状态机,不是定段 2-stage)**
+
+- **形态**:`--details` 默认 false。LIST 在搜索页单 goto 取到(已安全,逐字节不变)。开了
+  `--details` 后 `enrichJobDetails` 是个**导航循环**:对每个 job `goto job.url; scrape 描述`。
+  改写成 **loop 状态机**:stash `{ jobs, cursor, enriched }` 进 `__webchat_linkedin_search__`;
+  每次 replay 落在 `jobs[cursor].url`,scrape→push→`cursor++`→`goto jobs[cursor].url`(→ 再
+  reinject);cursor 耗尽则清键返回 enriched。顶部 resume 守卫:`includeDetails &&
+  typeof page.getCurrentUrl === 'function'` 且 URL 命中 `/jobs/view/` 且有 live stash 才进
+  loop——**搜索 goto 与 voyager list-fetch 不在 per-job replay 重跑**(list 从 stash 恢复)。
+  per-row 失败语义(`no url` / `fetch failed: ...` / `missing description`)全保。
+- **新增 degrade(防 ping-pong,落实约束「never loop」)**:loop SM 不是「最终页恢复暂存、丢了
+  就抛 clear error」那种定段形态——它**靠 stash 在每次 reinject 间存活**。若 sessionStorage 被
+  禁:stage-0 seed 写 setItem(guard 返回 false)→ 导航到 job[0] → reinject → resume 守卫
+  `readDetailsStash` 取回 null → 落到**全新搜索** → 重新 seed → 又导航到 job[0]……**无限
+  ping-pong**(正是 spec 警告的 "never loop")。修法:`stashDetailsState` 写完**立刻 getItem
+  读回验证**(guard set 返回 false 时 readback 为 null),只有读回成功才证明下次 reinject 能
+  resume;读不回就**在 stage-0(首次导航之前)/ loop 中途**调用 `degradeRemainingJobs`:把剩余
+  job 直接产出 `detail_error: "details unavailable for in-page execution"` 的非富集行,**不再
+  导航**。所以这条 adapter 的 fail-closed 是**降级返回**(read,无副作用,部分富集即可),不是
+  抛错——与 `services-read`(write 前置,必须 fail-closed 抛错)的契约不同。
+- **测试**:`tests/adapters/linkedin/search.test.ts` 新增 3 个 func 级 `--details` e2e:
+  (1) 跨导航富集 2 个 job、断言搜索页只 goto 一次、voyager list **不**逐 job 重取;
+  (2) per-row 语义(no-url 行 + missing-description 行)保持;(3) `blockStorage: true` 时
+  **不导航任何 job 页**(`gotoUrls` 里无 `/jobs/view/`)且全行降级。原 19 个 `enrichJobDetails`
+  断言(LINEAR 路径,单测/非 trampoline 运行时仍走它)全保。`withSessionScratch` 内存 Map 模拟
+  storage 脚本;degrade 测试不能用它(它内部拦截 setItem 必存)——改用裸 `vi.fn`,setItem→false、
+  getItem→null,真 scrape 落到 `scrape()`。esbuild exit 0,`tsc --noEmit` exit 0,22/22 绿。
+- **教训**:**loop 状态机的 fail-closed ≠ 定段状态机的 fail-closed**。定段是「最终页丢暂存就抛
+  CommandExecutionError」;loop 没有「最终页」,丢暂存意味着**下一跳会重走入口 → 自我重入**,
+  所以必须在**导航之前**用「写后读回」证明 stash 可存活,存不活就**就地降级、绝不导航**。判据是
+  「这次 set 的值我现在能 get 回来吗」,不是「set 脚本返回了 true 吗」——guard 脚本的返回值与
+  「值是否真落盘且能跨 reinject 读回」不必然一致,只有读回才是证据。
+
+**写操作的幂等性(read/write 的关键非对称)**:纯读 adapter(`jobs-preferences`/
+`profile-read`/`services-read`/`search`)replay 多次只是重复 scrape 同源 DOM,无副作用——
+天然 idempotent。**写** adapter 的状态机最后一段「send」必须**单次触发**:replay 重跑绝不能
+二次发送。本轮两个写 adapter 各自的论据:
+
+- **`twitter/reply-dm`(写循环,confidence 高)**:两层守卫。(1)**硬前置 DOM 门**:发送
+  脚本在 focus 输入框 / click 发送 *之前*,当 `skip-replied`(默认 true)时读该会话自己的
+  DOM(`DmScrollerContainer`),若 `chatText.includes(messageText)` 就返回 `skipped` 不发——
+  因为我们发的就是 `messageText`,**任何 replay 落回已发过的会话都会看到自己的消息而短路**。
+  (2)**单调 cursor**:`cursor++` 和 stash 都在 `goto 下一会话` *之前*完成,reinject 后从
+  `cursor+1` 续跑,刚发过的会话不会被重入。两者叠加:正常路径 cursor 不回头,`skip-replied`
+  DOM 门是「整条命令被重试 / cursor 走错」时的兜底。**注意**:用户显式 `--skip-replied false`
+  时第 1 层失效,仅靠 cursor 单调性——sessionStorage 被擦才可能重发(罕见,已记)。
+
+- **`linkedin/salesnav-message`(写,发 InMail **耗 credit**,confidence 高)**:**消灭发送后导航**
+  来根治。credit-costing 的 POST 本就是同源 `fetch`(不导航);唯一的发送后副作用来源是旧版的
+  「落地页核验」`goto(leadUrl)` —— 它是发送之后**仅有的** reinject 点。改法:**核验也走 `fetch`**
+  —— 发送 POST 经 `requireFetchResult` 已断言 HTTP 2xx(非 2xx/auth 直接抛),那就是 LinkedIn 对
+  `createMessage` 的成功确认;再用 credits 前后差(`creditsAfter < creditsRemaining`)佐证(open-link
+  免费发不耗 credit,故只报告不强求)。**发送之后不再有任何 `page.goto`**,所以 func **发送后永不
+  reinject** → 那个 `fetch` 一趟命令**必然只发一次**。发送 *之前* 的导航(可选的 SALES_HOME 预热、
+  以及未解析 `/in/` recipient 时 `resolveRecipient` 的 lead 探测)都有 URL 守卫防 ping-pong,且都
+  严格在发送上游 —— 早期 pass 在到达发送前就 `NAVIGATE_RESTART`,只有最终 pass 流到发送一次。
+  这比旧的「sessionStorage 哨兵 + 落地页实时 DOM 守卫」两道门更强:旧法残留一个
+  **「存储跨导航被擦」⨯「已发活动渲染延迟」同时发生 → 可能二次发送** 的竞态(故当时记为 confidence 中);
+  **去掉发送后导航后该竞态从根上消失**(没有发送后 replay,就没有重发的入口)。代价:核验从「抓落地页
+  DOM 文本」变成「信任发送 API 的 2xx + credits 差」——对 `createMessage` 这种动作端点,2xx 即创建成功,
+  与该 adapter 对 profile/credits 两个 `fetch` 的信任方式一致。`salesPageShowsSentMessage` /
+  `salesLeadUrlFromParts` 退化为 `__test__` 纯函数(不再被 func 调用)。**仍建议真机验证**(写 adapter
+  上线前用一次性会话试),这批改完照例**不自动 commit**、等用户确认。
+
+**教训**(写操作单发的两档强度,优先用上面那档):
+
+1. **最强 —— 让副作用之后没有导航**:`page.goto` 是唯一的 reinject 来源,所以**只要副作用
+   (这里是发 InMail 的 `fetch`)之后不再有任何 `page.goto`,func 就永不在发送后 reinject,单发是
+   *结构性* 保证,无需任何守卫**。`salesnav-message` 就是把发送后的「落地页核验 goto」换成同源
+   `fetch` 核验做到的。判据:**把所有 reinject 点列出来,确认副作用严格在最后一个之后**——能做到就
+   不要留任何「发送后导航」。
+2. **次强(当写本身就是导航循环、躲不开发送后导航时)** —— 如 `twitter/reply-dm`:把「副作用是否已
+   发生」做成**可观测、跨 reinject 存活的事实**(媒介自身的 DOM 证据,如 `skip-replied` 读会话里
+   有没有我发的那条)+ **单调推进的 cursor**(stash 在 goto 之前)。这是退而求其次,因为它依赖
+   「证据已渲染 / 存储存活」这类运行时条件。
+
+纯读没这负担。一旦 func 带副作用:**先想能不能把副作用挪到所有导航之后**(消灭 reinject 点);
+做不到再上「可观测哨兵 + 单调 cursor」;两者都给不出一句话的幂等论据,就 fail-fast,别赌。
 
 ## 11. 市场布局 v2:per-file + sha256(为公开市场铺路)
 

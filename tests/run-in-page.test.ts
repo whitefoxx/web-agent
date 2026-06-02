@@ -529,6 +529,112 @@ cli({ site:'demo', name:'fav', access:'read', domain:'demo.com', strategy: Strat
     expect(out.result).toEqual(['r1', 'r2']);
     expect(out.navs).toEqual([]);
   });
+
+  // ── sessionStorage state machine (the §10.22 fix for INTERLEAVED funcs) ──
+  // A func that reads page A INTO its result, then navigates to page B and reads
+  // B too, cannot just skip A's read on the final replay (it would lose A's data
+  // or read B's DOM for A). The fix: stash A's snapshot in the tab's
+  // sessionStorage (same-origin, survives the navigation+reinject) and recover it
+  // on B. This driver models that: sessionStorage persists across reinjects (same
+  // origin), and page.evaluate handles setItem/getItem/removeItem.
+  async function driveWithSessionStorage(opts: {
+    source: string;
+    startUrl: string;
+    pageData: (loc: string) => Record<string, unknown>;
+    cap?: number;
+  }): Promise<{ status: 'ok' | 'error' | 'exceeded'; result?: unknown; navs: string[] }> {
+    const cap = opts.cap ?? 6;
+    let href = opts.startUrl;
+    let lastNavigatedUrl: string | undefined;
+    const navs: string[] = [];
+    const store = new Map<string, string>(); // survives reinjects (same-origin tab)
+    const immediate = ((fn: () => void) => {
+      fn();
+      return 0 as unknown as ReturnType<typeof setTimeout>;
+    }) as typeof setTimeout;
+    const evalFor = (loc: string, js: string): unknown => {
+      let m: RegExpMatchArray | null;
+      if ((m = js.match(/sessionStorage\.setItem\((["'])(.+?)\1,\s*(".*")\)/s))) {
+        store.set(m[2], JSON.parse(m[3]));
+        return true;
+      }
+      if ((m = js.match(/sessionStorage\.getItem\((["'])(.+?)\1\)/))) {
+        return store.has(m[2]) ? store.get(m[2]) : null;
+      }
+      if ((m = js.match(/sessionStorage\.removeItem\((["'])(.+?)\1\)/))) {
+        store.delete(m[2]);
+        return true;
+      }
+      // a "scrape this page" script → return that page's data
+      return opts.pageData(loc);
+    };
+    for (let i = 0; i <= cap; i++) {
+      const rpc = async (method: string, a: { args?: unknown[] }) => {
+        if (method === 'evaluate') return evalFor(href, String((a.args ?? [])[0] ?? ''));
+        return undefined;
+      };
+      const page = makeLocalPage({
+        rpc,
+        env: { location: { href }, setTimeout: immediate },
+        lastNavigatedUrl,
+      });
+      const r = await runAdapterInPage({ source: opts.source, site: 'demo', name: 'two', kwargs: {}, page });
+      if (r.status === 'navigating') {
+        navs.push(r.navigateUrl as string);
+        href = r.navigateUrl as string;
+        lastNavigatedUrl = r.navigateUrl as string;
+        continue;
+      }
+      return { status: r.status, result: r.result, navs };
+    }
+    return { status: 'exceeded', navs };
+  }
+
+  // Mirrors jobs-preferences: read /a (stash), navigate to /b, read /b, merge.
+  const STATE_MACHINE = `import { cli, Strategy } from '@jackwener/opencli/registry';
+cli({ site:'demo', name:'two', access:'read', domain:'demo.com', strategy: Strategy.COOKIE,
+  func: async (page) => {
+    const KEY = '__wc_demo_two__';
+    const here = await page.getCurrentUrl().catch(() => '');
+    if (!/\\/b(?:\\/|\\?|#|$)/.test(here)) {
+      await page.goto('https://demo.com/a');
+      const a = await page.evaluate('readA');
+      await page.evaluate('sessionStorage.setItem("' + KEY + '", ' + JSON.stringify(JSON.stringify(a)) + ')');
+      await page.goto('https://demo.com/b');
+    }
+    const b = await page.evaluate('readB');
+    const stashedRaw = await page.evaluate('sessionStorage.getItem("' + KEY + '")');
+    await page.evaluate('sessionStorage.removeItem("' + KEY + '")');
+    const a = stashedRaw ? JSON.parse(stashedRaw) : null;
+    return { a, b };
+  },
+});`;
+
+  it('state machine carries page-A data across the navigation via sessionStorage and merges on B', async () => {
+    const out = await driveWithSessionStorage({
+      source: STATE_MACHINE,
+      startUrl: 'https://demo.com/a',
+      pageData: (loc) => (/\/b(?:\/|\?|#|$)/.test(loc) ? { from: 'B', n: 2 } : { from: 'A', n: 1 }),
+      cap: 6,
+    });
+    expect(out.status).toBe('ok');
+    // A's snapshot survived the /a → /b navigation; both pages contributed.
+    expect(out.result).toEqual({ a: { from: 'A', n: 1 }, b: { from: 'B', n: 2 } });
+    expect(out.navs).toEqual(['https://demo.com/b']); // one nav, no ping-pong
+  });
+
+  it('state machine entered mid-flight on B still reconstructs (stash already present)', async () => {
+    // Simulate a reinject that lands on /b with A already stashed: seed by running
+    // from /a (which stashes), then the driver naturally continues on /b.
+    const out = await driveWithSessionStorage({
+      source: STATE_MACHINE,
+      startUrl: 'https://demo.com/a',
+      pageData: (loc) => (/\/b/.test(loc) ? { from: 'B', n: 2 } : { from: 'A', n: 1 }),
+      cap: 6,
+    });
+    expect(out.status).toBe('ok');
+    expect((out.result as { a: unknown }).a).toEqual({ from: 'A', n: 1 });
+  });
 });
 
 describe('fmtError', () => {

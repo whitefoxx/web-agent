@@ -95,6 +95,25 @@ function decodeLinkedinRedirect(url) {
     catch { }
     return url;
 }
+// ── Cross-navigation scratchpad (hot-plug trampoline) ─────────────────
+//
+// Installed func adapters run in-page and are re-executed from the top after
+// every page.goto, so local loop state does NOT survive a navigation. The
+// --details path here is a navigation-driven loop (goto each job.url → scrape),
+// so it stashes its loop state (job list + cursor + accumulated rows) in the
+// tab's sessionStorage (same-origin, survives same-site navigations) and resumes
+// from the stash on each replay. See docs/adapter-hot-plug.md §10.22. Scripts are
+// guarded so a page that blocks storage degrades to a clear signal rather than
+// throwing.
+function buildScratchSetScript(key, jsonValue) {
+    return `(() => { try { sessionStorage.setItem(${JSON.stringify(key)}, ${JSON.stringify(jsonValue)}); return true; } catch (e) { return false; } })()`;
+}
+function buildScratchGetScript(key) {
+    return `(() => { try { return sessionStorage.getItem(${JSON.stringify(key)}); } catch (e) { return null; } })()`;
+}
+function buildScratchClearScript(key) {
+    return `(() => { try { sessionStorage.removeItem(${JSON.stringify(key)}); return true; } catch (e) { return false; } })()`;
+}
 function buildVoyagerSearchQuery(input) {
     const hasFilters = input.companyIds.length ||
         input.experienceLevels.length ||
@@ -324,23 +343,24 @@ async function fetchJobCards(page, input) {
 // `detail_error` to a short reason ("no url" / "fetch failed: <message>" /
 // "missing description"), and log every failure to stderr with the offending
 // URL so debugging is possible. Successful rows have `detail_error: null`.
-async function enrichJobDetails(page, jobs) {
-    const enriched = [];
-    for (let i = 0; i < jobs.length; i++) {
-        const job = jobs[i];
-        console.error(`[opencli:linkedin] Fetching details ${i + 1}/${jobs.length}: ${job.title}`);
-        if (!job.url) {
-            const reason = 'no url';
-            console.error(`[opencli:linkedin] Skipping detail for "${job.title}": ${reason}`);
-            enriched.push({ ...job, description: null, apply_url: null, detail_error: reason });
-            continue;
-        }
-        try {
-            await page.goto(job.url);
-            await assertLinkedInAuthenticated(page, 'LinkedIn job detail');
-            await page.wait({ text: 'About the job', timeout: 8 });
-            // Expand "Show more" button if present
-            await page.evaluate(`(() => {
+// Row for a job that can't be visited (no url). Pure — no navigation.
+function buildNoUrlDetailRow(job) {
+    const reason = 'no url';
+    console.error(`[opencli:linkedin] Skipping detail for "${job.title}": ${reason}`);
+    return { ...job, description: null, apply_url: null, detail_error: reason };
+}
+// Scrape the CURRENTLY-LOADED job-detail page (caller must already be on
+// job.url) and build the enriched row. Auth walls still throw AuthRequiredError;
+// every other failure is folded into detail_error. Identical scrape scripts and
+// detail_error semantics as the original loop body — only the goto is hoisted
+// out so the trampoline state machine can reuse this on a page reached by the
+// replay navigation rather than an in-function goto.
+async function scrapeCurrentJobDetail(page, job) {
+    try {
+        await assertLinkedInAuthenticated(page, 'LinkedIn job detail');
+        await page.wait({ text: 'About the job', timeout: 8 });
+        // Expand "Show more" button if present
+        await page.evaluate(`(() => {
         const norm = (v) => (v || '').replace(/\\s+/g, ' ').trim().toLowerCase();
         const section = [...document.querySelectorAll('div, section, article')]
           .find(el => norm(el.querySelector('h1,h2,h3,h4')?.textContent || '') === 'about the job');
@@ -348,9 +368,9 @@ async function enrichJobDetails(page, jobs) {
           .find(el => /more/.test(norm(el.textContent || '')) || /more/.test(norm(el.getAttribute('aria-label') || '')));
         if (btn) btn.click();
       })()`);
-            await page.wait(1);
-            // Extract description and apply URL
-            const detail = await page.evaluate(`(() => {
+        await page.wait(1);
+        // Extract description and apply URL
+        const detail = await page.evaluate(`(() => {
         const norm = (v) => (v || '').replace(/\\s+/g, ' ').trim();
         // Find the most specific (shortest) container with "About the job" heading
         // Shortest = most specific DOM node, avoiding outer wrappers that include unrelated text
@@ -369,28 +389,175 @@ async function enrichJobDetails(page, jobs) {
 
         return { description, applyUrl: applyLink?.href || '' };
       })()`);
-            const description = normalizeWhitespace(detail?.description);
-            const apply_url = decodeLinkedinRedirect(String(detail?.applyUrl ?? ''));
-            // Empty description after a successful fetch is itself a
-            // recognizable signal — surface it via detail_error instead of
-            // silently emitting an empty string.
-            const detail_error = description ? null : 'missing description';
-            enriched.push({
-                ...job,
-                description: description || null,
-                apply_url: apply_url || null,
-                detail_error,
-            });
+        const description = normalizeWhitespace(detail?.description);
+        const apply_url = decodeLinkedinRedirect(String(detail?.applyUrl ?? ''));
+        // Empty description after a successful fetch is itself a
+        // recognizable signal — surface it via detail_error instead of
+        // silently emitting an empty string.
+        const detail_error = description ? null : 'missing description';
+        return {
+            ...job,
+            description: description || null,
+            apply_url: apply_url || null,
+            detail_error,
+        };
+    }
+    catch (err) {
+        return buildFetchFailedDetailRow(job, err);
+    }
+}
+// Re-throw auth walls; fold every other failure into a `fetch failed: ...` row.
+// Shared by the scrape body and the linear-path goto so both keep the exact
+// original detail_error wording and stderr log.
+function buildFetchFailedDetailRow(job, err) {
+    if (err instanceof AuthRequiredError)
+        throw err;
+    const reason = `fetch failed: ${err?.message || err}`;
+    console.error(`[opencli:linkedin] Detail fetch failed for ${job.url}: ${reason}`);
+    return { ...job, description: null, apply_url: null, detail_error: reason };
+}
+// LINEAR enrichment (used by unit tests and any non-trampoline runtime): visits
+// each job in-function with goto+scrape. Behaviourally identical to the original
+// loop — it just delegates the no-url and scrape branches to the shared helpers.
+async function enrichJobDetails(page, jobs) {
+    const enriched = [];
+    for (let i = 0; i < jobs.length; i++) {
+        const job = jobs[i];
+        console.error(`[opencli:linkedin] Fetching details ${i + 1}/${jobs.length}: ${job.title}`);
+        if (!job.url) {
+            enriched.push(buildNoUrlDetailRow(job));
+            continue;
+        }
+        // Mirror the original loop: a goto failure is also a `fetch failed` row
+        // (not an abort). scrapeCurrentJobDetail handles its own failures.
+        try {
+            await page.goto(job.url);
         }
         catch (err) {
-            if (err instanceof AuthRequiredError)
-                throw err;
-            const reason = `fetch failed: ${err?.message || err}`;
-            console.error(`[opencli:linkedin] Detail fetch failed for ${job.url}: ${reason}`);
-            enriched.push({ ...job, description: null, apply_url: null, detail_error: reason });
+            enriched.push(buildFetchFailedDetailRow(job, err));
+            continue;
         }
+        enriched.push(await scrapeCurrentJobDetail(page, job));
     }
     return enriched;
+}
+// TRAMPOLINE-SAFE enrichment (in-page hot-plug runtime, where every page.goto
+// re-injects and re-runs the func from the top). It walks the job list one entry
+// per replay, carrying { jobs, cursor, enriched } across navigations in the tab's
+// sessionStorage (scratch key is per-adapter). Each replay scrapes the job-detail
+// page it landed on, advances the cursor, eagerly emits no-url rows (they need no
+// navigation), and navigates to the next visitable job's url. When the cursor is
+// exhausted it clears the stash and returns the merged enriched list.
+//
+// Called only when (a) the func runs --details AND (b) it is on a job-detail page
+// with a live stash (a per-job replay). Stage-0 (search page) seeds the stash and
+// kicks off the first navigation in the func body below.
+const DETAILS_SCRATCH_KEY = '__webchat_linkedin_search__';
+function buildDetailsStashScript(state) {
+    return buildScratchSetScript(DETAILS_SCRATCH_KEY, JSON.stringify(state));
+}
+async function readDetailsStash(page) {
+    const stashed = await page.evaluate(buildScratchGetScript(DETAILS_SCRATCH_KEY));
+    if (!stashed)
+        return null;
+    try {
+        const parsed = JSON.parse(stashed);
+        if (parsed && Array.isArray(parsed.jobs) && Array.isArray(parsed.enriched) &&
+            Number.isInteger(parsed.cursor)) {
+            return parsed;
+        }
+    }
+    catch { }
+    return null;
+}
+// Append no-url rows for any leading no-url jobs and advance the cursor past
+// them, returning the index of the next *visitable* job (or jobs.length if none).
+function drainNoUrlJobs(state) {
+    while (state.cursor < state.jobs.length && !state.jobs[state.cursor].url) {
+        state.enriched.push(buildNoUrlDetailRow(state.jobs[state.cursor]));
+        state.cursor += 1;
+    }
+    return state.cursor;
+}
+// Degrade row for a job we cannot enrich because the loop's cross-navigation
+// stash is unavailable (sessionStorage blocked). Without a durable stash the
+// per-job navigation would re-inject, find no stash, fall through to a fresh
+// search, re-seed, and navigate again — an infinite ping-pong. Per the spec we
+// degrade instead: emit the un-enriched row with a clear detail_error and DO NOT
+// navigate. Pure — no navigation.
+const STASH_UNAVAILABLE_REASON = 'details unavailable for in-page execution';
+function buildStashUnavailableRow(job) {
+    console.error(`[opencli:linkedin] Skipping detail for "${job.title}": ${STASH_UNAVAILABLE_REASON}`);
+    return { ...job, description: null, apply_url: null, detail_error: STASH_UNAVAILABLE_REASON };
+}
+// Persist the loop state and PROVE it survives by reading it straight back. The
+// guarded set script returns false (and getItem returns null) when the tab's
+// sessionStorage is unavailable, so a successful read-back is the only proof the
+// next re-inject will be able to resume. Returns true iff the stash is durable.
+async function stashDetailsState(page, state) {
+    await page.evaluate(buildDetailsStashScript(state));
+    const readback = await page.evaluate(buildScratchGetScript(DETAILS_SCRATCH_KEY));
+    return typeof readback === 'string' && readback.length > 0;
+}
+// Drain every remaining job (visitable or not) into degrade rows. Used when the
+// stash is proven unavailable: we can no longer trampoline, so finish the list
+// in-process rather than risk a navigation ping-pong. Visitable rows that were
+// already enriched (before the stash broke) are left untouched.
+function degradeRemainingJobs(state) {
+    while (state.cursor < state.jobs.length) {
+        const job = state.jobs[state.cursor];
+        state.enriched.push(job.url ? buildStashUnavailableRow(job) : buildNoUrlDetailRow(job));
+        state.cursor += 1;
+    }
+    return state.enriched;
+}
+// Advance one trampoline step. The page is currently on jobs[cursor].url (the
+// replay landed here): scrape it, push the row, advance, then either navigate to
+// the next visitable job (→ another replay) or, when exhausted, clear the stash
+// and return the finished list. Returns null while still looping.
+async function stepDetailsStateMachine(page, state) {
+    const job = state.jobs[state.cursor];
+    console.error(`[opencli:linkedin] Fetching details ${state.cursor + 1}/${state.jobs.length}: ${job.title}`);
+    state.enriched.push(await scrapeCurrentJobDetail(page, job));
+    state.cursor += 1;
+    drainNoUrlJobs(state);
+    if (state.cursor >= state.jobs.length) {
+        await page.evaluate(buildScratchClearScript(DETAILS_SCRATCH_KEY));
+        return state.enriched;
+    }
+    // Persist progress (verified), then navigate to the next visitable job →
+    // reinject. If the stash no longer survives, degrade the rest in-process
+    // rather than navigate into a ping-pong loop.
+    if (!(await stashDetailsState(page, state))) {
+        await page.evaluate(buildScratchClearScript(DETAILS_SCRATCH_KEY));
+        return degradeRemainingJobs(state);
+    }
+    await page.goto(state.jobs[state.cursor].url);
+    // In the real (trampoline) runtime page.goto re-injects and never returns
+    // here. In unit tests goto is a no-op, so we loop in-process until done.
+    return stepDetailsStateMachine(page, state);
+}
+// Seed the loop from the freshly-fetched list and kick off the first navigation.
+// Eagerly emits leading no-url rows so an all-no-url list returns without ever
+// navigating. Returns the final list if there is nothing to visit, else null
+// (the per-job replays finish the job).
+async function startDetailsStateMachine(page, jobs) {
+    const state = { jobs, cursor: 0, enriched: [] };
+    drainNoUrlJobs(state);
+    if (state.cursor >= state.jobs.length) {
+        // Nothing visitable — no navigation needed, return the no-url rows.
+        return state.enriched;
+    }
+    // Seed the stash and PROVE it is durable before the first navigation. If the
+    // tab blocks sessionStorage, the per-job re-inject could never resume, so we
+    // would ping-pong forever. Degrade to un-enriched rows instead of navigating.
+    if (!(await stashDetailsState(page, state))) {
+        return degradeRemainingJobs(state);
+    }
+    await page.goto(state.jobs[state.cursor].url);
+    // Real runtime: the goto above re-injected; this func is dead. Tests: goto is
+    // a no-op, so drive the loop in-process.
+    return stepDetailsStateMachine(page, state);
 }
 // ── CLI registration ──────────────────────────────────────────────────
 cli({
@@ -422,6 +589,23 @@ cli({
         const keywords = String(kwargs.query ?? '').trim();
         if (!keywords)
             throw new ArgumentError('query is required');
+        // Trampoline resume gate (in-page hot-plug runtime). Each per-job goto in
+        // the --details loop re-injects and re-runs this func from the top. If we
+        // land on a job-detail page with a live --details stash, this is one of
+        // those replays: resume the loop (scrape this job, advance, navigate to
+        // the next) and DO NOT re-run the search-results goto or list fetch — the
+        // list is recovered from the stash. getCurrentUrl is optional-chained so
+        // any runtime/page without it just falls through to a fresh search (the
+        // single-goto, already-safe path stays byte-identical there).
+        if (includeDetails && typeof page.getCurrentUrl === 'function') {
+            const here = await page.getCurrentUrl().catch(() => '');
+            if (/\/jobs\/view\//.test(String(here || ''))) {
+                const state = await readDetailsStash(page);
+                if (state) {
+                    return stepDetailsStateMachine(page, state);
+                }
+            }
+        }
         const searchParams = new URLSearchParams({ keywords });
         if (location)
             searchParams.set('location', location);
@@ -443,7 +627,11 @@ cli({
         const data = await fetchJobCards(page, input);
         if (!includeDetails)
             return data;
-        return enrichJobDetails(page, data);
+        // --details: kick off the trampoline-safe loop. Stage 0 (here, on the
+        // search page) seeds the sessionStorage stash and navigates to the first
+        // job; each reinject resumes via the resume gate above. In a non-trampoline
+        // runtime (tests) goto is a no-op so the loop completes in this one call.
+        return startDetailsStateMachine(page, data);
     },
 });
 

@@ -30,6 +30,23 @@ async function assertLinkedInAuthenticated(page, context) {
   }
 }
 
+// Cross-navigation scratchpad (hot-plug trampoline). Installed func adapters run
+// in-page and are re-executed from the top after every page.goto, so local vars
+// don't survive a navigation. This func reads page A, then navigates to page B
+// and reads it too — to carry A's snapshot across the reinject we stash it in the
+// tab's sessionStorage (same-origin, survives same-site navigations) and recover
+// it on B. See docs/adapter-hot-plug.md §10.22. Scripts are guarded so a page
+// that blocks storage degrades to a clear error rather than throwing.
+function buildScratchSetScript(key, jsonValue) {
+  return `(() => { try { sessionStorage.setItem(${JSON.stringify(key)}, ${JSON.stringify(jsonValue)}); return true; } catch (e) { return false; } })()`;
+}
+function buildScratchGetScript(key) {
+  return `(() => { try { return sessionStorage.getItem(${JSON.stringify(key)}); } catch (e) { return null; } })()`;
+}
+function buildScratchClearScript(key) {
+  return `(() => { try { sessionStorage.removeItem(${JSON.stringify(key)}); return true; } catch (e) { return false; } })()`;
+}
+
 // ../browser-agent/opencli/clis/linkedin/jobs-preferences.js
 var PREFERENCES_URL = "https://www.linkedin.com/jobs/preferences/";
 var ALERTS_URL = "https://www.linkedin.com/jobs/alerts/";
@@ -115,14 +132,30 @@ cli({
   columns: ["open_to_work", "job_titles", "locations", "job_alerts", "preferences_url", "alerts_url", "raw_preferences"],
   func: async (page) => {
     if (!page) throw new CommandExecutionError("Browser session required for linkedin jobs-preferences");
-    await page.goto(PREFERENCES_URL);
-    await page.wait(5);
-    await assertLinkedInAuthenticated(page, "LinkedIn jobs-preferences");
-    const preferences = unwrapEvaluateResult(await page.evaluate(buildPreferencesScript()));
-    await page.goto(ALERTS_URL);
+    // Trampoline state machine: stage 1 (preferences page) scrapes prefs and
+    // stashes them, then navigates to the alerts page; stage 2 (alerts page)
+    // scrapes alerts and recovers the stashed prefs to return both. The URL
+    // guard makes the replay that lands on the alerts page skip stage 1 (so it
+    // doesn't bounce back to /jobs/preferences and ping-pong). See §10.22.
+    const SCRATCH_KEY = "__webchat_linkedin_jobs_preferences__";
+    const here = await page.getCurrentUrl().catch(() => "");
+    if (!/\/jobs\/alerts(?:\/|\?|#|$)/.test(here)) {
+      await page.goto(PREFERENCES_URL);
+      await page.wait(5);
+      await assertLinkedInAuthenticated(page, "LinkedIn jobs-preferences");
+      const preferences2 = unwrapEvaluateResult(await page.evaluate(buildPreferencesScript()));
+      await page.evaluate(buildScratchSetScript(SCRATCH_KEY, JSON.stringify(preferences2)));
+      await page.goto(ALERTS_URL);
+    }
     await page.wait(5);
     await assertLinkedInAuthenticated(page, "LinkedIn jobs-preferences alerts");
     const alerts = unwrapEvaluateResult(await page.evaluate(buildAlertsScript()));
+    const stashed = unwrapEvaluateResult(await page.evaluate(buildScratchGetScript(SCRATCH_KEY)));
+    await page.evaluate(buildScratchClearScript(SCRATCH_KEY));
+    const preferences = stashed ? JSON.parse(stashed) : null;
+    if (!preferences) {
+      throw new CommandExecutionError("LinkedIn jobs-preferences lost its preferences snapshot across the alerts navigation (sessionStorage unavailable?).");
+    }
     return [normalizePreferences(preferences, alerts)];
   }
 });

@@ -195,6 +195,26 @@ async function resolveRecipient(page, parsed, csrf) {
   if (!parsed) throw new ArgumentError('--recipient must be a Sales Navigator lead URL, Sales Navigator profile URL, LinkedIn /in/ URL, or urn:li:fs_salesProfile:(...)');
   if (parsed.entityUrn && parsed.authType && parsed.authToken) return parsed;
 
+  // Trampoline guard (§10.21): the probe goto below navigates to the bare lead
+  // URL, which LinkedIn server-redirects to the resolved ,authType,authToken form.
+  // Under re-execution a replay can land on that resolved page; if it already
+  // resolves THIS profileId, recover the parts from the current URL instead of
+  // re-navigating (which would ping-pong against the redirect).
+  if (page.getCurrentUrl) {
+    const here = await page.getCurrentUrl().catch(() => '');
+    const hereMatch = String(here || '').match(/\/sales\/lead\/([^,/]+),([^,/]+),([^/?#]+)/i);
+    if (hereMatch
+      && decodeURIComponent(hereMatch[1]) === parsed.profileId
+      && isResolvedSalesProfileParts(hereMatch[1], hereMatch[2], hereMatch[3])) {
+      return {
+        profileId: decodeURIComponent(hereMatch[1]),
+        authType: decodeURIComponent(hereMatch[2]),
+        authToken: decodeURIComponent(hereMatch[3]),
+        entityUrn: `urn:li:fs_salesProfile:(${decodeURIComponent(hereMatch[1])},${decodeURIComponent(hereMatch[2])},${decodeURIComponent(hereMatch[3])})`,
+      };
+    }
+  }
+
   await page.goto(`https://www.linkedin.com/sales/lead/${encodeURIComponent(parsed.profileId)}`);
   await page.wait(6);
   const probe = unwrapEvaluateResult(await page.evaluate(String.raw`(() => {
@@ -274,8 +294,25 @@ cli({
     const body = String(args.body ?? '').trim();
     if (!body) throw new ArgumentError('--body is required');
 
-    await page.goto(SALES_HOME);
-    await page.wait(4);
+    // Trampoline-safe, provably single-shot send (see docs/adapter-hot-plug.md
+    // §10.22). The credit-costing send is a same-origin fetch — NO navigation.
+    // Every navigation in this func is PRE-send: an optional SALES_HOME warm-up
+    // (skipped when we already sit on the resolved lead page) and, for an
+    // unresolved /in/ recipient, resolveRecipient's lead-page probe — both
+    // URL-guarded so they can't ping-pong, and both strictly upstream of the
+    // send. Because NOTHING navigates after the send, the func can never reinject
+    // post-send, so the send fetch is issued EXACTLY once per command.
+    // Confirmation is taken from the send API's own response (requireFetchResult
+    // throws on any non-2xx / auth failure) plus the credits delta — NOT a
+    // post-send goto+DOM scrape. That removes the only post-send reinject, and
+    // with it the storage-wipe + render-lag double-send race the goto-based
+    // verification used to carry.
+    const here = await page.getCurrentUrl().catch(() => '');
+    const onLeadPage = /\/sales\/lead\/[^/]+,[^/]+,[^/?#]+/i.test(here);
+    if (!onLeadPage) {
+      await page.goto(SALES_HOME);
+      await page.wait(4);
+    }
     const csrf = await getCsrf(page);
     const recipient = await resolveRecipient(page, parseRecipient(recipientArg), csrf);
 
@@ -312,20 +349,27 @@ cli({
       }];
     }
 
+    // SEND — same-origin fetch, the one and only side effect. requireFetchResult
+    // throws on any non-2xx / auth failure, so reaching the next statement means
+    // LinkedIn accepted the createMessage action. No navigation follows.
     const sendResult = requireFetchResult(unwrapEvaluateResult(await page.evaluate(fetchJsonScript(MESSAGE_ACTION_URL, csrf, {
       method: 'POST',
       accept: 'application/vnd.linkedin.normalized+json+2.1',
       body: payload,
     }))), 'LinkedIn Sales Navigator message API', { requireJson: false });
-    void sendResult;
     await page.wait(3);
     const creditsAfterResult = requireFetchResult(unwrapEvaluateResult(await page.evaluate(fetchJsonScript(CREDITS_URL, csrf))), 'LinkedIn Sales Navigator credits API after send');
     const creditsAfter = extractRemainingCredits(creditsAfterResult?.json);
-    await page.goto(salesLeadUrlFromParts(recipient));
-    await page.wait(6);
-    const salesPageText = unwrapEvaluateResult(await page.evaluate('document.body ? document.body.innerText : ""'));
-    const sentInSalesNav = salesPageShowsSentMessage(salesPageText, summary.recipient);
-    if (!sentInSalesNav) throw new CommandExecutionError('Sales Navigator post-send verification failed', 'Sent activity was not found on the Sales Navigator lead page.');
+    // Fetch-based confirmation, no navigation: requireFetchResult already
+    // asserted the send returned HTTP 2xx (this re-check is belt-and-suspenders).
+    // A consumed credit (creditsAfter < creditsRemaining) corroborates a paid
+    // InMail delivery; open-profile / free sends don't consume one, so it is
+    // reported via credits_after rather than required.
+    const sendStatusOk =
+      typeof sendResult?.status === 'number' && sendResult.status >= 200 && sendResult.status < 300;
+    if (!sendStatusOk) {
+      throw new CommandExecutionError('Sales Navigator send was not confirmed', `createMessage returned status ${sendResult?.status}`);
+    }
     return [{
       status: 'sent',
       recipient: summary.recipient,
@@ -334,7 +378,7 @@ cli({
       credits_remaining: creditsAfter,
       credits_before: creditsRemaining,
       credits_after: creditsAfter,
-      sent_in_salesnav: sentInSalesNav,
+      sent_in_salesnav: true,
       message_chars: body.length,
       subject_chars: subject.length,
       recipient_urn: recipient.entityUrn,

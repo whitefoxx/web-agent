@@ -8,6 +8,24 @@ function unwrapEvaluateResult(payload) {
   if (payload && typeof payload === "object" && "data" in payload && "session" in payload) return payload.data;
   return payload;
 }
+
+// Cross-navigation scratchpad (hot-plug trampoline). Installed func adapters run
+// in-page and are re-executed from the top after every page.goto, so local vars
+// don't survive a navigation. This func reads the services page, then navigates
+// to the edit and media pages and reads them too — to carry the earlier snapshots
+// across each reinject we stash them in the tab's sessionStorage (same-origin,
+// survives same-site navigations) and recover them on the final (media) page.
+// See docs/adapter-hot-plug.md §10.22. Scripts are guarded so a page that blocks
+// storage degrades to a clear error rather than throwing.
+function buildScratchSetScript(key, jsonValue) {
+  return `(() => { try { sessionStorage.setItem(${JSON.stringify(key)}, ${JSON.stringify(jsonValue)}); return true; } catch (e) { return false; } })()`;
+}
+function buildScratchGetScript(key) {
+  return `(() => { try { return sessionStorage.getItem(${JSON.stringify(key)}); } catch (e) { return null; } })()`;
+}
+function buildScratchClearScript(key) {
+  return `(() => { try { sessionStorage.removeItem(${JSON.stringify(key)}); return true; } catch (e) { return false; } })()`;
+}
 function normalizeWhitespace(value) {
   return String(value ?? "").replace(/[\u00a0\u202f]+/g, " ").replace(/\s+/g, " ").trim();
 }
@@ -179,13 +197,40 @@ function normalizeServices(row) {
     reviews_visibility: normalizeWhitespace(row.reviews_visibility)
   };
 }
-async function readOwnerOnlyServicesEdit(page, servicesUrl) {
-  const editUrl = new URL(servicesUrl);
-  editUrl.pathname = editUrl.pathname.replace(/\/?$/, "/edit/");
-  await page.goto(editUrl.toString());
-  await page.wait(4);
-  await assertLinkedInAuthenticated(page, "LinkedIn services-read edit");
-  return unwrapEvaluateResult(await page.evaluate(buildServicesEditScript()));
+var SCRATCH_KEY = "__webchat_linkedin_services_read__";
+function deriveEditUrl(servicesUrl) {
+  const url = new URL(servicesUrl);
+  url.pathname = url.pathname.replace(/\/(?:edit|media)\/?$/, "/").replace(/\/?$/, "/edit/");
+  return url.toString();
+}
+function deriveMediaUrl(servicesUrl) {
+  const url = new URL(servicesUrl);
+  url.pathname = url.pathname.replace(/\/(?:edit|media)\/?$/, "/").replace(/\/?$/, "/media/");
+  return url.toString();
+}
+function isServicesEditUrl(url) {
+  return /\/services\/page\/[^/?#]+\/edit(?:\/|\?|#|$)/.test(url);
+}
+function isServicesMediaUrl(url) {
+  return /\/services\/page\/[^/?#]+\/media(?:\/|\?|#|$)/.test(url);
+}
+function isServicesPageUrl(url) {
+  return /\/services\/page\/[^/?#]+(?:\/|\?|#|$)/.test(url) && !isServicesEditUrl(url) && !isServicesMediaUrl(url);
+}
+async function readScratch(page) {
+  const raw = unwrapEvaluateResult(await page.evaluate(buildScratchGetScript(SCRATCH_KEY)));
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+async function mergeScratch(page, patch) {
+  const current = await readScratch(page);
+  const next = { ...current, ...patch };
+  await page.evaluate(buildScratchSetScript(SCRATCH_KEY, JSON.stringify(next)));
 }
 cli({
   site: "linkedin",
@@ -204,9 +249,71 @@ cli({
     if (!page) throw new CommandExecutionError("Browser session required for linkedin services-read");
     let servicesUrl = normalizeWhitespace(args["services-url"]);
     const shouldReadOwnerEdit = !servicesUrl && !normalizeWhitespace(args["profile-url"]);
-    if (servicesUrl) {
-      servicesUrl = normalizeServicesUrl(servicesUrl);
-    } else {
+    if (!shouldReadOwnerEdit) {
+      // Non-interleaved paths: the only merged scrape is the Services page, so a
+      // single URL guard keeps the replay (which already landed on the Services
+      // page) from bouncing back to re-discover/re-navigate. No sessionStorage
+      // state machine is needed because nothing earlier feeds into the result.
+      const here = await page.getCurrentUrl().catch(() => "");
+      if (!isServicesPageUrl(here)) {
+        if (servicesUrl) {
+          servicesUrl = normalizeServicesUrl(servicesUrl);
+        } else {
+          await page.goto(normalizeProfileUrl(args["profile-url"]));
+          await page.wait(5);
+          await assertLinkedInAuthenticated(page, "LinkedIn services-read profile");
+          const found = unwrapEvaluateResult(await page.evaluate(buildFindServicesUrlScript()));
+          servicesUrl = normalizeWhitespace(found?.services_url);
+          if (!servicesUrl) throw new EmptyResultError("linkedin services-read", "No LinkedIn Services page link was found on the profile.");
+          servicesUrl = normalizeServicesUrl(servicesUrl);
+        }
+        await page.goto(servicesUrl);
+      }
+      await page.wait(5);
+      await assertLinkedInAuthenticated(page, "LinkedIn services-read");
+      const services2 = unwrapEvaluateResult(await page.evaluate(buildServicesPageScript()));
+      return [normalizeServices({ ...services2 })];
+    }
+    // Owner-edit path: interleaved 4-stage state machine. We scrape the Services,
+    // edit, and media pages — each into the merged result — but every page.goto
+    // reinjects and re-runs this func from the top, losing locals. Stash each
+    // earlier snapshot in the tab's sessionStorage (same-origin, survives the
+    // navigations) and reconstruct the merge on the final (media) page. The
+    // current-URL guards make each replay resume at its own stage instead of
+    // ping-ponging back to the profile/services pages. See §10.22.
+    const here = await page.getCurrentUrl().catch(() => "");
+    if (isServicesMediaUrl(here)) {
+      // Final stage: scrape media, recover the stashed Services + edit snapshots.
+      await page.wait(4);
+      await assertLinkedInAuthenticated(page, "LinkedIn services-read media");
+      const media = unwrapEvaluateResult(await page.evaluate(buildMediaPageScript()));
+      const stash = await readScratch(page);
+      await page.evaluate(buildScratchClearScript(SCRATCH_KEY));
+      if (!stash.services || !stash.edit) {
+        throw new CommandExecutionError("LinkedIn services-read lost its Services/edit snapshot across the media navigation (sessionStorage unavailable?).");
+      }
+      return [normalizeServices({ ...stash.services, ...stash.edit, ...media })];
+    }
+    if (isServicesEditUrl(here)) {
+      // Stage 3: scrape the owner edit dialog, stash it, then go to the media page.
+      await page.wait(4);
+      await assertLinkedInAuthenticated(page, "LinkedIn services-read edit");
+      const edit = unwrapEvaluateResult(await page.evaluate(buildServicesEditScript()));
+      await mergeScratch(page, { edit });
+      await page.goto(deriveMediaUrl(here));
+      await page.wait(4);
+      await assertLinkedInAuthenticated(page, "LinkedIn services-read media");
+      const media = unwrapEvaluateResult(await page.evaluate(buildMediaPageScript()));
+      const stash = await readScratch(page);
+      await page.evaluate(buildScratchClearScript(SCRATCH_KEY));
+      if (!stash.services || !stash.edit) {
+        throw new CommandExecutionError("LinkedIn services-read lost its Services/edit snapshot across the media navigation (sessionStorage unavailable?).");
+      }
+      return [normalizeServices({ ...stash.services, ...stash.edit, ...media })];
+    }
+    if (!isServicesPageUrl(here)) {
+      // Stage 1 (discover): find the Services page link on the profile, stash the
+      // discovered URL (it is computed before navigation), then go to it.
       await page.goto(normalizeProfileUrl(args["profile-url"]));
       await page.wait(5);
       await assertLinkedInAuthenticated(page, "LinkedIn services-read profile");
@@ -214,22 +321,41 @@ cli({
       servicesUrl = normalizeWhitespace(found?.services_url);
       if (!servicesUrl) throw new EmptyResultError("linkedin services-read", "No LinkedIn Services page link was found on the profile.");
       servicesUrl = normalizeServicesUrl(servicesUrl);
+      await mergeScratch(page, { servicesUrl });
+      await page.goto(servicesUrl);
     }
-    await page.goto(servicesUrl);
+    // Stage 2 (Services page): scrape it, stash the snapshot + URL, go to edit.
     await page.wait(5);
     await assertLinkedInAuthenticated(page, "LinkedIn services-read");
     const services = unwrapEvaluateResult(await page.evaluate(buildServicesPageScript()));
-    const edit = shouldReadOwnerEdit ? await readOwnerOnlyServicesEdit(page, servicesUrl) : {};
-    let media = {};
-    if (shouldReadOwnerEdit) {
-      const mediaUrl = new URL(servicesUrl);
-      mediaUrl.pathname = mediaUrl.pathname.replace(/\/?$/, "/media/");
-      await page.goto(mediaUrl.toString());
-      await page.wait(4);
-      await assertLinkedInAuthenticated(page, "LinkedIn services-read media");
-      media = unwrapEvaluateResult(await page.evaluate(buildMediaPageScript()));
+    const hereServices = await page.getCurrentUrl().catch(() => "");
+    const stashUrl = (await readScratch(page)).servicesUrl;
+    const baseServicesUrl = stashUrl || (isServicesPageUrl(hereServices) ? hereServices : "");
+    if (!baseServicesUrl) {
+      // Cannot derive the /edit/ and /media/ URLs without the Services page URL.
+      // This only happens when the discovered URL did not survive the navigation
+      // (sessionStorage unavailable) and the live URL is also unavailable — fail
+      // closed with a clear error rather than letting deriveEditUrl throw on `new URL("")`.
+      throw new CommandExecutionError("LinkedIn services-read lost its Services page URL across the edit navigation (sessionStorage unavailable?).");
     }
-    return [normalizeServices({ ...services, ...edit, ...media })];
+    await mergeScratch(page, { services, servicesUrl: baseServicesUrl });
+    await page.goto(deriveEditUrl(baseServicesUrl));
+    // Stage 3 (edit page): scrape the owner edit dialog, stash it, go to media.
+    await page.wait(4);
+    await assertLinkedInAuthenticated(page, "LinkedIn services-read edit");
+    const edit = unwrapEvaluateResult(await page.evaluate(buildServicesEditScript()));
+    await mergeScratch(page, { edit });
+    await page.goto(deriveMediaUrl(baseServicesUrl));
+    // Stage 4 (media page, final): scrape it, recover the merged stash, return.
+    await page.wait(4);
+    await assertLinkedInAuthenticated(page, "LinkedIn services-read media");
+    const media = unwrapEvaluateResult(await page.evaluate(buildMediaPageScript()));
+    const stash = await readScratch(page);
+    await page.evaluate(buildScratchClearScript(SCRATCH_KEY));
+    if (!stash.services || !stash.edit) {
+      throw new CommandExecutionError("LinkedIn services-read lost its Services/edit snapshot across the media navigation (sessionStorage unavailable?).");
+    }
+    return [normalizeServices({ ...stash.services, ...stash.edit, ...media })];
   }
 });
 var __test__ = {

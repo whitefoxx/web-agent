@@ -63,6 +63,24 @@ async function assertLinkedInAuthenticated(page, context) {
   }
 }
 
+// Cross-navigation scratchpad (hot-plug trampoline). Installed func adapters run
+// in-page and are re-executed from the top after every page.goto, so local vars
+// don't survive a navigation. The own-profile read reads page A (the profile),
+// then navigates to page B (the About editor) and reads it too — to carry A's
+// snapshot across the reinject we stash it in the tab's sessionStorage
+// (same-origin, survives same-site navigations) and recover it on B. See
+// docs/adapter-hot-plug.md §10.22. Scripts are guarded so a page that blocks
+// storage degrades to a clear error rather than throwing.
+function buildScratchSetScript(key, jsonValue) {
+  return `(() => { try { sessionStorage.setItem(${JSON.stringify(key)}, ${JSON.stringify(jsonValue)}); return true; } catch (e) { return false; } })()`;
+}
+function buildScratchGetScript(key) {
+  return `(() => { try { return sessionStorage.getItem(${JSON.stringify(key)}); } catch (e) { return null; } })()`;
+}
+function buildScratchClearScript(key) {
+  return `(() => { try { sessionStorage.removeItem(${JSON.stringify(key)}); return true; } catch (e) { return false; } })()`;
+}
+
 // ../browser-agent/opencli/clis/linkedin/profile-read.js
 function normalizeProfileReadUrl(value) {
   const url = assertSafeLinkedinUrl(value || "https://www.linkedin.com/in/me/", "profile-url", "/in/me/");
@@ -174,21 +192,44 @@ cli({
     if (!page) throw new CommandExecutionError("Browser session required for linkedin profile-read");
     const profileUrl = normalizeProfileReadUrl(args["profile-url"]);
     const shouldReadEditor = !normalizeWhitespace(args["profile-url"]);
-    await page.goto(profileUrl);
-    await page.wait(5);
-    await assertLinkedInAuthenticated(page, "LinkedIn profile-read");
-    await page.autoScroll({ times: 4, delayMs: 700 });
-    await page.wait(1);
-    const row = unwrapEvaluateResult(await page.evaluate(buildProfileExtractionScript()));
-    let aboutEdit = {};
-    if (shouldReadEditor) {
-      const currentProfileUrl = normalizeWhitespace(row?.profile_url) || profileUrl;
+    if (!shouldReadEditor) {
+      await page.goto(profileUrl);
+      await page.wait(5);
+      await assertLinkedInAuthenticated(page, "LinkedIn profile-read");
+      await page.autoScroll({ times: 4, delayMs: 700 });
+      await page.wait(1);
+      const row2 = unwrapEvaluateResult(await page.evaluate(buildProfileExtractionScript()));
+      return [normalizeProfile({ ...row2 })];
+    }
+    // Trampoline state machine (own-profile read only): stage 1 (profile page)
+    // scrapes the profile row and stashes it, then navigates to the About
+    // editor; stage 2 (editor page) scrapes the editor and recovers the stashed
+    // row to merge both. The final-page guard makes the replay that lands on the
+    // editor skip stage 1 (so it doesn't bounce back to the profile and
+    // ping-pong). See docs/adapter-hot-plug.md §10.22.
+    const SCRATCH_KEY = "__webchat_linkedin_profile_read__";
+    const here = await page.getCurrentUrl().catch(() => "");
+    if (!/\/edit\/forms\/summary\//.test(here)) {
+      await page.goto(profileUrl);
+      await page.wait(5);
+      await assertLinkedInAuthenticated(page, "LinkedIn profile-read");
+      await page.autoScroll({ times: 4, delayMs: 700 });
+      await page.wait(1);
+      const row2 = unwrapEvaluateResult(await page.evaluate(buildProfileExtractionScript()));
+      await page.evaluate(buildScratchSetScript(SCRATCH_KEY, JSON.stringify(row2)));
+      const currentProfileUrl = normalizeWhitespace(row2?.profile_url) || profileUrl;
       const profilePath = new URL(currentProfileUrl).pathname.replace(/\/?$/, "/");
       const aboutEditUrl = new URL(`${profilePath}edit/forms/summary/new/`, "https://www.linkedin.com").toString();
       await page.goto(aboutEditUrl);
-      await page.wait(4);
-      await assertLinkedInAuthenticated(page, "LinkedIn profile-read about editor");
-      aboutEdit = unwrapEvaluateResult(await page.evaluate(buildAboutEditExtractionScript()));
+    }
+    await page.wait(4);
+    await assertLinkedInAuthenticated(page, "LinkedIn profile-read about editor");
+    const aboutEdit = unwrapEvaluateResult(await page.evaluate(buildAboutEditExtractionScript()));
+    const stashed = unwrapEvaluateResult(await page.evaluate(buildScratchGetScript(SCRATCH_KEY)));
+    await page.evaluate(buildScratchClearScript(SCRATCH_KEY));
+    const row = stashed ? JSON.parse(stashed) : null;
+    if (!row) {
+      throw new CommandExecutionError("LinkedIn profile-read lost its profile snapshot across the About-editor navigation (sessionStorage unavailable?).");
     }
     return [normalizeProfile({ ...row, ...aboutEdit })];
   }

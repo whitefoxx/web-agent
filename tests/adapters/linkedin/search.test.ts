@@ -5,6 +5,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { findAdapter } from '../../../src/runtime/registry.js';
 import { ArgumentError, AuthRequiredError } from '../../../src/runtime/errors.js';
+import { withSessionScratch } from '../_helpers/session-scratch';
 import { __test__ } from '../../../marketplace/linkedin/search.js';
 
 const {
@@ -225,5 +226,171 @@ describe('linkedin enrichJobDetails (silent failure fix)', () => {
         { rank: 1, title: 'Needs Auth', company: 'X', url: 'https://www.linkedin.com/jobs/view/4' },
       ]),
     ).rejects.toBeInstanceOf(AuthRequiredError);
+  });
+});
+
+describe('linkedin --details trampoline state machine (func, end-to-end)', () => {
+  // Build a voyager API element so fetchJobCards extracts { title, url, ... }.
+  const voyagerCard = (jobId: string, title: string) => ({
+    jobCardUnion: {
+      jobPostingCard: {
+        jobPostingUrn: `urn:li:fsd_jobPosting:${jobId}`,
+        jobPostingTitle: title,
+        primaryDescription: { text: 'Acme Corp' },
+        secondaryDescription: { text: 'Remote' },
+        tertiaryDescription: { text: '' },
+        footerItems: [],
+      },
+    },
+  });
+
+  // A fake page whose page.evaluate routes by script content to the right
+  // canned scrape result, wrapped in withSessionScratch so the state machine's
+  // setItem/getItem/removeItem scripts hit a real in-memory store (mirroring the
+  // same-origin tab's sessionStorage surviving a re-inject). page.goto is a
+  // no-op, so the URL-driven loop runs LINEARLY in one call.
+  function makeDetailsPage({
+    cards,
+    details, // map of "About the job" scrape results keyed by job id (from url)
+    blockStorage, // simulate a tab where sessionStorage is unavailable
+  }: {
+    cards: any[];
+    details: Record<string, { description: string; applyUrl: string }>;
+    blockStorage?: boolean;
+  }) {
+    const gotoUrls: string[] = [];
+    const page: any = {
+      getCurrentUrl: vi.fn().mockResolvedValue(''), // empty → enter fresh-search stage
+      getCookies: vi.fn().mockResolvedValue([{ name: 'JSESSIONID', value: '"ajax:123"' }]),
+      goto: vi.fn(async (url: string) => {
+        gotoUrls.push(url);
+      }),
+      wait: vi.fn(async () => undefined),
+    };
+    // Inner scrape: everything that is NOT a sessionStorage script.
+    const scrape = (script: string): unknown => {
+      // auth probe → not an auth wall
+      if (script.includes('looksLinkedInAuthWallText')) return false;
+      // voyager job-cards fetch → return the canned elements
+      if (script.includes('voyagerJobsDashJobCards') || script.includes('csrf-token')) {
+        return { elements: cards };
+      }
+      // "Show more" expand click → no meaningful return
+      if (script.includes('btn.click()')) return undefined;
+      // detail extraction → return per-job description keyed by the job id in the
+      // currently-loaded url (the most recent goto).
+      if (script.includes('applyLink')) {
+        const here = gotoUrls[gotoUrls.length - 1] || '';
+        const id = (here.match(/jobs\/view\/(\d+)/) || [])[1] || '';
+        return details[id] ?? { description: '', applyUrl: '' };
+      }
+      return undefined;
+    };
+    if (blockStorage) {
+      // Mirror the adapter's guarded scratch scripts on a tab where
+      // sessionStorage throws: setItem → false, getItem → null, removeItem →
+      // false. Real scrape scripts still flow through `scrape`.
+      page.evaluate = vi.fn(async (script: string) => {
+        const s = String(script);
+        if (/sessionStorage\.setItem/.test(s)) return false;
+        if (/sessionStorage\.getItem/.test(s)) return null;
+        if (/sessionStorage\.removeItem/.test(s)) return false;
+        return scrape(s);
+      });
+    } else {
+      page.evaluate = withSessionScratch((script: string) => scrape(String(script)));
+    }
+    return { page, gotoUrls };
+  }
+
+  it('enriches every job across navigations and returns the merged list (no list re-fetch per job)', async () => {
+    const command = getSearchCommand();
+    const { page, gotoUrls } = makeDetailsPage({
+      cards: [voyagerCard('10', 'Engineer A'), voyagerCard('20', 'Engineer B')],
+      details: {
+        '10': { description: '  Build things  ', applyUrl: 'https://acme.example/apply/10' },
+        '20': { description: 'Ship things', applyUrl: 'https://acme.example/apply/20' },
+      },
+    });
+
+    const out: any[] = await command!.func!(page, { query: 'engineer', limit: 2, details: true });
+
+    expect(out).toHaveLength(2);
+    expect(out[0]).toMatchObject({
+      rank: 1,
+      title: 'Engineer A',
+      description: 'Build things',
+      apply_url: 'https://acme.example/apply/10',
+      detail_error: null,
+    });
+    expect(out[1]).toMatchObject({
+      rank: 2,
+      title: 'Engineer B',
+      description: 'Ship things',
+      apply_url: 'https://acme.example/apply/20',
+      detail_error: null,
+    });
+    // The search-results page is fetched once; each job is visited exactly once.
+    // Crucially the voyager list is NOT re-fetched per job (the list is recovered
+    // from the stash on each replay, not re-derived from a fresh search).
+    const searchGotos = gotoUrls.filter((u) => /\/jobs\/search/.test(u));
+    const jobGotos = gotoUrls.filter((u) => /\/jobs\/view\//.test(u));
+    expect(searchGotos).toHaveLength(1);
+    expect(jobGotos).toEqual([
+      'https://www.linkedin.com/jobs/view/10',
+      'https://www.linkedin.com/jobs/view/20',
+    ]);
+  });
+
+  it('keeps per-row detail_error semantics: no-url rows and missing-description rows', async () => {
+    const command = getSearchCommand();
+    // Card with no resolvable id → url:'' (no-url row); plus a normal one whose
+    // detail page returns an empty description (missing description).
+    const noUrlCard = {
+      jobCardUnion: {
+        jobPostingCard: { jobPostingTitle: 'No URL Job', primaryDescription: { text: 'Acme' } },
+      },
+    };
+    const { page } = makeDetailsPage({
+      cards: [noUrlCard, voyagerCard('30', 'Empty Desc Job')],
+      details: { '30': { description: '', applyUrl: '' } },
+    });
+
+    const out: any[] = await command!.func!(page, { query: 'engineer', limit: 2, details: true });
+
+    expect(out).toHaveLength(2);
+    expect(out[0]).toMatchObject({ title: 'No URL Job', detail_error: 'no url', description: null });
+    expect(out[1]).toMatchObject({
+      title: 'Empty Desc Job',
+      detail_error: 'missing description',
+      description: null,
+    });
+  });
+
+  it('degrades (never ping-pongs) when the tab blocks sessionStorage', async () => {
+    const command = getSearchCommand();
+    // blockStorage → the very first setItem write is dropped (and read-back is
+    // null), so the stash can never survive a re-inject. The SM must degrade
+    // rather than navigate (otherwise a re-inject would find no stash, fall
+    // through to a fresh search, re-seed, and navigate again — forever).
+    const { page, gotoUrls } = makeDetailsPage({
+      cards: [voyagerCard('40', 'Engineer A'), voyagerCard('50', 'Engineer B')],
+      details: {
+        '40': { description: 'Build', applyUrl: 'https://x/apply/40' },
+        '50': { description: 'Ship', applyUrl: 'https://x/apply/50' },
+      },
+      blockStorage: true,
+    });
+
+    const out: any[] = await command!.func!(page, { query: 'engineer', limit: 2, details: true });
+
+    expect(out).toHaveLength(2);
+    for (const row of out) {
+      expect(row.description).toBeNull();
+      expect(row.apply_url).toBeNull();
+      expect(row.detail_error).toBe('details unavailable for in-page execution');
+    }
+    // The key safety property: it did NOT navigate to any job page (no ping-pong).
+    expect(gotoUrls.filter((u) => /\/jobs\/view\//.test(u))).toHaveLength(0);
   });
 });

@@ -21,14 +21,24 @@ const {
   salesPageShowsSentMessage,
 } = (await import('../../../marketplace/linkedin/salesnav-message.js')).__test__ as any;
 
-function createPageMock(evaluateResults: any[] = []) {
-  const evaluate = vi.fn();
-  for (const result of evaluateResults) evaluate.mockResolvedValueOnce(result);
-  evaluate.mockResolvedValue(undefined);
+// Real production pages always expose getCurrentUrl; the func reads it once to
+// guard the SALES_HOME warm-up. Returning '' (not a lead URL) makes the func take
+// the normal warm-up → resolve → fetch flow. The send is confirmed from the
+// createMessage API response (no post-send navigation, no sessionStorage), so the
+// evaluate mock is just an ordered queue: each fetch/scrape script consumes the
+// next queued result.
+function createPageMock(
+  evaluateResults: any[] = [],
+  opts: { currentUrl?: string } = {},
+) {
+  const queue = [...evaluateResults];
+  const evaluate = vi.fn((_script: string) => (queue.length ? queue.shift() : undefined));
   return {
     goto: vi.fn().mockResolvedValue(undefined),
     wait: vi.fn().mockResolvedValue(undefined),
     evaluate,
+    scrape: evaluate,
+    getCurrentUrl: vi.fn().mockResolvedValue(opts.currentUrl ?? ''),
     getCookies: vi
       .fn()
       .mockResolvedValue([{ name: 'JSESSIONID', value: '"csrf"', domain: '.linkedin.com' }]),
@@ -238,6 +248,82 @@ describe('linkedin salesnav-message command', () => {
         recipient: 'urn:li:fs_salesProfile:(P1,NAME_SEARCH,T1)',
         subject: 'Hello',
         body: 'Quick question',
+      }),
+    ).rejects.toThrow(CommandExecutionError);
+  });
+
+  it('send=true: confirms from the createMessage API response with NO post-send navigation (single-shot)', async () => {
+    const cmd = findAdapter('linkedin', 'salesnav-message');
+    // Queue: profile API, credits-before, send POST (200), credits-after.
+    const page = createPageMock([
+      {
+        status: 200,
+        json: {
+          data: {
+            fullName: 'Jane Doe',
+            defaultPosition: { title: 'QA', companyName: 'Acme' },
+            degree: 2,
+            inmailRestriction: 'NO_RESTRICTION',
+            memberBadges: { openLink: false },
+          },
+        },
+      },
+      { status: 200, json: { elements: [{ type: 'LSS_INMAIL', value: 12 }] } },
+      { status: 200, json: { value: 'urn:li:messagingMessage:created' } }, // send POST ok
+      { status: 200, json: { elements: [{ type: 'LSS_INMAIL', value: 11 }] } }, // a credit consumed
+    ]);
+    const rows = (await cmd!.func!(page, {
+      recipient: 'urn:li:fs_salesProfile:(P1,NAME_SEARCH,T1)',
+      subject: 'Hello',
+      body: 'Quick question',
+      send: true,
+    })) as any[];
+
+    expect(rows[0]).toMatchObject({
+      status: 'sent',
+      recipient: 'Jane Doe',
+      sent_in_salesnav: true,
+      credits_before: 12,
+      credits_after: 11,
+    });
+    expect(Object.keys(rows[0]).sort()).toEqual([...cmd!.columns!].sort());
+
+    // Single-shot: the credit-costing createMessage POST is evaluated EXACTLY once.
+    const sendCalls = page.evaluate.mock.calls.filter((c: any[]) =>
+      String(c[0]).includes('salesApiMessageActions'),
+    );
+    expect(sendCalls).toHaveLength(1);
+
+    // No post-send navigation: the ONLY goto is the SALES_HOME warm-up (before the
+    // send). Nothing navigates after the send, so the func can never reinject and
+    // re-issue the InMail — this is the trampoline single-shot guarantee.
+    expect(page.goto).toHaveBeenCalledTimes(1);
+    expect(page.goto).toHaveBeenCalledWith('https://www.linkedin.com/sales/');
+  });
+
+  it('send=true: a non-2xx createMessage response fails typed (no silent "sent")', async () => {
+    const cmd = findAdapter('linkedin', 'salesnav-message');
+    const page = createPageMock([
+      {
+        status: 200,
+        json: {
+          data: {
+            fullName: 'Jane Doe',
+            defaultPosition: { title: 'QA', companyName: 'Acme' },
+            inmailRestriction: 'NO_RESTRICTION',
+          },
+        },
+      },
+      { status: 200, json: { elements: [{ type: 'LSS_INMAIL', value: 12 }] } },
+      // send POST returns the fetch-helper error tuple (HTTP 500) → requireFetchResult throws.
+      ['error', 500, null, '', 'HTTP 500'],
+    ]);
+    await expect(
+      cmd!.func!(page, {
+        recipient: 'urn:li:fs_salesProfile:(P1,NAME_SEARCH,T1)',
+        subject: 'Hello',
+        body: 'Quick question',
+        send: true,
       }),
     ).rejects.toThrow(CommandExecutionError);
   });
