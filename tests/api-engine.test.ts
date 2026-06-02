@@ -216,4 +216,30 @@ describe('runApiSession — engine integration scenarios', () => {
     const r = await runScenario({ responses: [toolMsg('generic__x'), textMsg('ok')] });
     expect(r.doneReason).toBe('no_more_commands');
   });
+
+  it('plan mode: reflects once before finishing (reflect/re-plan)', async () => {
+    const r = await runScenario({
+      mode: 'plan',
+      responses: [
+        toolMsg('submit_plan', { goal: 'G', steps: ['a'] }),
+        textMsg('做完了'), // tries to finish with the step still pending → reflection fires
+        textMsg('最终答复'),
+      ],
+      requestPlanDecision: async () => ({ decision: 'approve' as const }),
+    });
+    expect(r.completeCalls).toHaveLength(3); // plan + finish-attempt + post-reflection
+    expect(r.notices.some((t) => /自检|收尾/.test(t))).toBe(true);
+    expect(r.doneReason).toBe('no_more_commands');
+  });
+
+  it('emits live run_stats with step + token usage', async () => {
+    const r = await runScenario({ responses: [toolMsg('generic__x'), textMsg('ok')] });
+    const stats = r.events.filter((e) => e.type === 'run_stats') as {
+      step: number;
+      promptTokens: number;
+    }[];
+    expect(stats.length).toBeGreaterThan(0);
+    expect(stats[0]!.step).toBe(1);
+    expect(stats[0]!.promptTokens).toBe(10);
+  });
 });

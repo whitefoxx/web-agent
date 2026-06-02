@@ -21,6 +21,7 @@ import {
   type SteerMessageReq,
   type AssistantTurnEvt,
   type AssistantTurnPatchEvt,
+  type RunStatsEvt,
   type DeleteSessionReq,
   type GetSessionReq,
   type GetSessionResp,
@@ -86,6 +87,10 @@ const PAGE_LABELS: Record<Exclude<View, 'closed' | 'menu'>, string> = {
   logs: '日志',
 };
 
+function fmtTok(n: number): string {
+  return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+}
+
 export function App() {
   const [turns, setTurns] = useState<UiTurn[]>([]);
   const [input, setInput] = useState('');
@@ -97,6 +102,11 @@ export function App() {
   const [mode, setMode] = useState<'chat' | 'plan'>('chat');
   const [pendingPlan, setPendingPlan] = useState<PlanDecisionReq | null>(null);
   const [streaming, setStreaming] = useState<string | null>(null);
+  const [runStats, setRunStats] = useState<{
+    step: number;
+    promptTokens: number;
+    completionTokens: number;
+  } | null>(null);
   // Header menu state machine. 'closed' = no overlay; 'menu' = dropdown
   // showing; any other value = a settings page is open. Click outside the
   // menu/page region drops back to 'closed'.
@@ -186,6 +196,7 @@ export function App() {
     switch (m.type) {
       case 'ASSISTANT_TURN':
       case 'ASSISTANT_TURN_PATCH':
+      case 'RUN_STATS':
       case 'TOOL_TRACE':
       case 'SESSION_DONE':
       case 'SESSION_NOTICE':
@@ -205,6 +216,15 @@ export function App() {
       case 'ASSISTANT_TURN_PATCH':
         setStreaming((m as AssistantTurnPatchEvt).text);
         break;
+      case 'RUN_STATS': {
+        const s = m as RunStatsEvt;
+        setRunStats({
+          step: s.step,
+          promptTokens: s.promptTokens,
+          completionTokens: s.completionTokens,
+        });
+        break;
+      }
       case 'TOOL_TRACE':
         onToolTrace(m as ToolTraceEvt);
         break;
@@ -321,6 +341,7 @@ export function App() {
     setRunning(false);
     setProgress(null);
     setStreaming(null);
+    setRunStats(null);
     // NOTE: deliberately NOT clearing sessionId on 'no_more_commands' /
     // 'user_abort' — follow-up messages stay in the same session so the LLM
     // keeps full context. On a real 'error' we drop the binding so the user
@@ -409,6 +430,7 @@ export function App() {
     setRunning(false);
     setPendingPlan(null);
     setStreaming(null);
+    setRunStats(null);
     if (!sessionId) return;
     const req: AbortSessionReq = { type: 'ABORT_SESSION', sessionId };
     void chrome.runtime.sendMessage(req).catch(() => {});
@@ -422,6 +444,7 @@ export function App() {
     setPlan(null);
     setPendingPlan(null);
     setStreaming(null);
+    setRunStats(null);
   }
 
   function onKeyDown(ev: KeyboardEvent): void {
@@ -492,6 +515,15 @@ export function App() {
       </div>
 
       <footer>
+        {running && runStats && (
+          <div
+            style={{ fontSize: 11, opacity: 0.55, padding: '0 2px 3px', display: 'flex', gap: 12 }}
+          >
+            <span>步 {runStats.step}</span>
+            <span>上下文 ~{fmtTok(runStats.promptTokens)} tok</span>
+            <span>输出 ~{fmtTok(runStats.completionTokens)} tok</span>
+          </div>
+        )}
         <div style={{ display: 'flex', gap: 6, padding: '0 2px 4px' }}>
           <button
             class="ghost-btn"
@@ -1275,9 +1307,7 @@ function LlmBackendSection({
         {loading ? (
           <div style="color:var(--muted);font-size:13px">加载中…</div>
         ) : store.profiles.length === 0 ? (
-          <div
-            style="padding:20px;text-align:center;color:var(--muted);font-size:13px;border:1px dashed var(--border);border-radius:10px"
-          >
+          <div style="padding:20px;text-align:center;color:var(--muted);font-size:13px;border:1px dashed var(--border);border-radius:10px">
             还没保存任何 API Key。点下方「+ 新建配置」开始。
           </div>
         ) : (

@@ -334,6 +334,20 @@ sleep / toolCallKey / ThrashTracker`),`tests/resilience.test.ts` 全覆盖;
 - **教训**:用"可注入 deps + 默认回退真实实现"加测试缝,比整段抽 `driveLoop` 风险小得多
   (production 零行为变化,测试 1281→1291 全绿);工具子集化的安全底线=点不到站点就全保留。
 
+### 10.13 跟进 — 反思/重规划收尾 + 实时 token/步数计量条
+
+补齐两个 🟡 项里有产品价值的:
+
+- **② 反思 / 重规划(plan 模式收尾)**:原来的"未完成步骤 nudge"升级成**至多一次的收尾
+  自检**(`reflectedOnce`):模型想结束时若有 approved plan——有未完成步骤就催它收尾;全部
+  完成则让它**对照 goal 自检**(有无遗漏/质量问题),需要就 `update_plan` 加步骤继续,否则
+  给最终答复。补上 #3 的"自动反思"环节。
+- **① 实时计量条**:引擎每轮 emit `run_stats{step,promptTokens,completionTokens}` →
+  `RUN_STATS` → composer 上方小字「步 N · 上下文 ~Xk tok · 输出 ~Yk tok」(运行中显示,
+  结束清空)。补上 #20 的 UI 计量。
+- **教训**:收尾自检 gate 必须 at-most-once(`reflectedOnce`)否则死循环;计量条复用既有
+  metrics 字段,零额外计算。测试 1291→1293(`runScenario` 加反思 + run_stats 两条断言)。
+
 ---
 
 ## 11. 完成状态(2026-06-02)

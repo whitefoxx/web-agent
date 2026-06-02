@@ -183,6 +183,16 @@ export interface AssistantTurnPatchEvt {
   text: string;
 }
 
+/** SW → SidePanel: live run meter (step count + token usage) for the cost
+ * indicator. */
+export interface RunStatsEvt {
+  type: 'RUN_STATS';
+  sessionId: string;
+  step: number;
+  promptTokens: number;
+  completionTokens: number;
+}
+
 export interface ToolTraceEvt {
   type: 'TOOL_TRACE';
   sessionId: string;
@@ -361,6 +371,7 @@ export type Message =
   | PlanDecisionResp
   | AssistantTurnEvt
   | AssistantTurnPatchEvt
+  | RunStatsEvt
   | ToolTraceEvt
   | SessionDoneEvt
   | SessionNoticeEvt

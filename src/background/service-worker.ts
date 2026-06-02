@@ -39,6 +39,7 @@ import type {
   SteerMessageReq,
   AssistantTurnEvt,
   AssistantTurnPatchEvt,
+  RunStatsEvt,
   DeleteSessionReq,
   GetSessionReq,
   GetSessionResp,
@@ -699,6 +700,17 @@ function forwardOrchEvent(sessionId: string, evt: OrchEvent): void {
         sessionId,
         iteration: evt.iteration,
         text: evt.text,
+      };
+      sendToSidepanel(out);
+      break;
+    }
+    case 'run_stats': {
+      const out: RunStatsEvt = {
+        type: 'RUN_STATS',
+        sessionId,
+        step: evt.step,
+        promptTokens: evt.promptTokens,
+        completionTokens: evt.completionTokens,
       };
       sendToSidepanel(out);
       break;

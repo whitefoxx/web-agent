@@ -719,7 +719,7 @@ export async function runApiSession(ctx: EngineContext, deps: ApiEngineDeps = {}
   const thrash = new ThrashTracker();
   const noProgress = new NoProgressTracker();
   let lastPromptTokens = 0;
-  let verifiedOnce = false; // end-of-run plan-completion nudge fires at most once
+  let reflectedOnce = false; // plan-mode finishing reflection fires at most once
 
   // Structured-LLM compaction: when prompt tokens cross the soft limit,
   // summarize the older half of the message array into one progress-ledger
@@ -1166,6 +1166,12 @@ export async function runApiSession(ctx: EngineContext, deps: ApiEngineDeps = {}
       lastPromptTokens = resp.usage?.prompt_tokens ?? lastPromptTokens;
       metrics.promptTokens = lastPromptTokens;
       metrics.completionTokens += resp.usage?.completion_tokens ?? 0;
+      ctx.emit({
+        type: 'run_stats',
+        step: iter + 1,
+        promptTokens: metrics.promptTokens,
+        completionTokens: metrics.completionTokens,
+      });
 
       const choice = resp.choices?.[0];
       if (!choice) return finish('error', 'LLM 没有返回任何 choices');
@@ -1203,26 +1209,29 @@ export async function runApiSession(ctx: EngineContext, deps: ApiEngineDeps = {}
       await saveSession(session);
 
       if (!toolCalls || toolCalls.length === 0) {
-        // Verify-with-evidence: if a plan was approved but steps remain, nudge
-        // the model to finish them (or explicitly mark them) — once per run,
-        // so it can't loop forever.
-        const prog = planProgress(session.plan);
-        if (!verifiedOnce && session.plan?.approved && prog.completed < prog.total) {
-          verifiedOnce = true;
+        // Reflect & re-plan (plan mode): on a finish attempt, do ONE self-check
+        // against the approved plan — finish leftover steps, or (if all done)
+        // confirm the goal is actually met and re-plan via update_plan if not.
+        // Once per run so it can't loop forever.
+        if (!reflectedOnce && session.plan?.approved) {
+          reflectedOnce = true;
+          const prog = planProgress(session.plan);
           const pending = session.plan.steps
             .filter((s) => s.status !== 'completed')
             .map((s) => `- ${s.title}`)
             .join('\n');
-          messages.push({
-            role: 'user',
-            content: `你似乎要结束了,但计划还有未完成的步骤:\n${pending}\n请完成它们;若确已完成,请先用 update_plan 标记为 completed 再结束;若某步确实无需执行,也标记并简要说明原因。`,
+          const goalLine = session.plan.goal ? `目标:${session.plan.goal}\n` : '';
+          const incomplete = prog.completed < prog.total;
+          const body = incomplete
+            ? `${goalLine}你似乎要结束了,但计划还有未完成步骤:\n${pending}\n请完成它们;若确已完成请先用 update_plan 标记 completed;若某步确实无需执行,也标记并说明原因。`
+            : `${goalLine}你已把所有计划步骤标记完成。最后自检一遍:结果是否真的达成了上面的目标?有没有遗漏、质量不足或值得补强的地方?如需补做,用 update_plan 加步骤后继续;若确认无误,直接给用户最终答复。`;
+          messages.push({ role: 'user', content: `[自检] ${body}` });
+          appendTurn(session, { role: 'user', text: '[自检] 对照计划复盘', ts: Date.now() });
+          ctx.emit({
+            type: 'notice',
+            level: 'info',
+            text: incomplete ? '计划仍有未完成步骤,提醒模型收尾…' : '计划已完成,让模型最后自检一遍…',
           });
-          appendTurn(session, {
-            role: 'user',
-            text: '[系统校验] 仍有未完成的计划步骤,请收尾',
-            ts: Date.now(),
-          });
-          ctx.emit({ type: 'notice', level: 'info', text: '检测到计划未完成,提醒模型收尾…' });
           session.apiMessages = messages;
           await saveSession(session);
           continue;

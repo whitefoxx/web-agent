@@ -52,6 +52,8 @@ export type OrchEvent =
   // The SW forwards it as ASSISTANT_TURN_PATCH so the SidePanel can render the
   // bubble live; the final 'assistant_turn' finalizes it.
   | { type: 'assistant_delta'; iteration: number; text: string }
+  // Live run meter: step count + token usage so far (SW → RUN_STATS).
+  | { type: 'run_stats'; step: number; promptTokens: number; completionTokens: number }
   | { type: 'tool_trace'; trace: ToolTrace }
   | {
       type: 'iteration_progress';
