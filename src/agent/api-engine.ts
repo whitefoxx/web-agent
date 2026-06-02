@@ -651,6 +651,11 @@ export const apiEngine: AgentEngine = {
     // Long-term memory recall: load the user's saved facts once and inject them
     // into the system prompt for this whole run (both planning and execution).
     const memoryBlock = renderMemoryBlock(await listMemories().catch(() => []));
+    // Environment note (e.g. disabled func adapters) so the model doesn't
+    // silently fall back to generic tools and fake an unavailable capability.
+    const envNote = ctx.environmentNote
+      ? `\n\n## 运行环境提示\n${ctx.environmentNote}\n如果任务需要这些当前不可用的站点工具,请如实告知用户去启用,不要用 generic 工具硬凑、假装能完成。`
+      : '';
 
     // Re-pull tools each iteration so a market install mid-conversation shows
     // up on the very next LLM call (no need to start a new session). Cheap —
@@ -713,6 +718,11 @@ export const apiEngine: AgentEngine = {
     async function runPlanningPhase(): Promise<
       'approved' | 'answered' | 'rejected' | 'error' | 'aborted'
     > {
+      ctx.emit({
+        type: 'notice',
+        level: 'info',
+        text: '🗺️ 规划模式:正在研究任务,随后会给你一份计划待批准…',
+      });
       for (let pIter = 0; pIter < PLAN_MAX_STEPS; pIter++) {
         if (ctx.signal.aborted) return 'aborted';
         const iterationId = `${session.id}__plan${pIter}`;
@@ -736,7 +746,10 @@ export const apiEngine: AgentEngine = {
             signal: ctx.signal,
             body: {
               model: cfg.model,
-              messages: [{ role: 'system', content: systemPromptPlan() + memoryBlock }, ...messages],
+              messages: [
+                { role: 'system', content: systemPromptPlan() + memoryBlock + envNote },
+                ...messages,
+              ],
               tools,
               tool_choice: 'auto',
               max_tokens: 4096,
@@ -1086,7 +1099,8 @@ export const apiEngine: AgentEngine = {
                     (session.plan
                       ? renderPlanBlock(session.plan)
                       : '\n\n多步任务(≥3 步)建议先用 update_plan 列出待办清单再开始。') +
-                    memoryBlock,
+                    memoryBlock +
+                    envNote,
                 },
                 ...messages,
               ],

@@ -86,6 +86,11 @@ export interface EngineContext {
   /** Plan mode for this run; 'plan' = research read-only → propose → approve →
    * execute. Defaults to 'chat' (execute directly). */
   mode?: 'chat' | 'plan';
+  /** One-line note about the runtime environment (e.g. installed func adapters
+   * disabled because "Allow user scripts" is off) injected into the system
+   * prompt so the model knows what's unavailable instead of silently faking it
+   * with generic tools. */
+  environmentNote?: string;
   /** Emit a UI event. */
   emit(evt: OrchEvent): void;
   /** Run a tool by `site__name`. Shared dispatcher: per-site tab management,

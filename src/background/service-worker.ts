@@ -82,7 +82,11 @@ import {
   setEnabled as setAdapterEnabled,
   listInstalledAdapters,
 } from '../adapters/install-manager';
-import { configureWebchatWorld, handleRunnerPortConnect } from '../userscript/sw-runner';
+import {
+  configureWebchatWorld,
+  handleRunnerPortConnect,
+  isUserScriptsApiAvailable,
+} from '../userscript/sw-runner';
 
 const SCOPE = 'sw';
 
@@ -574,6 +578,24 @@ function makeExecuteTool(
   };
 }
 
+/** One-shot guard so we warn about disabled func adapters at most once per SW. */
+let disabledFuncNoticeSent = false;
+
+/** When Phase B (userScripts) is off but the user has func adapters installed,
+ * a one-line note so the model + user know those site tools are unavailable
+ * (instead of the model silently faking it with generic tools). */
+async function disabledFuncAdapterNote(): Promise<string | null> {
+  if (isUserScriptsApiAvailable()) return null;
+  const rows = await listInstalledAdapters().catch(() => []);
+  const funcRows = rows.filter((r) => r.enabled && (r.kind === 'func' || r.kind === 'mixed'));
+  if (!funcRows.length) return null;
+  const names = funcRows
+    .slice(0, 6)
+    .map((r) => r.title)
+    .join('、');
+  return `你安装的 ${funcRows.length} 个 adapter(${names}${funcRows.length > 6 ? '…' : ''})需要 Chrome 的「允许用户脚本」开关才能运行,当前未启用,这些站点的工具不可用。`;
+}
+
 async function driveApiSession(
   session: SessionState,
   userText: string,
@@ -582,11 +604,22 @@ async function driveApiSession(
   const abortCtl = new AbortController();
   activeSessions.set(session.id, { session, abort: abortCtl });
   startKeepalivePing(); // pin the SW for the whole turn (see startKeepalivePing)
+  const envNote = await disabledFuncAdapterNote();
+  if (envNote && !disabledFuncNoticeSent) {
+    disabledFuncNoticeSent = true;
+    sendToSidepanel({
+      type: 'SESSION_NOTICE',
+      sessionId: session.id,
+      level: 'warning',
+      text: `${envNote} 在 chrome://extensions 打开本扩展的该开关并重载扩展即可启用。`,
+    } satisfies SessionNoticeEvt);
+  }
   const ctx: EngineContext = {
     session,
     userText,
     signal: abortCtl.signal,
     mode,
+    environmentNote: envNote ?? undefined,
     emit: (evt) => forwardOrchEvent(session.id, evt),
     executeTool: makeExecuteTool(session.id),
     requestPlanDecision: (plan) => requestPlanDecision(session.id, plan),

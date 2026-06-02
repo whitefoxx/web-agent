@@ -297,6 +297,22 @@ sleep / toolCallKey / ThrashTracker`),`tests/resilience.test.ts` 全覆盖;
 - **教训**:独立 IDB 库避免 session-store 版本升级冲突;`indexedDB` 只在函数内引用,模块
   顶层无副作用,故 node 测试可安全 import(只测纯函数)。
 
+### 10.11 跟进(实地测试反馈)— 禁用 adapter 感知 + plan 可见性
+
+- **背景**:首次实地测(b 站 plan 模式)发现模型没用 bilibili adapter 而退化到 generic。
+  根因是 `chrome.userScripts 不可用` → bilibili 的 search/subtitle(func/Phase B)未注册,
+  只有 hot(pipeline)在工具列表里。非 harness bug,但暴露两个 UX 盲点。
+- **修法**:
+  - **禁用 adapter 感知**:SW `disabledFuncAdapterNote()`——Phase B 关 + 装了 func/mixed
+    adapter 时,(a) 发一次 `SESSION_NOTICE` 提示用户去开「允许用户脚本」;(b) 经
+    `EngineContext.environmentNote` 注入 system,告诉模型这些站点工具不可用、别用 generic
+    假装能做。
+  - **plan 可见性**:进入规划阶段先 emit 一条 notice(「🗺️ 规划模式:研究中,随后给你计划
+    待批准」),让用户知道计划在路上、别过早 abort。计划本身已有 `PlanApprovalCard`(提交时
+    审批、步骤可编辑)+ `PlanChecklist`(批准后实时勾选)两处展示。
+- **教训**:func/pipeline 混装时"装了 ≠ 能用",环境前提(userScripts 开关)要对用户和模型
+  都显式化;`npm run build` 重载后该开关常被 Chrome 重置。
+
 ---
 
 ## 11. 完成状态(2026-06-02)
