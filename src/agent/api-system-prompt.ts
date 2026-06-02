@@ -7,6 +7,10 @@
  * the detail.
  */
 
+/** Bump when any prompt in this file changes materially. Surfaced in run logs
+ * for traceability (prompt-management lite). */
+export const PROMPT_VERSION = '2026-06-02.1';
+
 export function systemPromptApi(): string {
   return `你是一个运行在用户浏览器里的网页操作助手。你通过函数调用（tools）驱动用户已登录的真实网页标签页（如小红书等），同时也有一组通用网页操作工具（打开网页、点击、输入、滚动、抓取文本等）。
 

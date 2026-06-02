@@ -48,6 +48,10 @@ export type OrchEvent =
       reasoningText?: string;
       commands: ParsedCommand[];
     }
+  // Incremental assistant text while streaming (full text so far, not a delta).
+  // The SW forwards it as ASSISTANT_TURN_PATCH so the SidePanel can render the
+  // bubble live; the final 'assistant_turn' finalizes it.
+  | { type: 'assistant_delta'; iteration: number; text: string }
   | { type: 'tool_trace'; trace: ToolTrace }
   | {
       type: 'iteration_progress';
