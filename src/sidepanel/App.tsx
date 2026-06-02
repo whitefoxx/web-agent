@@ -14,7 +14,28 @@ import {
   IconStop,
   IconTerminal,
   IconX,
+  IconFlag,
+  IconEye,
+  IconSearch,
+  IconCamera,
+  IconPointer,
+  IconType,
+  IconScroll,
+  IconList,
+  IconBranch,
+  IconSave,
+  IconImage,
+  IconGlobe,
+  IconCheckCircle,
+  IconChevronDown,
+  IconDot,
+  IconHand,
+  IconFastForward,
+  IconCheck,
+  IconCopy,
+  IconSparkle,
 } from './Icons';
+import { toolActivity, screenshotDataUrl, planSites, type ActivityIcon } from './activity';
 import type { UiTurn } from './types';
 import {
   type AbortSessionReq,
@@ -91,15 +112,56 @@ function fmtTok(n: number): string {
   return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
 }
 
+const ACTIVITY_ICON: Record<ActivityIcon, (p: { size?: number }) => preact.JSX.Element> = {
+  navigate: IconFlag,
+  read: IconEye,
+  search: IconSearch,
+  camera: IconCamera,
+  click: IconPointer,
+  type: IconType,
+  scroll: IconScroll,
+  plan: IconList,
+  subagent: IconBranch,
+  memory: IconSave,
+  image: IconImage,
+  site: IconGlobe,
+  action: IconDot,
+};
+
+type TurnKind = 'user' | 'system' | 'tool' | 'reasoning' | 'answer';
+
+/** An assistant turn is "reasoning" (a timeline narration bullet) if a tool turn
+ * follows it before the next user message; otherwise it's the "answer" bubble. */
+function classifyTurn(turns: UiTurn[], i: number): TurnKind {
+  const t = turns[i]!;
+  if (t.role === 'user') return 'user';
+  if (t.role === 'system') return 'system';
+  if (t.role === 'tool') return 'tool';
+  for (let j = i + 1; j < turns.length && turns[j]!.role !== 'user'; j++) {
+    if (turns[j]!.role === 'tool') return 'reasoning';
+  }
+  return 'answer';
+}
+
+/** Whether tool activity preceded this turn in the current exchange — used to
+ * place a "✓ 完成" marker at the end of the timeline, just before the answer. */
+function hadToolActivityBefore(turns: UiTurn[], i: number): boolean {
+  for (let j = i - 1; j >= 0 && turns[j]!.role !== 'user'; j--) {
+    if (turns[j]!.role === 'tool') return true;
+  }
+  return false;
+}
+
 export function App() {
   const [turns, setTurns] = useState<UiTurn[]>([]);
   const [input, setInput] = useState('');
   const [running, setRunning] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
-  const [progress, setProgress] = useState<ProgressState | null>(null);
+  const [, setProgress] = useState<ProgressState | null>(null);
   const [pendingConfirms, setPendingConfirms] = useState<WriteConfirmReq[]>([]);
   const [plan, setPlan] = useState<PlanState | null>(null);
   const [mode, setMode] = useState<'chat' | 'plan'>('chat');
+  const [modeMenuOpen, setModeMenuOpen] = useState(false);
   const [pendingPlan, setPendingPlan] = useState<PlanDecisionReq | null>(null);
   const [streaming, setStreaming] = useState<string | null>(null);
   const [runStats, setRunStats] = useState<{
@@ -107,6 +169,7 @@ export function App() {
     promptTokens: number;
     completionTokens: number;
   } | null>(null);
+  const [lightbox, setLightbox] = useState<string | null>(null);
   // Header menu state machine. 'closed' = no overlay; 'menu' = dropdown
   // showing; any other value = a settings page is open. Click outside the
   // menu/page region drops back to 'closed'.
@@ -458,6 +521,12 @@ export function App() {
   const apiReady = !!llmConfig.apiKey;
   const apiLabel = llmConfig.model || llmConfig.provider;
   const inputBlocked = !apiReady;
+  // Live "what's happening now" text for the ongoing indicator.
+  const inProgressStep = plan?.steps.find((s) => s.status === 'in_progress');
+  const activeText =
+    inProgressStep?.activeForm ||
+    inProgressStep?.title ||
+    (mode === 'plan' ? '规划中…' : '执行中…');
 
   return (
     <>
@@ -494,16 +563,25 @@ export function App() {
 
       <div class="messages" ref={messagesRef}>
         {turns.length === 0 && !running && <WelcomeCard />}
-        {turns.map((t, i) => (
-          <TurnView key={i} turn={t} />
-        ))}
+        {turns.map((t, i) => {
+          const kind = classifyTurn(turns, i);
+          return (
+            <TurnView
+              key={i}
+              turn={t}
+              kind={kind}
+              showDone={kind === 'answer' && hadToolActivityBefore(turns, i)}
+              onImage={setLightbox}
+            />
+          );
+        })}
         {streaming !== null && (
           <div class="msg assistant">
             <Markdown text={streaming || '…'} />
           </div>
         )}
         {plan && plan.steps.length > 0 && <PlanChecklist plan={plan} />}
-        {progress && <ProgressBanner progress={progress} />}
+        {running && streaming === null && <ActiveHeader text={activeText} />}
         {pendingConfirms.length > 0 && (
           <WriteConfirmCard
             req={pendingConfirms[0]}
@@ -516,36 +594,23 @@ export function App() {
 
       <footer>
         {running && runStats && (
-          <div
-            style={{ fontSize: 11, opacity: 0.55, padding: '0 2px 3px', display: 'flex', gap: 12 }}
-          >
+          <div class="run-stats">
             <span>步 {runStats.step}</span>
             <span>上下文 ~{fmtTok(runStats.promptTokens)} tok</span>
             <span>输出 ~{fmtTok(runStats.completionTokens)} tok</span>
           </div>
         )}
-        <div style={{ display: 'flex', gap: 6, padding: '0 2px 4px' }}>
-          <button
-            class="ghost-btn"
-            onClick={() => setMode((mo) => (mo === 'plan' ? 'chat' : 'plan'))}
-            title="计划模式:先研究并给出可审批的计划，批准后再执行（含写操作）"
-            style={{
-              fontSize: 12,
-              padding: '2px 10px',
-              borderRadius: 12,
-              border: '1px solid rgba(127,127,127,0.3)',
-              opacity: mode === 'plan' ? 1 : 0.65,
-            }}
-          >
-            {mode === 'plan' ? '📋 计划模式' : '💬 对话模式'}
-          </button>
-        </div>
-        <div class={`composer ${inputBlocked && !running ? 'disabled' : ''}`}>
+        <div class={`composer-card ${inputBlocked && !running ? 'disabled' : ''}`}>
           <textarea
+            class="composer-input"
             placeholder={
-              apiReady
-                ? '问我点什么，比如：帮我看看小红书首页最近有什么内容'
-                : '先在右上角菜单 → LLM 后端 填入 API Key…'
+              !apiReady
+                ? '先在右上角菜单 → LLM 后端 填入 API Key…'
+                : running
+                  ? '插话纠偏…（不打断当前任务）'
+                  : turns.length > 0
+                    ? '回复…'
+                    : '问我点什么，比如：帮我看看小红书首页最近有什么内容'
             }
             value={input}
             onInput={(e) => setInput((e.target as HTMLTextAreaElement).value)}
@@ -553,35 +618,92 @@ export function App() {
             disabled={inputBlocked}
             rows={1}
           />
-          {running ? (
-            <>
-              {input.trim() && (
+          <div class="composer-bar">
+            <div class="mode-anchor">
+              <button
+                class="mode-pill"
+                onClick={() => setModeMenuOpen((o) => !o)}
+                title="选择执行模式"
+              >
+                {mode === 'plan' ? <IconHand size={14} /> : <IconFastForward size={14} />}
+                <span>{mode === 'plan' ? '先计划再执行' : '直接执行'}</span>
+                <IconChevronDown size={13} class="mode-chev" />
+              </button>
+              {modeMenuOpen && (
+                <>
+                  <div class="mode-backdrop" onClick={() => setModeMenuOpen(false)} />
+                  <div class="mode-menu">
+                    <button
+                      class="mode-opt"
+                      onClick={() => {
+                        setMode('plan');
+                        setModeMenuOpen(false);
+                      }}
+                    >
+                      <IconHand size={18} class="mode-opt-icon" />
+                      <span class="mode-opt-text">
+                        <span class="mode-opt-title">先计划再执行</span>
+                        <span class="mode-opt-desc">
+                          复杂任务先给出可审批的计划；简单任务直接开始。
+                        </span>
+                      </span>
+                      {mode === 'plan' && <IconCheck size={16} class="mode-check" />}
+                    </button>
+                    <button
+                      class="mode-opt"
+                      onClick={() => {
+                        setMode('chat');
+                        setModeMenuOpen(false);
+                      }}
+                    >
+                      <IconFastForward size={18} class="mode-opt-icon" />
+                      <span class="mode-opt-text">
+                        <span class="mode-opt-title">直接执行</span>
+                        <span class="mode-opt-desc">不暂停审批直接做（写操作仍会二次确认）。</span>
+                      </span>
+                      {mode === 'chat' && <IconCheck size={16} class="mode-check" />}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+            <div class="composer-bar-right">
+              {running ? (
+                <>
+                  {input.trim() && (
+                    <button
+                      class="send-btn"
+                      onClick={onSend}
+                      title="插话纠偏（不打断当前会话）"
+                      aria-label="插话"
+                    >
+                      <IconArrowUp size={16} />
+                    </button>
+                  )}
+                  <button
+                    class="send-btn stop"
+                    onClick={onAbort}
+                    title="停止生成"
+                    aria-label="停止"
+                  >
+                    <IconStop size={12} />
+                  </button>
+                </>
+              ) : (
                 <button
                   class="send-btn"
                   onClick={onSend}
-                  title="插话纠偏（不打断当前会话）"
-                  aria-label="插话"
+                  disabled={!input.trim() || inputBlocked}
+                  title="发送 (Enter)"
+                  aria-label="发送"
                 >
                   <IconArrowUp size={16} />
                 </button>
               )}
-              <button class="send-btn stop" onClick={onAbort} title="停止生成" aria-label="停止">
-                <IconStop size={12} />
-              </button>
-            </>
-          ) : (
-            <button
-              class="send-btn"
-              onClick={onSend}
-              disabled={!input.trim() || inputBlocked}
-              title="发送 (Enter)"
-              aria-label="发送"
-            >
-              <IconArrowUp size={16} />
-            </button>
-          )}
+            </div>
+          </div>
         </div>
-        <div class="hint">Enter 发送 · Shift+Enter 换行 · 由 {apiLabel || 'API'} 提供推理</div>
+        <div class="hint">Enter 发送 · AI 可能出错，请核对重要信息 · {apiLabel || 'API'}</div>
       </footer>
 
       {/* Top-level menu pages. History owns its own overlay because it has a
@@ -645,6 +767,11 @@ export function App() {
             onClear={() => setLogs([])}
           />
         </PageOverlay>
+      )}
+      {lightbox && (
+        <div class="lightbox" onClick={() => setLightbox(null)}>
+          <img src={lightbox} alt="screenshot" />
+        </div>
       )}
     </>
   );
@@ -788,21 +915,13 @@ function LogsSection({
   );
 }
 
-function ProgressBanner({ progress }: { progress: ProgressState }) {
-  const label =
-    progress.phase === 'injecting'
-      ? '正在请求模型…'
-      : progress.phase === 'streaming'
-        ? `模型正在生成 (~${progress.textLen ?? 0} 字)…`
-        : `模型思考中… (iter ${progress.iteration})`;
+/** Live "ongoing" indicator at the active edge of the timeline — a spinning
+ * sparkle + the current high-level task (Claude-for-Chrome style). */
+function ActiveHeader({ text }: { text: string }): preact.JSX.Element {
   return (
-    <div class="progress-banner">
-      <span class="dots">
-        <span class="d1" />
-        <span class="d2" />
-        <span class="d3" />
-      </span>
-      <span>{label}</span>
+    <div class="tl-active-head">
+      <IconSparkle size={18} class="tl-sparkle" />
+      <span>{text}</span>
     </div>
   );
 }
@@ -929,6 +1048,7 @@ function PlanApprovalCard({
   req: PlanDecisionReq;
   onDecide: (decision: 'approve' | 'reject', editedSteps?: string[]) => void;
 }) {
+  const [editing, setEditing] = useState(false);
   const original = req.plan.steps.map((s) => s.title);
   const [text, setText] = useState(original.join('\n'));
   const edited = text
@@ -936,29 +1056,77 @@ function PlanApprovalCard({
     .map((l) => l.trim())
     .filter(Boolean);
   const changed = edited.length !== original.length || edited.some((l, i) => l !== original[i]);
+  const sites = planSites([req.plan.goal ?? '', ...original].join(' '));
   return (
-    <div class="write-confirm">
-      <div class="title">📋 计划待审批</div>
-      {req.plan.goal && <div class="desc">{req.plan.goal}</div>}
-      <textarea
-        value={text}
-        onInput={(e) => setText((e.target as HTMLTextAreaElement).value)}
-        rows={Math.max(3, edited.length)}
-        title="每行一个步骤，可编辑后再批准"
-        style={{ width: '100%', boxSizing: 'border-box', fontSize: 13, margin: '6px 0' }}
-      />
-      <div class="actions">
-        <button
-          class="primary"
-          disabled={edited.length === 0}
-          onClick={() => onDecide('approve', changed ? edited : undefined)}
-        >
-          批准执行
-        </button>
-        <button class="secondary" onClick={() => onDecide('reject')}>
-          取消
-        </button>
+    <div class="plan-card">
+      <div class="plan-card-head">
+        <IconList size={16} />
+        <span>计划</span>
       </div>
+      <div class="plan-card-body">
+        {req.plan.goal && <div class="plan-goal">{req.plan.goal}</div>}
+        {sites.length > 0 && (
+          <>
+            <div class="plan-sec">涉及站点</div>
+            <div class="plan-sites">
+              {sites.map((s) => (
+                <span key={s} class="plan-site">
+                  <IconGlobe size={13} />
+                  {s}
+                </span>
+              ))}
+            </div>
+          </>
+        )}
+        <div class="plan-sec">执行步骤</div>
+        {editing ? (
+          <textarea
+            class="plan-edit"
+            value={text}
+            onInput={(e) => setText((e.target as HTMLTextAreaElement).value)}
+            rows={Math.max(3, edited.length)}
+            title="每行一个步骤"
+          />
+        ) : (
+          <ol class="plan-steps">
+            {req.plan.steps.map((s, i) => (
+              <li key={i}>
+                <span class="plan-num">{i + 1}</span>
+                <span>{s.title}</span>
+              </li>
+            ))}
+          </ol>
+        )}
+      </div>
+      <div class="plan-actions">
+        {editing ? (
+          <>
+            <button
+              class="plan-btn primary"
+              disabled={edited.length === 0}
+              onClick={() => onDecide('approve', changed ? edited : undefined)}
+            >
+              用修改后的计划执行
+            </button>
+            <button class="plan-btn" onClick={() => setEditing(false)}>
+              返回
+            </button>
+          </>
+        ) : (
+          <>
+            <button class="plan-btn primary" onClick={() => onDecide('approve')}>
+              批准执行<span class="kbd">⏎</span>
+            </button>
+            <button class="plan-btn" onClick={() => setEditing(true)}>
+              修改
+            </button>
+            <button class="plan-btn ghost" onClick={() => onDecide('reject')}>
+              取消
+            </button>
+          </>
+        )}
+      </div>
+      <div class="plan-foot">只会用上面列出的内容；访问其它站点 / 写操作前会再问你。</div>
     </div>
   );
 }
@@ -1024,69 +1192,99 @@ function WelcomeCard() {
   );
 }
 
-function TurnView({ turn }: { turn: UiTurn }) {
+function TurnView({
+  turn,
+  kind,
+  showDone,
+  onImage,
+}: {
+  turn: UiTurn;
+  kind: TurnKind;
+  showDone?: boolean;
+  onImage?: (url: string) => void;
+}) {
   if (turn.role === 'user') {
     return <div class="msg user">{turn.text}</div>;
   }
   if (turn.role === 'system') {
+    if (turn.text === '回答完成') return null; // ✓ marker is rendered before the answer instead
     return <div class={`msg system ${turn.level === 'error' ? 'err' : ''}`}>{turn.text}</div>;
   }
   if (turn.role === 'tool') {
-    return <ToolTraceCard trace={turn.trace} />;
+    return <TimelineToolRow trace={turn.trace} onImage={onImage} />;
+  }
+  if (kind === 'reasoning') {
+    const reason = turn.text?.trim();
+    if (!reason) return null;
+    return (
+      <div class="tl-row reason">
+        <span class="tl-gutter">
+          <span class="tl-icon dot">
+            <IconDot size={7} />
+          </span>
+        </span>
+        <span class="tl-reason">
+          <Markdown text={reason} />
+        </span>
+      </div>
+    );
   }
   const looksLikeParseFailure =
     turn.commands.length === 0 &&
     !!turn.rawText &&
     /```[^\n`]*\r?\n[\s\S]*?\r?\n```/.test(turn.rawText);
   return (
-    <div class="msg assistant">
-      {turn.reasoningText && (
-        <details class="reasoning">
-          <summary>思考过程</summary>
-          <div class="body">{turn.reasoningText}</div>
-        </details>
-      )}
-      <Markdown text={turn.text || '（无内容）'} />
-      {turn.commands.length > 0 && (
-        <details class="parsed-commands" open>
-          <summary>
-            已解析 {turn.commands.length} 个指令
-            <span class="badges">
+    <>
+      {showDone && <DoneRow />}
+      <div class="msg assistant">
+        {turn.reasoningText && (
+          <details class="reasoning">
+            <summary>思考过程</summary>
+            <div class="body">{turn.reasoningText}</div>
+          </details>
+        )}
+        <Markdown text={turn.text || '（无内容）'} />
+        {turn.commands.length > 0 && (
+          <details class="parsed-commands" open>
+            <summary>
+              已解析 {turn.commands.length} 个指令
+              <span class="badges">
+                {turn.commands.map((c, i) => (
+                  <span key={i} class="badge">
+                    {commandLabel(c)}
+                  </span>
+                ))}
+              </span>
+            </summary>
+            <ol class="cmd-list">
               {turn.commands.map((c, i) => (
-                <span key={i} class="badge">
-                  {commandLabel(c)}
-                </span>
+                <li key={i}>
+                  <code>
+                    {c.action}
+                    {c.tool ? ` ${c.tool}` : ''}
+                  </code>
+                  {c.args && Object.keys(c.args).length > 0 && (
+                    <pre>{JSON.stringify(c.args, null, 2)}</pre>
+                  )}
+                  {c.action === 'parse_error' && c.message && <pre>{c.message}</pre>}
+                </li>
               ))}
-            </span>
-          </summary>
-          <ol class="cmd-list">
-            {turn.commands.map((c, i) => (
-              <li key={i}>
-                <code>
-                  {c.action}
-                  {c.tool ? ` ${c.tool}` : ''}
-                </code>
-                {c.args && Object.keys(c.args).length > 0 && (
-                  <pre>{JSON.stringify(c.args, null, 2)}</pre>
-                )}
-                {c.action === 'parse_error' && c.message && <pre>{c.message}</pre>}
-              </li>
-            ))}
-          </ol>
-        </details>
-      )}
-      {looksLikeParseFailure && (
-        <div class="warn-banner">
-          ⚠️ 回复里看起来有代码块但没解析出任何 agent-command。展开下方"原始回复"对照。
-        </div>
-      )}
-      {turn.rawText && turn.rawText !== turn.text && (
-        <details class="raw-text">
-          <summary>原始回复（调试用）</summary>
-          <pre>{turn.rawText}</pre>
-        </details>
-      )}
-    </div>
+            </ol>
+          </details>
+        )}
+        {looksLikeParseFailure && (
+          <div class="warn-banner">
+            ⚠️ 回复里看起来有代码块但没解析出任何 agent-command。展开下方"原始回复"对照。
+          </div>
+        )}
+        {turn.rawText && turn.rawText !== turn.text && (
+          <details class="raw-text">
+            <summary>原始回复（调试用）</summary>
+            <pre>{turn.rawText}</pre>
+          </details>
+        )}
+      </div>
+    </>
   );
 }
 
@@ -1095,53 +1293,101 @@ function commandLabel(c: import('../messages').ParsedCommand): string {
   return c.action;
 }
 
-function ToolTraceCard({ trace }: { trace: ToolTrace }) {
-  const badge =
-    trace.status === 'started' ? 'pending' : trace.status === 'completed' ? 'ok' : 'err';
-  const title =
-    trace.action === 'execute_tool'
-      ? `调用 ${trace.tool ?? '(?)'}`
-      : trace.action === 'list_tools'
-        ? `列出工具${trace.args?.category ? ` (${String(trace.args.category)})` : ''}`
-        : trace.action === 'describe_tool'
-          ? `查询 ${String(trace.args?.name ?? '?')}`
-          : trace.action === 'done'
-            ? `Agent 结束`
-            : trace.action;
+/** Completion marker row at the end of an activity timeline. */
+function DoneRow(): preact.JSX.Element {
   return (
-    <details class="trace" open={trace.status !== 'started'}>
-      <summary>
-        <span class={`badge ${badge}`}>
-          {badge === 'pending' ? '执行中' : badge === 'ok' ? '完成' : '失败'}
+    <div class="tl-row done">
+      <span class="tl-gutter">
+        <span class="tl-icon">
+          <IconCheckCircle size={15} />
         </span>
-        <span>{title}</span>
-        {trace.durationMs !== undefined && (
-          <span style="color:var(--muted);margin-left:auto;font-size:10px">
-            {trace.durationMs}ms
+      </span>
+      <span class="tl-label">完成</span>
+    </div>
+  );
+}
+
+/** One tool call as an activity-timeline row (Claude-for-Chrome-style): semantic
+ * icon + concise label + optional screenshot thumb; click to expand raw
+ * args/result/error. */
+function TimelineToolRow({
+  trace,
+  onImage,
+}: {
+  trace: ToolTrace;
+  onImage?: (url: string) => void;
+}): preact.JSX.Element {
+  const [open, setOpen] = useState(false);
+  const act = toolActivity(trace);
+  const Icon = ACTIVITY_ICON[act.icon];
+  const thumb = trace.result !== undefined ? screenshotDataUrl(trace.result) : null;
+  const active = trace.status === 'started';
+  const failed = trace.status === 'failed';
+  const hasArgs = !!trace.args && Object.keys(trace.args).length > 0;
+  const hasDetail = hasArgs || trace.result !== undefined || !!trace.error;
+  return (
+    <div class={`tl-row tool ${active ? 'active' : ''} ${failed ? 'failed' : ''}`}>
+      <div
+        class="tl-head"
+        onClick={() => hasDetail && setOpen((o) => !o)}
+        style={{ cursor: hasDetail ? 'pointer' : 'default' }}
+      >
+        <span class="tl-gutter">
+          <span class="tl-icon">
+            {active ? <IconSparkle size={15} class="tl-sparkle" /> : <Icon size={15} />}
           </span>
+        </span>
+        <span class="tl-main">
+          <span class="tl-label">
+            {act.label}
+            {failed ? '（失败）' : ''}
+          </span>
+          {trace.tool && <span class="tl-tool">{trace.tool}</span>}
+        </span>
+        {thumb && (
+          <img
+            class="tl-thumb"
+            src={thumb}
+            alt="screenshot"
+            onClick={(e) => {
+              e.stopPropagation();
+              onImage?.(thumb);
+            }}
+          />
         )}
-      </summary>
-      <div class="body">
-        {trace.args && (
-          <>
-            <strong>参数：</strong>
-            <pre>{JSON.stringify(trace.args, null, 2)}</pre>
-          </>
-        )}
-        {trace.error && (
-          <>
-            <strong>错误：</strong>
-            <pre>{trace.error}</pre>
-          </>
-        )}
-        {trace.result !== undefined && (
-          <>
-            <strong>结果：</strong>
-            <pre>{previewResult(trace.result)}</pre>
-          </>
-        )}
+        {hasDetail && <IconChevronDown size={13} class={`tl-chev ${open ? 'open' : ''}`} />}
       </div>
-    </details>
+      {open && (
+        <div class="tl-detail">
+          {hasArgs && <CopyBox text={JSON.stringify(trace.args, null, 2)} />}
+          {trace.error && <pre class="tl-err">{trace.error}</pre>}
+          {trace.result !== undefined && !thumb && <CopyBox text={previewResult(trace.result)} />}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** A <pre> with a hover copy button in its top-right corner — used for the args
+ * and result boxes in an expanded timeline step. */
+function CopyBox({ text }: { text: string }): preact.JSX.Element {
+  const [copied, setCopied] = useState(false);
+  function copy(): void {
+    void navigator.clipboard?.writeText(text).then(
+      () => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1200);
+      },
+      () => {},
+    );
+  }
+  return (
+    <div class="copybox">
+      <button class="copybox-btn" title="复制" onClick={copy}>
+        {copied ? <IconCheck size={13} /> : <IconCopy size={13} />}
+      </button>
+      <pre>{text}</pre>
+    </div>
   );
 }
 

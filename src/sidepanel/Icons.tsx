@@ -150,3 +150,69 @@ export function IconClock(p: IconProps): JSX.Element {
 }
 
 export const IconTerminal = (p: IconProps): JSX.Element => stroke('M4 17l6-6-6-6M12 19h8', p);
+
+/* ── Activity-timeline icons (Claude-for-Chrome-style) ── */
+export const IconFlag = (p: IconProps): JSX.Element =>
+  stroke('M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1zM4 22v-7', p);
+export const IconEye = (p: IconProps): JSX.Element =>
+  stroke('M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z M12 15a3 3 0 100-6 3 3 0 000 6z', p);
+export const IconSearch = (p: IconProps): JSX.Element =>
+  stroke('M11 18a7 7 0 100-14 7 7 0 000 14z M21 21l-4.5-4.5', p);
+export const IconCamera = (p: IconProps): JSX.Element =>
+  stroke(
+    'M14.5 4h-5L7 7H4a2 2 0 00-2 2v9a2 2 0 002 2h16a2 2 0 002-2V9a2 2 0 00-2-2h-3zM12 17.5a3.5 3.5 0 100-7 3.5 3.5 0 000 7z',
+    p,
+  );
+export const IconPointer = (p: IconProps): JSX.Element => stroke('M4 4l6 16 2-6 6-2z', p);
+export const IconType = (p: IconProps): JSX.Element => stroke('M4 7V4h16v3M9 20h6M12 4v16', p);
+export const IconScroll = (p: IconProps): JSX.Element => stroke('M7 6l5 5 5-5M7 13l5 5 5-5', p);
+export const IconList = (p: IconProps): JSX.Element =>
+  stroke('M8 6h12M8 12h12M8 18h12M3.5 6h.01M3.5 12h.01M3.5 18h.01', p);
+export const IconBranch = (p: IconProps): JSX.Element =>
+  stroke(
+    'M6 3v12M18 9a3 3 0 100-6 3 3 0 000 6zM6 21a3 3 0 100-6 3 3 0 000 6zM15 6a9 9 0 01-9 9',
+    p,
+  );
+export const IconSave = (p: IconProps): JSX.Element =>
+  stroke('M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2zM17 21v-8H7v8M7 3v5h8', p);
+export const IconImage = (p: IconProps): JSX.Element =>
+  stroke(
+    'M19 3H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2V5a2 2 0 00-2-2zM8.5 10a1.5 1.5 0 100-3 1.5 1.5 0 000 3zM21 15l-5-5L5 21',
+    p,
+  );
+export const IconGlobe = (p: IconProps): JSX.Element =>
+  stroke(
+    'M12 22a10 10 0 100-20 10 10 0 000 20zM2 12h20M12 2a15 15 0 014 10 15 15 0 01-4 10 15 15 0 01-4-10 15 15 0 014-10z',
+    p,
+  );
+export const IconCheckCircle = (p: IconProps): JSX.Element =>
+  stroke('M9 12l2 2 4.5-4.5M12 21a9 9 0 100-18 9 9 0 000 18z', p);
+export const IconChevronDown = (p: IconProps): JSX.Element => stroke('M6 9l6 6 6-6', p);
+
+export function IconDot(p: IconProps): JSX.Element {
+  const s = p.size ?? 8;
+  return (
+    <svg width={s} height={s} viewBox="0 0 24 24" class={p.class} style={p.style}>
+      <circle cx="12" cy="12" r="6" fill="currentColor" />
+    </svg>
+  );
+}
+
+export const IconHand = (p: IconProps): JSX.Element =>
+  stroke(
+    'M18 11V6a2 2 0 00-4 0M14 10V4a2 2 0 00-4 0v2M10 10.5V6a2 2 0 00-4 0v8M18 8a2 2 0 014 0v6a8 8 0 01-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 012.83-2.82L7 15',
+    p,
+  );
+export const IconFastForward = (p: IconProps): JSX.Element =>
+  stroke('M13 19l9-7-9-7v14zM2 19l9-7-9-7v14z', p);
+export const IconCheck = (p: IconProps): JSX.Element => stroke('M20 6L9 17l-5-5', p);
+
+export const IconCopy = (p: IconProps): JSX.Element =>
+  stroke(
+    'M8 8h11a1 1 0 011 1v11a1 1 0 01-1 1H8a1 1 0 01-1-1V9a1 1 0 011-1zM5 15H4a1 1 0 01-1-1V4a1 1 0 011-1h10a1 1 0 011 1v1',
+    p,
+  );
+
+/** 8-ray asterisk/sparkle — the active "ongoing" indicator (spins via CSS). */
+export const IconSparkle = (p: IconProps): JSX.Element =>
+  stroke('M12 2v20M2 12h20M5 5l14 14M19 5L5 19', p);
