@@ -13,6 +13,7 @@
 
 import type { LogEntry } from './runtime/log';
 import type { PlanState } from './agent/plan';
+import type { MemoryFact } from './agent/memory-store';
 
 export interface ParsedCommand {
   /** Raw JSON object parsed from an `<agent-command>` code block. Pre-history:
@@ -173,6 +174,15 @@ export interface AssistantTurnEvt {
   iteration: number;
 }
 
+/** SW → SidePanel: incremental assistant text while streaming (full text so
+ * far, not a delta). The final ASSISTANT_TURN replaces it. */
+export interface AssistantTurnPatchEvt {
+  type: 'ASSISTANT_TURN_PATCH';
+  sessionId: string;
+  iteration: number;
+  text: string;
+}
+
 export interface ToolTraceEvt {
   type: 'TOOL_TRACE';
   sessionId: string;
@@ -316,6 +326,22 @@ export interface AdaptersChangedEvt {
   type: 'ADAPTERS_CHANGED';
 }
 
+/* ───────── Long-term memory (SidePanel ↔ SW) ───────── */
+
+export interface ListMemoriesReq {
+  type: 'LIST_MEMORIES';
+}
+
+export interface ListMemoriesResp {
+  type: 'LIST_MEMORIES_RESP';
+  memories: MemoryFact[];
+}
+
+export interface DeleteMemoryReq {
+  type: 'DELETE_MEMORY';
+  id: string;
+}
+
 /* ───────── Aggregate ───────── */
 
 export type Message =
@@ -334,6 +360,7 @@ export type Message =
   | PlanDecisionReq
   | PlanDecisionResp
   | AssistantTurnEvt
+  | AssistantTurnPatchEvt
   | ToolTraceEvt
   | SessionDoneEvt
   | SessionNoticeEvt
@@ -347,7 +374,10 @@ export type Message =
   | SetAdapterEnabledReq
   | ListInstalledReq
   | ListInstalledResp
-  | AdaptersChangedEvt;
+  | AdaptersChangedEvt
+  | ListMemoriesReq
+  | ListMemoriesResp
+  | DeleteMemoryReq;
 
 export function isMessage(v: unknown): v is Message {
   return !!v && typeof v === 'object' && typeof (v as { type?: unknown }).type === 'string';

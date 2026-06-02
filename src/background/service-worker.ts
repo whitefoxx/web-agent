@@ -33,10 +33,12 @@ import { lookupAdapter } from '../tools/manifest';
 import { apiEngine } from '../agent/api-engine';
 import type { EngineContext, OrchEvent, ToolExecResult } from '../agent/engine';
 import type { PlanState } from '../agent/plan';
+import { listMemories, deleteMemory } from '../agent/memory-store';
 import type {
   AbortSessionReq,
   SteerMessageReq,
   AssistantTurnEvt,
+  AssistantTurnPatchEvt,
   DeleteSessionReq,
   GetSessionReq,
   GetSessionResp,
@@ -64,6 +66,7 @@ import type {
   ListInstalledResp,
   InstalledAdapterSummary,
   AdaptersChangedEvt,
+  DeleteMemoryReq,
 } from '../messages';
 
 // Side-effect import: registers site-independent web-operation adapters
@@ -332,6 +335,20 @@ chrome.runtime.onMessage.addListener((msg: unknown, _sender, sendResponse): bool
       void handleListInstalled().then(
         (resp) => sendResponse(resp),
         (e) => sendResponse({ ok: false, error: msgOf(e) }),
+      );
+      return true;
+    }
+    case 'LIST_MEMORIES': {
+      void listMemories().then(
+        (memories) => sendResponse({ type: 'LIST_MEMORIES_RESP', memories }),
+        () => sendResponse({ type: 'LIST_MEMORIES_RESP', memories: [] }),
+      );
+      return true;
+    }
+    case 'DELETE_MEMORY': {
+      void deleteMemory((m as DeleteMemoryReq).id).then(
+        () => sendResponse({ ok: true }),
+        () => sendResponse({ ok: false }),
       );
       return true;
     }
@@ -672,6 +689,16 @@ function forwardOrchEvent(sessionId: string, evt: OrchEvent): void {
         rawText: evt.rawText,
         reasoningText: evt.reasoningText,
         commands: evt.commands,
+      };
+      sendToSidepanel(out);
+      break;
+    }
+    case 'assistant_delta': {
+      const out: AssistantTurnPatchEvt = {
+        type: 'ASSISTANT_TURN_PATCH',
+        sessionId,
+        iteration: evt.iteration,
+        text: evt.text,
       };
       sendToSidepanel(out);
       break;

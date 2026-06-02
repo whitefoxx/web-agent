@@ -20,6 +20,7 @@ import {
   type AbortSessionReq,
   type SteerMessageReq,
   type AssistantTurnEvt,
+  type AssistantTurnPatchEvt,
   type DeleteSessionReq,
   type GetSessionReq,
   type GetSessionResp,
@@ -41,9 +42,13 @@ import {
   type WriteConfirmResp,
   type PlanDecisionReq,
   type PlanDecisionResp,
+  type ListMemoriesReq,
+  type ListMemoriesResp,
+  type DeleteMemoryReq,
 } from '../messages';
 import type { SessionState, Turn } from '../agent/session';
 import type { PlanState } from '../agent/plan';
+import type { MemoryFact } from '../agent/memory-store';
 import type { LogEntry, LogConfig } from '../runtime/log';
 import { getLogConfig, setLogConfig, subscribeLog } from '../runtime/log';
 import { makeSessionId } from '../agent/session';
@@ -71,12 +76,13 @@ interface ProgressState {
   textLen?: number;
 }
 
-type View = 'closed' | 'menu' | 'backend' | 'adapters' | 'history' | 'logs';
+type View = 'closed' | 'menu' | 'backend' | 'adapters' | 'history' | 'memory' | 'logs';
 
 const PAGE_LABELS: Record<Exclude<View, 'closed' | 'menu'>, string> = {
   backend: 'LLM 后端',
   adapters: 'Adapters',
   history: '历史会话',
+  memory: '记忆',
   logs: '日志',
 };
 
@@ -90,6 +96,7 @@ export function App() {
   const [plan, setPlan] = useState<PlanState | null>(null);
   const [mode, setMode] = useState<'chat' | 'plan'>('chat');
   const [pendingPlan, setPendingPlan] = useState<PlanDecisionReq | null>(null);
+  const [streaming, setStreaming] = useState<string | null>(null);
   // Header menu state machine. 'closed' = no overlay; 'menu' = dropdown
   // showing; any other value = a settings page is open. Click outside the
   // menu/page region drops back to 'closed'.
@@ -178,6 +185,7 @@ export function App() {
     const sid = (m as { sessionId?: string }).sessionId;
     switch (m.type) {
       case 'ASSISTANT_TURN':
+      case 'ASSISTANT_TURN_PATCH':
       case 'TOOL_TRACE':
       case 'SESSION_DONE':
       case 'SESSION_NOTICE':
@@ -193,6 +201,9 @@ export function App() {
     switch (m.type) {
       case 'ASSISTANT_TURN':
         onAssistantTurn(m as AssistantTurnEvt);
+        break;
+      case 'ASSISTANT_TURN_PATCH':
+        setStreaming((m as AssistantTurnPatchEvt).text);
         break;
       case 'TOOL_TRACE':
         onToolTrace(m as ToolTraceEvt);
@@ -278,6 +289,7 @@ export function App() {
   }
 
   function onAssistantTurn(m: AssistantTurnEvt): void {
+    setStreaming(null); // the finalized turn replaces the streaming bubble
     setTurns((cur) => [
       ...cur,
       {
@@ -308,6 +320,7 @@ export function App() {
   function onSessionDone(m: SessionDoneEvt): void {
     setRunning(false);
     setProgress(null);
+    setStreaming(null);
     // NOTE: deliberately NOT clearing sessionId on 'no_more_commands' /
     // 'user_abort' — follow-up messages stay in the same session so the LLM
     // keeps full context. On a real 'error' we drop the binding so the user
@@ -395,6 +408,7 @@ export function App() {
     setProgress(null);
     setRunning(false);
     setPendingPlan(null);
+    setStreaming(null);
     if (!sessionId) return;
     const req: AbortSessionReq = { type: 'ABORT_SESSION', sessionId };
     void chrome.runtime.sendMessage(req).catch(() => {});
@@ -407,6 +421,7 @@ export function App() {
     setProgress(null);
     setPlan(null);
     setPendingPlan(null);
+    setStreaming(null);
   }
 
   function onKeyDown(ev: KeyboardEvent): void {
@@ -459,6 +474,11 @@ export function App() {
         {turns.map((t, i) => (
           <TurnView key={i} turn={t} />
         ))}
+        {streaming !== null && (
+          <div class="msg assistant">
+            <Markdown text={streaming || '…'} />
+          </div>
+        )}
         {plan && plan.steps.length > 0 && <PlanChecklist plan={plan} />}
         {progress && <ProgressBanner progress={progress} />}
         {pendingConfirms.length > 0 && (
@@ -576,6 +596,11 @@ export function App() {
           }}
         />
       )}
+      {view === 'memory' && (
+        <PageOverlay title={PAGE_LABELS.memory} onClose={() => setView('closed')}>
+          <MemorySection />
+        </PageOverlay>
+      )}
       {view === 'logs' && (
         <PageOverlay title={PAGE_LABELS.logs} onClose={() => setView('closed')}>
           <LogsSection
@@ -610,6 +635,12 @@ function MenuDropdown({ onPick }: { onPick: (target: View) => void }): preact.JS
       <button class="menu-item" role="menuitem" onClick={() => onPick('history')}>
         <IconClock size={16} class="menu-icon" />
         <span>历史会话</span>
+      </button>
+      <button class="menu-item" role="menuitem" onClick={() => onPick('memory')}>
+        <span class="menu-icon" style={{ width: 16, textAlign: 'center' }}>
+          🧠
+        </span>
+        <span>记忆</span>
       </button>
       <button class="menu-item" role="menuitem" onClick={() => onPick('logs')}>
         <IconTerminal size={16} class="menu-icon" />
@@ -777,6 +808,82 @@ function WriteConfirmCard({
           取消
         </button>
       </div>
+    </div>
+  );
+}
+
+/** Long-term memory management page (R4): list + delete saved user facts. */
+function MemorySection(): preact.JSX.Element {
+  const [items, setItems] = useState<MemoryFact[]>([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      try {
+        const r = (await chrome.runtime.sendMessage({
+          type: 'LIST_MEMORIES',
+        } satisfies ListMemoriesReq)) as ListMemoriesResp | undefined;
+        if (alive) setItems(r?.memories ?? []);
+      } catch {
+        if (alive) setItems([]);
+      }
+      if (alive) setLoading(false);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+  function del(id: string): void {
+    void chrome.runtime
+      .sendMessage({ type: 'DELETE_MEMORY', id } satisfies DeleteMemoryReq)
+      .catch(() => {});
+    setItems((cur) => cur.filter((m) => m.id !== id));
+  }
+  return (
+    <div style={{ padding: '4px 2px', fontSize: 13 }}>
+      <p style={{ opacity: 0.7, marginTop: 0 }}>
+        Agent 在对话里调用 remember 时记下的用户长期偏好 / 事实，每次会话开始时注入上下文。
+      </p>
+      {loading ? (
+        <div style={{ opacity: 0.6 }}>加载中…</div>
+      ) : items.length === 0 ? (
+        <div style={{ opacity: 0.6 }}>还没有长期记忆。</div>
+      ) : (
+        <ul
+          style={{
+            listStyle: 'none',
+            margin: 0,
+            padding: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 6,
+          }}
+        >
+          {items.map((m) => (
+            <li
+              key={m.id}
+              style={{
+                display: 'flex',
+                gap: 8,
+                alignItems: 'flex-start',
+                padding: '6px 8px',
+                border: '1px solid rgba(127,127,127,0.2)',
+                borderRadius: 6,
+              }}
+            >
+              <span style={{ flex: 1 }}>{m.text}</span>
+              <button
+                class="ghost-btn"
+                title="删除"
+                onClick={() => del(m.id)}
+                style={{ fontSize: 12 }}
+              >
+                删除
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
