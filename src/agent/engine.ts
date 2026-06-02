@@ -15,8 +15,9 @@
  * / etc.) now live here.
  */
 
-import type { ParsedCommand, ToolTrace } from '../messages';
+import type { ParsedCommand, ToolTrace, PlanDecision } from '../messages';
 import type { SessionState } from './session';
+import type { PlanState } from './plan';
 
 export interface ToolExecResult {
   ok: boolean;
@@ -29,10 +30,14 @@ export type SessionDoneReason =
   | 'no_more_commands'
   | 'done_signal'
   | 'max_iterations'
+  // Graceful pause: hit the step/token budget but made progress. Resumable —
+  // the session binding is kept and the next user message continues with full
+  // context. NOT an error. See docs/agent-harness.md §10.2.
+  | 'checkpoint'
   | 'error'
   | 'user_abort';
 
-export type IterationPhase = 'starting' | 'injecting' | 'awaiting' | 'completed';
+export type IterationPhase = 'starting' | 'injecting' | 'awaiting' | 'streaming' | 'completed';
 
 export type OrchEvent =
   | {
@@ -49,11 +54,26 @@ export type OrchEvent =
       iteration: number;
       iterationId: string;
       phase: IterationPhase;
+      /** Visible chars so far — only set while phase==='streaming'. */
+      textLen?: number;
     }
   | {
       type: 'session_done';
       reason: SessionDoneReason;
       error?: string;
+    }
+  // Inline, non-fatal status the loop wants the user to see (e.g. a checkpoint
+  // or anti-thrash break). The SW forwards it as a SESSION_NOTICE.
+  | {
+      type: 'notice';
+      level: 'info' | 'warning' | 'error';
+      text: string;
+    }
+  // The living plan/todo changed; the SW forwards it as PLAN_UPDATED so the
+  // SidePanel re-renders its checklist.
+  | {
+      type: 'plan_updated';
+      plan: PlanState;
     };
 
 export interface EngineContext {
@@ -63,11 +83,19 @@ export interface EngineContext {
   signal: AbortSignal;
   /** Follow-up turn inside an existing session. */
   continuation?: boolean;
+  /** Plan mode for this run; 'plan' = research read-only → propose → approve →
+   * execute. Defaults to 'chat' (execute directly). */
+  mode?: 'chat' | 'plan';
   /** Emit a UI event. */
   emit(evt: OrchEvent): void;
   /** Run a tool by `site__name`. Shared dispatcher: per-site tab management,
    * pacing, and write-confirm gating live behind this. */
   executeTool(opts: { tool: string; args: Record<string, unknown> }): Promise<ToolExecResult>;
+  /** Ask the user to approve a proposed plan (plan mode). Resolves with their
+   * decision; rejects (decision:'reject') on timeout / panel close. */
+  requestPlanDecision(plan: PlanState): Promise<PlanDecision>;
+  /** Drain any messages the user injected mid-run (steering); [] if none. */
+  takeSteerMessages(): string[];
 }
 
 export interface AgentEngine {

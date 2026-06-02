@@ -16,8 +16,8 @@
  * removed when the "zero API key" mode was dropped.
  */
 
-import { openAiToolsFromRegistry } from '../tools/manifest';
-import { systemPromptApi } from './api-system-prompt';
+import { openAiToolsFromRegistry, lookupAdapter } from '../tools/manifest';
+import { systemPromptApi, systemPromptPlan, systemPromptSubagent } from './api-system-prompt';
 import { resolveSlots, type LlmProfile } from '../config/llm-config';
 import { visionDescribe, generateImage } from './specialist';
 import { appendTurn, saveSession } from './session';
@@ -25,12 +25,31 @@ import type { AgentEngine, EngineContext, SessionDoneReason } from './engine';
 import type { ApiMessage, ContentPart, ToolCall } from './api-types';
 import { collectImageRefs, stripDataUrls, isDataUrl } from './tool-images';
 import { log, warn, error as logError } from '../runtime/log';
+import {
+  DEFAULT_RETRY_POLICY,
+  isRetriableNetworkError,
+  isRetriableStatus,
+  parseRetryAfter,
+  retryDelayMs,
+  sleep,
+  ThrashTracker,
+  toolCallKey,
+  type RetryPolicy,
+} from './resilience';
+import { DEFAULT_BUDGET, budgetVerdict, renderBudgetNote, shouldCompact } from './budget';
+import { applyCompaction, buildCompactionMessages, findCompactionBoundary } from './compaction';
+import { parsePlanSteps, planProgress, renderPlanBlock, seedPlan } from './plan';
+import { createStreamAccumulator, parseSSEChunk } from './stream';
+import { newRunMetrics, renderRunSummary } from './metrics';
+import { addMemory, listMemories, renderMemoryBlock } from './memory-store';
 
-const DEFAULT_MAX_ITERATIONS = 12;
 const MAX_TOOL_RESULT_CHARS = 64_000;
 /** Cap images fed to the model per turn (vision tokens are expensive, and a
  * turn with several image-returning tools could otherwise balloon). */
 const MAX_VISION_IMAGES_PER_TURN = 8;
+/** Stream the main assistant turn (SSE) for live feedback. Flip off if a
+ * provider's endpoint doesn't support streaming / stream_options. */
+const STREAM_MAIN_TURN = true;
 
 /** Model-driven vision: a pseudo-tool offered only to vision-capable profiles.
  * Tool results keep image URLs in their TEXT (as data); when the model decides
@@ -75,6 +94,110 @@ const GENERATE_IMAGE_TOOL = {
         size: { type: 'string', description: '可选:尺寸,如 1024x1024' },
       },
       required: ['prompt'],
+    },
+  },
+};
+
+/** Living todo/plan tool (Phase 1) — the model maintains a checklist for
+ * multi-step tasks (TodoWrite semantics: pass the FULL step list each call).
+ * Intercepted by the engine, never dispatched. */
+const UPDATE_PLAN_TOOL = {
+  type: 'function' as const,
+  function: {
+    name: 'update_plan',
+    description:
+      '维护当前任务的待办清单(todo)。任务有 3 步以上时强烈建议使用:先列出步骤,再随进展更新。规则:每次调用传入【完整】的步骤列表(不是增量);开始做某步前标 in_progress,做完立刻标 completed;任何时刻最多只有一个 in_progress。这能帮你在长任务里不跑偏。',
+    parameters: {
+      type: 'object',
+      properties: {
+        steps: {
+          type: 'array',
+          description: '完整的步骤列表,按执行顺序',
+          items: {
+            type: 'object',
+            properties: {
+              title: { type: 'string', description: '步骤简述' },
+              status: {
+                type: 'string',
+                enum: ['pending', 'in_progress', 'completed'],
+                description: '该步骤状态',
+              },
+              activeForm: {
+                type: 'string',
+                description: '可选:进行时描述,如「正在抓取首页」',
+              },
+            },
+            required: ['title', 'status'],
+          },
+        },
+      },
+      required: ['steps'],
+    },
+  },
+};
+
+/** submit_plan (Phase 2 plan mode) — the model proposes a stepwise plan for the
+ * user to approve before leaving the read-only planning phase. Intercepted. */
+const SUBMIT_PLAN_TOOL = {
+  type: 'function' as const,
+  function: {
+    name: 'submit_plan',
+    description:
+      '提交一个分步执行计划给用户审批(规划模式)。研究清楚后调用:goal 为一句话目标,steps 为有序步骤清单(每步一句话、具体可执行,写操作要显式列为步骤)。用户批准后你才进入执行阶段。',
+    parameters: {
+      type: 'object',
+      properties: {
+        goal: { type: 'string', description: '一句话目标' },
+        steps: {
+          type: 'array',
+          description: '有序的步骤清单',
+          items: { type: 'string' },
+        },
+      },
+      required: ['goal', 'steps'],
+    },
+  },
+};
+
+/** spawn_subagent (Phase 4) — delegate a bounded subtask to an isolated-context
+ * sub-agent and get back only its text digest, so bulky intermediate data never
+ * enters the main conversation. Read-only, serial, no nesting. Intercepted. */
+const SUBAGENT_TOOL = {
+  type: 'function' as const,
+  function: {
+    name: 'spawn_subagent',
+    description:
+      '把一个【有界的子任务】(如「抓取并对比这 20 条笔记」)交给一个隔离上下文的子 agent 去做,只拿回它的文字结论。适合会产生大量中间数据的子任务——这样主对话不会被原始数据撑爆。子 agent 只读、串行、不能再派生子 agent。',
+    parameters: {
+      type: 'object',
+      properties: {
+        task: {
+          type: 'string',
+          description: '交给子 agent 的具体子任务(要自包含——它看不到主对话历史)',
+        },
+        allowed_tools: {
+          type: 'array',
+          items: { type: 'string' },
+          description: '可选:限制子 agent 只能用这些工具(全名,如 xiaohongshu__feed)',
+        },
+      },
+      required: ['task'],
+    },
+  },
+};
+
+/** remember (long-term memory) — persist a durable user fact/preference across
+ * sessions. Intercepted; recalled into the system prompt on future runs. */
+const REMEMBER_TOOL = {
+  type: 'function' as const,
+  function: {
+    name: 'remember',
+    description:
+      '把一条关于用户的【长期事实或偏好】记下来,跨会话保留(例如「用户常用的小红书账号是 X」「用户偏好简洁的回答」)。只记真正长期有用的;一次一条、简短。不要记一次性的任务细节或临时信息。',
+    parameters: {
+      type: 'object',
+      properties: { fact: { type: 'string', description: '要记住的一条简短事实/偏好' } },
+      required: ['fact'],
     },
   },
 };
@@ -330,7 +453,13 @@ async function chatCompletion(opts: {
   baseUrl: string;
   body: Record<string, unknown>;
   signal?: AbortSignal;
+  /** Bounded-retry policy for transient faults; defaults to DEFAULT_RETRY_POLICY. */
+  policy?: RetryPolicy;
+  /** Stream the response (SSE) and call onText with the growing content. */
+  stream?: boolean;
+  onText?: (text: string) => void;
 }): Promise<ChatCompletionResponse> {
+  const policy = opts.policy ?? DEFAULT_RETRY_POLICY;
   const url = `${opts.baseUrl.replace(/\/$/, '')}/chat/completions`;
   log('api', `→ POST ${url}`, {
     model: opts.body.model,
@@ -344,31 +473,111 @@ async function chatCompletion(opts: {
   if (hasImageContent(opts.body.messages)) {
     log('api', '→ vision request body', redactBodyForLog(opts.body));
   }
-  const t0 = Date.now();
-  const resp = await fetch(url, {
+  const reqBody = opts.stream
+    ? { ...opts.body, stream: true, stream_options: { include_usage: true } }
+    : opts.body;
+  const init: RequestInit = {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${opts.apiKey}`,
     },
-    body: JSON.stringify(opts.body),
+    body: JSON.stringify(reqBody),
     signal: opts.signal,
-  });
-  const elapsed = Date.now() - t0;
-  if (!resp.ok) {
-    const text = await resp.text();
-    logError('api', `← ${resp.status} (${elapsed}ms)`, { body: text.slice(0, 1000) });
-    throw new Error(`LLM API error ${resp.status}: ${text.slice(0, 500)}`);
+  };
+
+  // Bounded retry with backoff. A single transient fault (network blip, 429,
+  // 5xx) used to kill the WHOLE session via finish('error') — fatal for a long
+  // loop where step 25 hits one hiccup. We retry transient faults only: a 4xx
+  // (bad request / auth) won't self-heal so it throws straight through, and an
+  // AbortError (user hit Stop) is never retried. See resilience.ts / §10.1.
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < policy.maxAttempts; attempt++) {
+    const isLast = attempt === policy.maxAttempts - 1;
+    const t0 = Date.now();
+    try {
+      const resp = await fetch(url, init);
+      const elapsed = Date.now() - t0;
+      if (!resp.ok) {
+        const text = await resp.text();
+        if (isRetriableStatus(resp.status) && !isLast) {
+          const delay = retryDelayMs(attempt, policy, parseRetryAfter(resp.headers.get('retry-after')));
+          warn(
+            'api',
+            `← ${resp.status} (${elapsed}ms) — 第 ${attempt + 1}/${policy.maxAttempts} 次,${delay}ms 后重试`,
+            { body: text.slice(0, 300) },
+          );
+          await sleep(delay, opts.signal);
+          continue;
+        }
+        // Non-retriable (other 4xx) or out of attempts: surface the real error.
+        // This is a plain Error, so the catch below won't mistake it for a
+        // retriable network fault.
+        logError('api', `← ${resp.status} (${elapsed}ms)`, { body: text.slice(0, 1000) });
+        throw new Error(`LLM API error ${resp.status}: ${text.slice(0, 500)}`);
+      }
+      if (opts.stream && resp.body) {
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        const acc = createStreamAccumulator();
+        let buf = '';
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const { events, rest } = parseSSEChunk(buf);
+          buf = rest;
+          for (const ev of events) acc.push(ev);
+          if (events.length && opts.onText) opts.onText(acc.result().content);
+        }
+        const a = acc.result();
+        log('api', `← 200 stream (${elapsed}ms)${attempt > 0 ? ` (重试后)` : ''}`, {
+          finish: a.finish_reason,
+          textLen: a.content.length,
+          toolCalls: a.tool_calls.length,
+          usage: a.usage,
+        });
+        return {
+          choices: [
+            {
+              message: {
+                role: 'assistant',
+                content: a.content || null,
+                reasoning_content: a.reasoning_content || null,
+                tool_calls: a.tool_calls.length ? a.tool_calls : undefined,
+              },
+              finish_reason: a.finish_reason ?? 'stop',
+            },
+          ],
+          usage: a.usage,
+        };
+      }
+      const json = (await resp.json()) as ChatCompletionResponse;
+      log('api', `← 200 (${elapsed}ms)${attempt > 0 ? ` (第 ${attempt} 次重试后成功)` : ''}`, {
+        finish: json.choices?.[0]?.finish_reason,
+        textLen: json.choices?.[0]?.message?.content?.length ?? 0,
+        thinkingLen: json.choices?.[0]?.message?.reasoning_content?.length ?? 0,
+        toolCalls: json.choices?.[0]?.message?.tool_calls?.length ?? 0,
+        usage: json.usage,
+      });
+      return json;
+    } catch (e) {
+      // Stop pressed → propagate at once, never retry.
+      if (opts.signal?.aborted || (e instanceof Error && e.name === 'AbortError')) throw e;
+      lastErr = e;
+      if (isRetriableNetworkError(e) && !isLast) {
+        const delay = retryDelayMs(attempt, policy);
+        warn('api', `网络错误 — 第 ${attempt + 1}/${policy.maxAttempts} 次,${delay}ms 后重试`, {
+          err: e instanceof Error ? e.message : String(e),
+        });
+        await sleep(delay, opts.signal);
+        continue;
+      }
+      throw e; // non-retriable (incl. the LLM API error thrown above) or exhausted
+    }
   }
-  const json = (await resp.json()) as ChatCompletionResponse;
-  log('api', `← 200 (${elapsed}ms)`, {
-    finish: json.choices?.[0]?.finish_reason,
-    textLen: json.choices?.[0]?.message?.content?.length ?? 0,
-    thinkingLen: json.choices?.[0]?.message?.reasoning_content?.length ?? 0,
-    toolCalls: json.choices?.[0]?.message?.tool_calls?.length ?? 0,
-    usage: json.usage,
-  });
-  return json;
+  /* loop always returns or throws above; this satisfies the type checker */
+  throw lastErr ?? new Error('chatCompletion: 重试耗尽');
 }
 
 export const apiEngine: AgentEngine = {
@@ -376,10 +585,12 @@ export const apiEngine: AgentEngine = {
 
   async run(ctx: EngineContext): Promise<void> {
     const { session } = ctx;
+    const metrics = newRunMetrics(Date.now());
 
     function finish(reason: SessionDoneReason, err?: string): void {
       session.status = reason === 'error' ? 'error' : reason === 'user_abort' ? 'aborted' : 'idle';
       void saveSession(session);
+      log('metrics', renderRunSummary(metrics, Date.now(), reason));
       ctx.emit({ type: 'session_done', reason, error: err });
       log('api', `session=${session.id} done`, { reason, err });
     }
@@ -415,8 +626,6 @@ export const apiEngine: AgentEngine = {
     session.status = 'running';
     session.iterations = 0;
 
-    const maxIter = DEFAULT_MAX_ITERATIONS;
-
     // Persist the user turn for the history drawer, and seed the OpenAI message
     // array (continuing prior turns if any).
     appendTurn(session, { role: 'user', text: ctx.userText, ts: Date.now() });
@@ -439,6 +648,10 @@ export const apiEngine: AgentEngine = {
       historyLen: messages.length,
     });
 
+    // Long-term memory recall: load the user's saved facts once and inject them
+    // into the system prompt for this whole run (both planning and execution).
+    const memoryBlock = renderMemoryBlock(await listMemories().catch(() => []));
+
     // Re-pull tools each iteration so a market install mid-conversation shows
     // up on the very next LLM call (no need to start a new session). Cheap —
     // building the schema array is sub-millisecond — and avoids stale tools
@@ -446,11 +659,380 @@ export const apiEngine: AgentEngine = {
     // Track the registry version we last reported, so a one-liner log only
     // fires when the set actually changed.
     let lastToolsCount = -1;
+    // Adaptive budget + anti-thrash (slice 2): the model is told its step
+    // budget so it paces itself; hitting the cap yields a graceful, resumable
+    // checkpoint instead of a bare max_iterations. A repeatedly-failing tool
+    // call breaks the loop instead of burning the whole budget.
+    const thrash = new ThrashTracker();
+    let lastPromptTokens = 0;
+    let verifiedOnce = false; // end-of-run plan-completion nudge fires at most once
+
+    // Structured-LLM compaction: when prompt tokens cross the soft limit,
+    // summarize the older half of the message array into one progress-ledger
+    // message so a long loop doesn't blow the context window. Mutates `messages`
+    // in place (the persisted reference stays valid). Best-effort — a failed
+    // summarizer sub-call just skips (the hard-token checkpoint is the backstop).
+    async function compactIfNeeded(): Promise<void> {
+      if (!shouldCompact(lastPromptTokens, DEFAULT_BUDGET)) return;
+      const idx = findCompactionBoundary(messages);
+      if (idx < 2) return;
+      const older = messages.slice(0, idx);
+      let resp: ChatCompletionResponse;
+      try {
+        resp = await chatCompletion({
+          apiKey: cfg.apiKey,
+          baseUrl: cfg.baseUrl,
+          signal: ctx.signal,
+          body: { model: cfg.model, messages: buildCompactionMessages(older), max_tokens: 1024 },
+        });
+      } catch (e) {
+        warn('api', 'compaction sub-call failed; skipping', e);
+        return;
+      }
+      const summary = resp.choices?.[0]?.message?.content ?? '';
+      if (!summary.trim()) return;
+      const removed = applyCompaction(messages, summary, idx);
+      if (removed <= 0) return;
+      metrics.compactions++;
+      lastPromptTokens = 0; // next real response re-measures
+      session.apiMessages = messages;
+      await saveSession(session);
+      log('api', `compacted ${removed} msgs → summary`, { summaryLen: summary.length });
+      ctx.emit({
+        type: 'notice',
+        level: 'info',
+        text: '已把较早的对话压缩成进度摘要,腾出上下文空间(继续执行)。',
+      });
+    }
+
+    // ── Plan mode: read-only planning phase ──────────────────────────────
+    // Research with read-only tools → submit_plan → user approval. On approval
+    // session.plan is set+approved and we fall through to the execution loop.
+    const PLAN_MAX_STEPS = 12;
+    let planError = '';
+    async function runPlanningPhase(): Promise<
+      'approved' | 'answered' | 'rejected' | 'error' | 'aborted'
+    > {
+      for (let pIter = 0; pIter < PLAN_MAX_STEPS; pIter++) {
+        if (ctx.signal.aborted) return 'aborted';
+        const iterationId = `${session.id}__plan${pIter}`;
+        ctx.emit({ type: 'iteration_progress', iteration: pIter, iterationId, phase: 'awaiting' });
+
+        // Read-only registry tools + submit_plan (+ vision). Write tools are
+        // filtered out so the planning phase truly cannot mutate anything.
+        const tools = [
+          ...openAiToolsFromRegistry().filter(
+            (t) => lookupAdapter(t.function.name)?.access !== 'write',
+          ),
+          SUBMIT_PLAN_TOOL,
+          ...(hasVisionTool ? [VIEW_IMAGE_TOOL] : []),
+        ];
+
+        let resp: ChatCompletionResponse;
+        try {
+          resp = await chatCompletion({
+            apiKey: cfg.apiKey,
+            baseUrl: cfg.baseUrl,
+            signal: ctx.signal,
+            body: {
+              model: cfg.model,
+              messages: [{ role: 'system', content: systemPromptPlan() + memoryBlock }, ...messages],
+              tools,
+              tool_choice: 'auto',
+              max_tokens: 4096,
+            },
+          });
+        } catch (e) {
+          if (ctx.signal.aborted) return 'aborted';
+          logError('api', 'planning chatCompletion failed', e);
+          planError = e instanceof Error ? e.message : String(e);
+          return 'error';
+        }
+        lastPromptTokens = resp.usage?.prompt_tokens ?? lastPromptTokens;
+        const choice = resp.choices?.[0];
+        if (!choice) {
+          planError = 'LLM 没有返回任何 choices';
+          return 'error';
+        }
+        const msg = choice.message;
+        const text = msg.content ?? '';
+        const thinking = msg.reasoning_content ?? undefined;
+        const toolCalls = msg.tool_calls;
+        messages.push({
+          role: 'assistant',
+          content: msg.content ?? '',
+          ...(thinking ? { reasoning_content: thinking } : {}),
+          ...(toolCalls?.length ? { tool_calls: toolCalls } : {}),
+        });
+        appendTurn(session, {
+          role: 'assistant',
+          cleanedText: text,
+          reasoningText: thinking,
+          commands: [],
+          iteration: pIter,
+          ts: Date.now(),
+        });
+        ctx.emit({
+          type: 'assistant_turn',
+          iteration: pIter,
+          cleanedText: text,
+          reasoningText: thinking,
+          commands: [],
+        });
+        ctx.emit({ type: 'iteration_progress', iteration: pIter, iterationId, phase: 'completed' });
+        session.apiMessages = messages;
+        await saveSession(session);
+
+        // Answered directly without a plan → a simple task; treat as done.
+        if (!toolCalls || toolCalls.length === 0) return 'answered';
+
+        for (const call of toolCalls) {
+          if (ctx.signal.aborted) return 'aborted';
+          let args: Record<string, unknown> = {};
+          try {
+            args = JSON.parse(call.function.arguments || '{}');
+          } catch {
+            warn('api', `bad JSON arguments for ${call.function.name}`, {
+              arguments: call.function.arguments,
+            });
+          }
+          const traceId = `t_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+          const startTrace = {
+            id: traceId,
+            action: 'execute_tool' as const,
+            tool: call.function.name,
+            args,
+            status: 'started' as const,
+          };
+          ctx.emit({ type: 'tool_trace', trace: startTrace });
+          appendTurn(session, { role: 'tool_trace', trace: startTrace, ts: Date.now() });
+
+          const emitFinal = (
+            status: 'completed' | 'failed',
+            extra: { result?: unknown; error?: string } = {},
+          ): void => {
+            const t = {
+              id: traceId,
+              action: 'execute_tool' as const,
+              tool: call.function.name,
+              args,
+              status,
+              durationMs: 0,
+              ...extra,
+            };
+            ctx.emit({ type: 'tool_trace', trace: t });
+            appendTurn(session, { role: 'tool_trace', trace: t, ts: Date.now() });
+          };
+          const ackTool = async (content: string): Promise<void> => {
+            messages.push({ role: 'tool', tool_call_id: call.id, content });
+            session.apiMessages = messages;
+            await saveSession(session);
+          };
+
+          // submit_plan → approval gate.
+          if (call.function.name === 'submit_plan') {
+            const goal = typeof args.goal === 'string' ? args.goal : '';
+            const proposed = seedPlan(goal, (args as { steps?: unknown[] }).steps ?? [], Date.now());
+            if (proposed.steps.length === 0) {
+              await ackTool('计划为空,请给出具体的步骤列表。');
+              emitFinal('failed', { error: 'empty plan' });
+              continue;
+            }
+            const decision = await ctx.requestPlanDecision(proposed);
+            if (ctx.signal.aborted) return 'aborted';
+            if (decision.decision === 'approve') {
+              const steps =
+                decision.editedSteps && decision.editedSteps.length
+                  ? seedPlan(goal, decision.editedSteps, Date.now()).steps
+                  : proposed.steps;
+              session.plan = { goal: proposed.goal, steps, updatedAt: Date.now(), approved: true };
+              ctx.emit({ type: 'plan_updated', plan: session.plan });
+              await ackTool(
+                `用户已批准计划(${steps.length} 步)。现在进入执行阶段,按计划逐步执行,并用 update_plan 更新进度。`,
+              );
+              emitFinal('completed', { result: session.plan });
+              return 'approved';
+            }
+            const fb = decision.feedback?.trim();
+            if (!fb) {
+              await ackTool('用户取消了该计划。');
+              emitFinal('completed');
+              return 'rejected';
+            }
+            await ackTool(`用户未批准,反馈:${fb}。请据此修改后重新 submit_plan。`);
+            emitFinal('completed');
+            continue;
+          }
+
+          // Block writes during planning (belt-and-suspenders; also filtered out).
+          if (lookupAdapter(call.function.name)?.access === 'write') {
+            await ackTool('规划阶段为只读,不能执行写操作。请把它写进计划,批准后再执行。');
+            emitFinal('failed', { error: 'write blocked in planning' });
+            continue;
+          }
+
+          // Read-only vision sub-call during planning.
+          if (call.function.name === 'view_image' || call.function.name === 'generate_image') {
+            const sr = await handleSpecialistCall(call.function.name, args, {
+              visionProfile,
+              visionInline,
+              imageProfile,
+              signal: ctx.signal,
+            });
+            await ackTool(sr.toolContent);
+            emitFinal(sr.ok ? 'completed' : 'failed', {
+              result: sr.traceResult,
+              error: sr.ok ? undefined : sr.toolContent,
+            });
+            continue;
+          }
+
+          // Read tool — execute via the dispatcher.
+          const r = await ctx.executeTool({ tool: call.function.name, args });
+          const rawResult = stripDataUrls(
+            r.ok
+              ? typeof r.result === 'string'
+                ? r.result
+                : safeStringify(r.result)
+              : `错误: ${r.error ?? '(unknown)'}`,
+          );
+          await ackTool(truncate(rawResult));
+          emitFinal(r.ok ? 'completed' : 'failed', { result: r.result, error: r.error });
+        }
+      }
+      planError = '规划阶段未在步数内产出可批准的计划';
+      return 'error';
+    }
+
+    // ── Sub-agent (Phase 4): an isolated-context bounded subtask. Its messages
+    // never touch the main array; only its final text digest is returned to the
+    // main loop. Read-only + serial (the tab/CDP world isn't concurrency-safe).
+    const SUBAGENT_MAX_STEPS = 15;
+    async function runSubagent(task: string, allowedTools?: string[]): Promise<string> {
+      const allow = new Set(allowedTools ?? []);
+      const subTools = openAiToolsFromRegistry().filter((t) => {
+        if (lookupAdapter(t.function.name)?.access === 'write') return false; // read-only
+        if (allow.size && !allow.has(t.function.name)) return false;
+        return true;
+      });
+      const subMessages: ApiMessage[] = [{ role: 'user', content: task }];
+      let last = '';
+      for (let i = 0; i < SUBAGENT_MAX_STEPS; i++) {
+        if (ctx.signal.aborted) return last || '(子 agent 被中断)';
+        let resp: ChatCompletionResponse;
+        try {
+          resp = await chatCompletion({
+            apiKey: cfg.apiKey,
+            baseUrl: cfg.baseUrl,
+            signal: ctx.signal,
+            body: {
+              model: cfg.model,
+              messages: [{ role: 'system', content: systemPromptSubagent() }, ...subMessages],
+              tools: subTools,
+              tool_choice: 'auto',
+              max_tokens: 4096,
+            },
+          });
+        } catch (e) {
+          if (ctx.signal.aborted) return last || '(子 agent 被中断)';
+          return `子 agent 调用失败:${e instanceof Error ? e.message : String(e)}`;
+        }
+        const choice = resp.choices?.[0];
+        if (!choice) return last || '(子 agent 无返回)';
+        const msg = choice.message;
+        if (msg.content) last = msg.content;
+        const toolCalls = msg.tool_calls;
+        subMessages.push({
+          role: 'assistant',
+          content: msg.content ?? '',
+          ...(toolCalls?.length ? { tool_calls: toolCalls } : {}),
+        });
+        if (!toolCalls || toolCalls.length === 0) return last.trim() || '(子 agent 无结论)';
+        for (const call of toolCalls) {
+          if (ctx.signal.aborted) return last || '(子 agent 被中断)';
+          let a: Record<string, unknown> = {};
+          try {
+            a = JSON.parse(call.function.arguments || '{}');
+          } catch {
+            /* ignore bad args */
+          }
+          // No writes, no recursion inside a sub-agent.
+          if (
+            call.function.name === 'spawn_subagent' ||
+            lookupAdapter(call.function.name)?.access === 'write'
+          ) {
+            subMessages.push({
+              role: 'tool',
+              tool_call_id: call.id,
+              content: '子 agent 不能执行该工具(写操作 / 嵌套子 agent 已禁止)。',
+            });
+            continue;
+          }
+          const r = await ctx.executeTool({ tool: call.function.name, args: a });
+          const txt = stripDataUrls(
+            r.ok
+              ? typeof r.result === 'string'
+                ? r.result
+                : safeStringify(r.result)
+              : `错误: ${r.error ?? '(unknown)'}`,
+          );
+          subMessages.push({ role: 'tool', tool_call_id: call.id, content: truncate(txt) });
+        }
+      }
+      return last.trim() || '(子 agent 达到步数上限,未得出明确结论)';
+    }
 
     try {
-      for (let iter = 0; iter < maxIter; iter++) {
+      if (ctx.mode === 'plan') {
+        const planResult = await runPlanningPhase();
+        if (planResult === 'aborted') return finish('user_abort');
+        if (planResult === 'answered') return finish('no_more_commands');
+        if (planResult === 'rejected') {
+          ctx.emit({ type: 'notice', level: 'info', text: '已取消(计划未获批准)。' });
+          return finish('no_more_commands');
+        }
+        if (planResult === 'error') return finish('error', planError || '规划阶段失败');
+        // 'approved' → fall through to the execution loop with session.plan set.
+      }
+      for (let iter = 0; ; iter++) {
         if (ctx.signal.aborted) return finish('user_abort');
+        // Steering: fold in any messages the user injected mid-run. Safe at the
+        // top of an iteration — all prior tool_calls are answered, so inserting
+        // a user message can't orphan a tool_call.
+        const steers = ctx.takeSteerMessages();
+        if (steers.length) {
+          for (const s of steers) {
+            messages.push({ role: 'user', content: s });
+            appendTurn(session, { role: 'user', text: s, ts: Date.now() });
+            log('api', `steered: ${s.slice(0, 60)}`);
+          }
+          session.apiMessages = messages;
+          await saveSession(session);
+        }
+        // Soft token limit → summarize older history before the next call so a
+        // long loop doesn't blow the context window (slice 3).
+        await compactIfNeeded();
+        // Budget gate — checkpoint (resumable) rather than dead-stop.
+        const verdict = budgetVerdict(iter, lastPromptTokens, DEFAULT_BUDGET);
+        if (verdict.stop) {
+          const why =
+            verdict.reason === 'steps'
+              ? `已到本轮步数上限(${DEFAULT_BUDGET.maxSteps} 步)`
+              : '上下文已接近模型上限';
+          log('api', `session=${session.id} checkpoint`, {
+            reason: verdict.reason,
+            iter,
+            lastPromptTokens,
+          });
+          ctx.emit({
+            type: 'notice',
+            level: 'info',
+            text: `${why},先在此暂存进度。发送「继续」可接着完成(保留上下文)。`,
+          });
+          return finish('checkpoint');
+        }
         session.iterations = iter;
+        metrics.steps = iter + 1;
         const iterationId = `${session.id}__api${iter}`;
 
         ctx.emit({ type: 'iteration_progress', iteration: iter, iterationId, phase: 'awaiting' });
@@ -458,6 +1040,9 @@ export const apiEngine: AgentEngine = {
         // Offer specialist tools only for configured capability slots.
         const tools = [
           ...openAiToolsFromRegistry(),
+          UPDATE_PLAN_TOOL,
+          SUBAGENT_TOOL,
+          REMEMBER_TOOL,
           ...(hasVisionTool ? [VIEW_IMAGE_TOOL] : []),
           ...(hasImageTool ? [GENERATE_IMAGE_TOOL] : []),
         ];
@@ -469,12 +1054,26 @@ export const apiEngine: AgentEngine = {
           lastToolsCount = tools.length;
         }
 
+        let lastStreamLen = 0;
         let resp: ChatCompletionResponse;
         try {
           resp = await chatCompletion({
             apiKey: cfg.apiKey,
             baseUrl: cfg.baseUrl,
             signal: ctx.signal,
+            stream: STREAM_MAIN_TURN,
+            onText: (t) => {
+              if (t.length - lastStreamLen >= 24) {
+                lastStreamLen = t.length;
+                ctx.emit({
+                  type: 'iteration_progress',
+                  iteration: iter,
+                  iterationId,
+                  phase: 'streaming',
+                  textLen: t.length,
+                });
+              }
+            },
             body: {
               model: cfg.model,
               messages: [
@@ -482,7 +1081,12 @@ export const apiEngine: AgentEngine = {
                   role: 'system',
                   content:
                     systemPromptApi() +
-                    specialistSystemNote({ vision: hasVisionTool, image: hasImageTool }),
+                    specialistSystemNote({ vision: hasVisionTool, image: hasImageTool }) +
+                    renderBudgetNote(iter, DEFAULT_BUDGET) +
+                    (session.plan
+                      ? renderPlanBlock(session.plan)
+                      : '\n\n多步任务(≥3 步)建议先用 update_plan 列出待办清单再开始。') +
+                    memoryBlock,
                 },
                 ...messages,
               ],
@@ -496,6 +1100,12 @@ export const apiEngine: AgentEngine = {
           logError('api', 'chatCompletion failed', e);
           return finish('error', e instanceof Error ? e.message : String(e));
         }
+
+        // Track real prompt-token usage (free, from the provider) for the
+        // budget gate + compaction trigger (slice 3).
+        lastPromptTokens = resp.usage?.prompt_tokens ?? lastPromptTokens;
+        metrics.promptTokens = lastPromptTokens;
+        metrics.completionTokens += resp.usage?.completion_tokens ?? 0;
 
         const choice = resp.choices?.[0];
         if (!choice) return finish('error', 'LLM 没有返回任何 choices');
@@ -532,13 +1142,40 @@ export const apiEngine: AgentEngine = {
         session.apiMessages = messages;
         await saveSession(session);
 
-        if (!toolCalls || toolCalls.length === 0) return finish('no_more_commands');
+        if (!toolCalls || toolCalls.length === 0) {
+          // Verify-with-evidence: if a plan was approved but steps remain, nudge
+          // the model to finish them (or explicitly mark them) — once per run,
+          // so it can't loop forever.
+          const prog = planProgress(session.plan);
+          if (!verifiedOnce && session.plan?.approved && prog.completed < prog.total) {
+            verifiedOnce = true;
+            const pending = session.plan.steps
+              .filter((s) => s.status !== 'completed')
+              .map((s) => `- ${s.title}`)
+              .join('\n');
+            messages.push({
+              role: 'user',
+              content: `你似乎要结束了,但计划还有未完成的步骤:\n${pending}\n请完成它们;若确已完成,请先用 update_plan 标记为 completed 再结束;若某步确实无需执行,也标记并简要说明原因。`,
+            });
+            appendTurn(session, {
+              role: 'user',
+              text: '[系统校验] 仍有未完成的计划步骤,请收尾',
+              ts: Date.now(),
+            });
+            ctx.emit({ type: 'notice', level: 'info', text: '检测到计划未完成,提醒模型收尾…' });
+            session.apiMessages = messages;
+            await saveSession(session);
+            continue;
+          }
+          return finish('no_more_commands');
+        }
 
         // Images collected from ALL tool results this turn. Pushed as ONE user
         // message AFTER the loop — interleaving a user message between tool
         // messages would break the "every tool_call_id answered contiguously
         // before the next non-tool message" contract when there are ≥2 calls.
         const turnImages: string[] = [];
+        let breaker: string | null = null;
 
         for (const call of toolCalls) {
           if (ctx.signal.aborted) return finish('user_abort');
@@ -575,6 +1212,119 @@ export const apiEngine: AgentEngine = {
             ts: Date.now(),
           });
 
+          // update_plan (Phase 1): intercepted — maintain the living todo list,
+          // push it to the UI, ack the model. Never goes through the dispatcher.
+          if (call.function.name === 'update_plan') {
+            const steps = parsePlanSteps((args as { steps?: unknown }).steps);
+            session.plan = {
+              ...(session.plan?.goal ? { goal: session.plan.goal } : {}),
+              steps,
+              updatedAt: Date.now(),
+            };
+            const prog = planProgress(session.plan);
+            ctx.emit({ type: 'plan_updated', plan: session.plan });
+            messages.push({
+              role: 'tool',
+              tool_call_id: call.id,
+              content: `已更新待办清单(${prog.completed}/${prog.total} 完成)。`,
+            });
+            const pTrace = {
+              id: traceId,
+              action: 'execute_tool' as const,
+              tool: call.function.name,
+              args,
+              status: 'completed' as const,
+              result: session.plan,
+              durationMs: 0,
+            };
+            ctx.emit({ type: 'tool_trace', trace: pTrace });
+            appendTurn(session, { role: 'tool_trace', trace: pTrace, ts: Date.now() });
+            session.apiMessages = messages;
+            await saveSession(session);
+            continue;
+          }
+
+          // spawn_subagent (Phase 4): run an isolated subtask, fold only its
+          // text digest into the main context. Intercepted; never dispatched.
+          if (call.function.name === 'spawn_subagent') {
+            const task = typeof args.task === 'string' ? args.task.trim() : '';
+            const allowed = Array.isArray((args as { allowed_tools?: unknown }).allowed_tools)
+              ? (args as { allowed_tools: unknown[] }).allowed_tools.filter(
+                  (x): x is string => typeof x === 'string',
+                )
+              : undefined;
+            if (!task) {
+              messages.push({ role: 'tool', tool_call_id: call.id, content: 'task 不能为空。' });
+              const t = {
+                id: traceId,
+                action: 'execute_tool' as const,
+                tool: call.function.name,
+                args,
+                status: 'failed' as const,
+                error: 'empty task',
+                durationMs: 0,
+              };
+              ctx.emit({ type: 'tool_trace', trace: t });
+              appendTurn(session, { role: 'tool_trace', trace: t, ts: Date.now() });
+              session.apiMessages = messages;
+              await saveSession(session);
+              continue;
+            }
+            ctx.emit({
+              type: 'notice',
+              level: 'info',
+              text: `🧵 子 agent 开始:${task.slice(0, 60)}`,
+            });
+            const subStart = Date.now();
+            const digest = await runSubagent(task, allowed);
+            metrics.subagents++;
+            messages.push({ role: 'tool', tool_call_id: call.id, content: digest });
+            const t = {
+              id: traceId,
+              action: 'execute_tool' as const,
+              tool: call.function.name,
+              args,
+              status: 'completed' as const,
+              result: { digestChars: digest.length },
+              durationMs: Date.now() - subStart,
+            };
+            ctx.emit({ type: 'tool_trace', trace: t });
+            appendTurn(session, { role: 'tool_trace', trace: t, ts: Date.now() });
+            ctx.emit({
+              type: 'notice',
+              level: 'info',
+              text: `🧵 子 agent 完成(${digest.length} 字)`,
+            });
+            session.apiMessages = messages;
+            await saveSession(session);
+            continue;
+          }
+
+          // remember (long-term memory): persist a user fact, ack the model.
+          if (call.function.name === 'remember') {
+            const fact = typeof args.fact === 'string' ? args.fact : '';
+            const saved = await addMemory(fact);
+            messages.push({
+              role: 'tool',
+              tool_call_id: call.id,
+              content: saved ? `已记住:${saved.text}` : '没有可记录的内容(fact 为空)。',
+            });
+            const t = {
+              id: traceId,
+              action: 'execute_tool' as const,
+              tool: call.function.name,
+              args,
+              status: (saved ? 'completed' : 'failed') as 'completed' | 'failed',
+              result: saved ?? undefined,
+              durationMs: 0,
+            };
+            ctx.emit({ type: 'tool_trace', trace: t });
+            appendTurn(session, { role: 'tool_trace', trace: t, ts: Date.now() });
+            session.apiMessages = messages;
+            await saveSession(session);
+            continue;
+          }
+
           // Specialist tools (view_image / generate_image) are intercepted here —
           // they don't go through the dispatcher; the engine routes them to the
           // capability slot's model.
@@ -601,10 +1351,14 @@ export const apiEngine: AgentEngine = {
             appendTurn(session, { role: 'tool_trace', trace: sTrace, ts: Date.now() });
             session.apiMessages = messages;
             await saveSession(session);
+            breaker = thrash.record(toolCallKey(call.function.name, args), sr.ok);
+            if (breaker) break;
             continue;
           }
 
           const r = await ctx.executeTool({ tool: call.function.name, args });
+          metrics.toolCalls++;
+          if (!r.ok) metrics.toolErrors++;
 
           // Auto-attach only DATA URLs (screenshots) from a tool result: their
           // base64 can't round-trip through a view_image tool-call argument, so
@@ -645,6 +1399,21 @@ export const apiEngine: AgentEngine = {
           appendTurn(session, { role: 'tool_trace', trace: traceFinal, ts: Date.now() });
           session.apiMessages = messages;
           await saveSession(session);
+          breaker = thrash.record(toolCallKey(call.function.name, args), r.ok);
+          if (breaker) break;
+        }
+
+        // Anti-thrash: the same call kept failing → stop instead of burning the
+        // rest of the budget. The current call is answered (its tool msg pushed);
+        // any unexecuted sibling calls are padded by sanitizeHistory on resume.
+        if (breaker) {
+          warn('api', `thrash breaker: ${breaker}`);
+          ctx.emit({
+            type: 'notice',
+            level: 'warning',
+            text: `${breaker} 已暂停;换个说法或补充信息后发送「继续」。`,
+          });
+          return finish('checkpoint');
         }
 
         // One image-bearing user message for the whole turn (after every tool
@@ -670,7 +1439,6 @@ export const apiEngine: AgentEngine = {
 
         if (choice.finish_reason !== 'tool_calls') return finish('no_more_commands');
       }
-      return finish('max_iterations');
     } finally {
       session.apiMessages = messages;
       await saveSession(session);

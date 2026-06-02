@@ -12,6 +12,7 @@
  */
 
 import type { LogEntry } from './runtime/log';
+import type { PlanState } from './agent/plan';
 
 export interface ParsedCommand {
   /** Raw JSON object parsed from an `<agent-command>` code block. Pre-history:
@@ -44,11 +45,22 @@ export interface UserMessageReq {
   type: 'USER_MESSAGE';
   sessionId: string;
   text: string;
+  /** 'plan' makes the agent research read-only, propose a plan for approval,
+   * then execute. 'chat' (default) executes directly. */
+  mode?: 'chat' | 'plan';
 }
 
 export interface AbortSessionReq {
   type: 'ABORT_SESSION';
   sessionId: string;
+}
+
+/** SidePanel → SW: inject a message into a RUNNING session so the agent folds
+ * it into its next turn (steering / course-correction) without restarting. */
+export interface SteerMessageReq {
+  type: 'STEER_MESSAGE';
+  sessionId: string;
+  text: string;
 }
 
 export interface RequestLogsReq {
@@ -124,6 +136,28 @@ export interface WriteConfirmResp {
   approved: boolean;
 }
 
+/** SW → SidePanel: ask the user to approve a proposed plan before the agent
+ * leaves the read-only planning phase and starts executing (plan mode). */
+export interface PlanDecisionReq {
+  type: 'PLAN_DECISION_REQ';
+  sessionId: string;
+  decisionId: string;
+  plan: PlanState;
+}
+
+/** SidePanel's reply. `reject` (incl. cancel / timeout) keeps the agent in
+ * planning if feedback is given, else ends the turn. `editedSteps` lets the
+ * user tweak the step list before approving. */
+export interface PlanDecisionResp {
+  type: 'PLAN_DECISION_RESP';
+  decisionId: string;
+  decision: 'approve' | 'reject';
+  editedSteps?: string[];
+  feedback?: string;
+}
+
+export type PlanDecision = Pick<PlanDecisionResp, 'decision' | 'editedSteps' | 'feedback'>;
+
 /* ───────── Service Worker → SidePanel ───────── */
 
 export interface AssistantTurnEvt {
@@ -148,7 +182,13 @@ export interface ToolTraceEvt {
 export interface SessionDoneEvt {
   type: 'SESSION_DONE';
   sessionId: string;
-  reason: 'no_more_commands' | 'done_signal' | 'max_iterations' | 'error' | 'user_abort';
+  reason:
+    | 'no_more_commands'
+    | 'done_signal'
+    | 'max_iterations'
+    | 'checkpoint'
+    | 'error'
+    | 'user_abort';
   error?: string;
   /** True when the session ended only because the SW was recycled, NOT a real
    * failure. The history is persisted in IDB, so the SidePanel must KEEP the
@@ -177,6 +217,14 @@ export interface SessionNoticeEvt {
   sessionId: string;
   level: 'info' | 'warning' | 'error';
   text: string;
+}
+
+/** SW → SidePanel: the agent's living plan/todo changed; re-render the
+ * checklist (Phase 1). */
+export interface PlanUpdatedEvt {
+  type: 'PLAN_UPDATED';
+  sessionId: string;
+  plan: PlanState;
 }
 
 export interface LogsResponse {
@@ -273,6 +321,7 @@ export interface AdaptersChangedEvt {
 export type Message =
   | UserMessageReq
   | AbortSessionReq
+  | SteerMessageReq
   | RequestLogsReq
   | GetSessionStateReq
   | ListSessionsReq
@@ -282,10 +331,13 @@ export type Message =
   | DeleteSessionReq
   | WriteConfirmReq
   | WriteConfirmResp
+  | PlanDecisionReq
+  | PlanDecisionResp
   | AssistantTurnEvt
   | ToolTraceEvt
   | SessionDoneEvt
   | SessionNoticeEvt
+  | PlanUpdatedEvt
   | IterationProgressEvt
   | LogsResponse
   | LogEntryEvt

@@ -32,8 +32,10 @@ import { executeAdapter } from '../tools/dispatcher';
 import { lookupAdapter } from '../tools/manifest';
 import { apiEngine } from '../agent/api-engine';
 import type { EngineContext, OrchEvent, ToolExecResult } from '../agent/engine';
+import type { PlanState } from '../agent/plan';
 import type {
   AbortSessionReq,
+  SteerMessageReq,
   AssistantTurnEvt,
   DeleteSessionReq,
   GetSessionReq,
@@ -46,11 +48,16 @@ import type {
   Message,
   RequestLogsReq,
   SessionDoneEvt,
+  SessionNoticeEvt,
+  PlanUpdatedEvt,
   SessionSummary,
   ToolTraceEvt,
   UserMessageReq,
   WriteConfirmReq,
   WriteConfirmResp,
+  PlanDecisionReq,
+  PlanDecisionResp,
+  PlanDecision,
   InstallAdapterReq,
   UninstallAdapterReq,
   SetAdapterEnabledReq,
@@ -95,6 +102,15 @@ const activeSessions = new Map<string, ActiveSession>();
  * false on decline / timeout / panel close. */
 const pendingConfirmations = new Map<string, { resolve: (approved: boolean) => void }>();
 const WRITE_CONFIRM_TIMEOUT_MS = 5 * 60 * 1000;
+
+/** SidePanel-bound plan-approval prompts (plan mode). Resolves with the user's
+ * decision; rejects on timeout / panel close. */
+const pendingPlanDecisions = new Map<string, { resolve: (d: PlanDecision) => void }>();
+const PLAN_DECISION_TIMEOUT_MS = 10 * 60 * 1000;
+
+/** Messages injected into a running session via STEER_MESSAGE, drained by the
+ * engine on its next turn. Keyed by sessionId. */
+const steerQueue = new Map<string, string[]>();
 
 /** Open keep-alive ports from extension pages (SidePanel). Originally we
  * relied SOLELY on an open port to pin the SW — but an IDLE connected port
@@ -241,6 +257,11 @@ chrome.runtime.onMessage.addListener((msg: unknown, _sender, sendResponse): bool
       sendResponse({ ok: true });
       return false;
     }
+    case 'STEER_MESSAGE': {
+      handleSteer(m as SteerMessageReq);
+      sendResponse({ ok: true });
+      return false;
+    }
     case 'REQUEST_LOGS': {
       sendResponse(handleRequestLogs(m as RequestLogsReq));
       return false;
@@ -272,6 +293,10 @@ chrome.runtime.onMessage.addListener((msg: unknown, _sender, sendResponse): bool
     }
     case 'WRITE_CONFIRM_RESP': {
       handleWriteConfirmResp(m as WriteConfirmResp);
+      return false;
+    }
+    case 'PLAN_DECISION_RESP': {
+      handlePlanDecisionResp(m as PlanDecisionResp);
       return false;
     }
     case 'LOG_ENTRY': {
@@ -320,7 +345,7 @@ async function handleUserMessage(m: UserMessageReq): Promise<void> {
     return;
   }
   const session = (await loadSession(m.sessionId)) ?? makeSession(m.sessionId);
-  await driveApiSession(session, m.text);
+  await driveApiSession(session, m.text, m.mode);
 }
 
 function handleAbort(m: AbortSessionReq): void {
@@ -328,6 +353,16 @@ function handleAbort(m: AbortSessionReq): void {
   if (!entry) return;
   log(SCOPE, `aborting session ${m.sessionId}`);
   entry.abort.abort();
+}
+
+/** Queue a steering message for a running session (the engine drains it on its
+ * next turn). Ignored if the session isn't currently being driven. */
+function handleSteer(m: SteerMessageReq): void {
+  if (!activeSessions.has(m.sessionId)) return;
+  const q = steerQueue.get(m.sessionId) ?? [];
+  q.push(m.text);
+  steerQueue.set(m.sessionId, q);
+  log(SCOPE, `steer queued for ${m.sessionId}`, { pending: q.length });
 }
 
 function handleRequestLogs(_m: RequestLogsReq): LogsResponse {
@@ -476,6 +511,41 @@ function requestWriteConfirmation(
   });
 }
 
+/** Ask the SidePanel to approve a proposed plan before the agent leaves the
+ * read-only planning phase (plan mode). Resolves with the decision; rejects on
+ * timeout / panel close. Mirrors requestWriteConfirmation. */
+function requestPlanDecision(sessionId: string, plan: PlanState): Promise<PlanDecision> {
+  const decisionId = `p_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+  log(SCOPE, `requesting plan decision`, { decisionId, steps: plan.steps.length });
+  return new Promise<PlanDecision>((resolve) => {
+    const timer = setTimeout(() => {
+      if (!pendingPlanDecisions.has(decisionId)) return;
+      pendingPlanDecisions.delete(decisionId);
+      warn(SCOPE, `plan-decision timeout ${decisionId}`);
+      resolve({ decision: 'reject' });
+    }, PLAN_DECISION_TIMEOUT_MS);
+    pendingPlanDecisions.set(decisionId, {
+      resolve: (d: PlanDecision) => {
+        clearTimeout(timer);
+        resolve(d);
+      },
+    });
+    const req: PlanDecisionReq = { type: 'PLAN_DECISION_REQ', sessionId, decisionId, plan };
+    sendToSidepanel(req);
+  });
+}
+
+function handlePlanDecisionResp(m: PlanDecisionResp): void {
+  const pending = pendingPlanDecisions.get(m.decisionId);
+  if (!pending) {
+    warn(SCOPE, `unmatched PLAN_DECISION_RESP decisionId=${m.decisionId}`);
+    return;
+  }
+  pendingPlanDecisions.delete(m.decisionId);
+  log(SCOPE, `plan decision resolved ${m.decisionId}`, { decision: m.decision });
+  pending.resolve({ decision: m.decision, editedSteps: m.editedSteps, feedback: m.feedback });
+}
+
 /* ───────── engine driver ───────── */
 
 /** Build the shared tool executor for a session: gates `write` adapters behind
@@ -504,7 +574,11 @@ function makeExecuteTool(
   };
 }
 
-async function driveApiSession(session: SessionState, userText: string): Promise<void> {
+async function driveApiSession(
+  session: SessionState,
+  userText: string,
+  mode?: 'chat' | 'plan',
+): Promise<void> {
   const abortCtl = new AbortController();
   activeSessions.set(session.id, { session, abort: abortCtl });
   startKeepalivePing(); // pin the SW for the whole turn (see startKeepalivePing)
@@ -512,8 +586,16 @@ async function driveApiSession(session: SessionState, userText: string): Promise
     session,
     userText,
     signal: abortCtl.signal,
+    mode,
     emit: (evt) => forwardOrchEvent(session.id, evt),
     executeTool: makeExecuteTool(session.id),
+    requestPlanDecision: (plan) => requestPlanDecision(session.id, plan),
+    takeSteerMessages: () => {
+      const q = steerQueue.get(session.id);
+      if (!q || q.length === 0) return [];
+      steerQueue.delete(session.id);
+      return q;
+    },
   };
   try {
     await apiEngine.run(ctx);
@@ -527,6 +609,7 @@ async function driveApiSession(session: SessionState, userText: string): Promise
     } satisfies SessionDoneEvt);
   } finally {
     activeSessions.delete(session.id);
+    steerQueue.delete(session.id);
     stopKeepalivePingIfIdle(); // release the SW once no session is running
     await saveSession(session);
   }
@@ -572,6 +655,7 @@ function forwardOrchEvent(sessionId: string, evt: OrchEvent): void {
         iterationId: evt.iterationId,
         iteration: evt.iteration,
         phase: evt.phase,
+        textLen: evt.textLen,
       };
       sendToSidepanel(out);
       break;
@@ -583,6 +667,21 @@ function forwardOrchEvent(sessionId: string, evt: OrchEvent): void {
         reason: evt.reason,
         error: evt.error,
       };
+      sendToSidepanel(out);
+      break;
+    }
+    case 'notice': {
+      const out: SessionNoticeEvt = {
+        type: 'SESSION_NOTICE',
+        sessionId,
+        level: evt.level,
+        text: evt.text,
+      };
+      sendToSidepanel(out);
+      break;
+    }
+    case 'plan_updated': {
+      const out: PlanUpdatedEvt = { type: 'PLAN_UPDATED', sessionId, plan: evt.plan };
       sendToSidepanel(out);
       break;
     }

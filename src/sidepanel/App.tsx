@@ -18,6 +18,7 @@ import {
 import type { UiTurn } from './types';
 import {
   type AbortSessionReq,
+  type SteerMessageReq,
   type AssistantTurnEvt,
   type DeleteSessionReq,
   type GetSessionReq,
@@ -31,14 +32,18 @@ import {
   type RequestLogsReq,
   type SessionDoneEvt,
   type SessionNoticeEvt,
+  type PlanUpdatedEvt,
   type SessionSummary,
   type ToolTrace,
   type ToolTraceEvt,
   type UserMessageReq,
   type WriteConfirmReq,
   type WriteConfirmResp,
+  type PlanDecisionReq,
+  type PlanDecisionResp,
 } from '../messages';
 import type { SessionState, Turn } from '../agent/session';
+import type { PlanState } from '../agent/plan';
 import type { LogEntry, LogConfig } from '../runtime/log';
 import { getLogConfig, setLogConfig, subscribeLog } from '../runtime/log';
 import { makeSessionId } from '../agent/session';
@@ -82,6 +87,9 @@ export function App() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [progress, setProgress] = useState<ProgressState | null>(null);
   const [pendingConfirms, setPendingConfirms] = useState<WriteConfirmReq[]>([]);
+  const [plan, setPlan] = useState<PlanState | null>(null);
+  const [mode, setMode] = useState<'chat' | 'plan'>('chat');
+  const [pendingPlan, setPendingPlan] = useState<PlanDecisionReq | null>(null);
   // Header menu state machine. 'closed' = no overlay; 'menu' = dropdown
   // showing; any other value = a settings page is open. Click outside the
   // menu/page region drops back to 'closed'.
@@ -175,6 +183,8 @@ export function App() {
       case 'SESSION_NOTICE':
       case 'ITERATION_PROGRESS':
       case 'WRITE_CONFIRM_REQ':
+      case 'PLAN_UPDATED':
+      case 'PLAN_DECISION_REQ':
         if (!eventBelongsToCurrentSession(sid)) return;
         break;
       default:
@@ -198,6 +208,12 @@ export function App() {
         break;
       case 'WRITE_CONFIRM_REQ':
         onWriteConfirmReq(m as WriteConfirmReq);
+        break;
+      case 'PLAN_UPDATED':
+        setPlan((m as PlanUpdatedEvt).plan);
+        break;
+      case 'PLAN_DECISION_REQ':
+        setPendingPlan(m as PlanDecisionReq);
         break;
       case 'LOG_ENTRY':
         setLogs((cur) => append(cur, (m as LogEntryEvt).entry, 500));
@@ -247,6 +263,20 @@ export function App() {
     });
   }
 
+  function onDecidePlan(decision: 'approve' | 'reject', editedSteps?: string[]): void {
+    setPendingPlan((cur) => {
+      if (!cur) return null;
+      const resp: PlanDecisionResp = {
+        type: 'PLAN_DECISION_RESP',
+        decisionId: cur.decisionId,
+        decision,
+        editedSteps,
+      };
+      chrome.runtime.sendMessage(resp).catch(() => {});
+      return null;
+    });
+  }
+
   function onAssistantTurn(m: AssistantTurnEvt): void {
     setTurns((cur) => [
       ...cur,
@@ -286,6 +316,10 @@ export function App() {
     // promises "接着聊（基于历史上下文）", so we KEEP the binding — the next
     // message resumes the same session with full context.
     if (m.reason === 'error' && !m.recoverable) setSessionId(null);
+    // A checkpoint already surfaced an explanatory SESSION_NOTICE inline, and
+    // the session stays resumable ("继续"), so don't append a redundant system
+    // line — just stop the spinner (handled above) and keep the binding.
+    if (m.reason === 'checkpoint') return;
     const text =
       m.reason === 'user_abort'
         ? '已停止'
@@ -315,7 +349,16 @@ export function App() {
 
   async function onSend(): Promise<void> {
     const text = input.trim();
-    if (!text || running) return;
+    if (!text) return;
+    if (running) {
+      // Steer: inject into the running session instead of starting a new turn.
+      if (!sessionId) return;
+      const req: SteerMessageReq = { type: 'STEER_MESSAGE', sessionId, text };
+      void chrome.runtime.sendMessage(req).catch(() => {});
+      setInput('');
+      setTurns((cur) => [...cur, { role: 'user', text: `↪ ${text}`, ts: Date.now() }]);
+      return;
+    }
     // Reuse sessionId across follow-up messages so the SW can continue in
     // the same chat history. Only allocate a new one if we're starting fresh
     // (no prior session) or the previous one ended.
@@ -325,7 +368,7 @@ export function App() {
     setInput('');
     setProgress({ iteration: 0, phase: 'injecting' });
     setTurns((cur) => [...cur, { role: 'user', text, ts: Date.now() }]);
-    const req: UserMessageReq = { type: 'USER_MESSAGE', sessionId: sid, text };
+    const req: UserMessageReq = { type: 'USER_MESSAGE', sessionId: sid, text, mode };
     // Fire-and-forget: SW early-acks. All further progress arrives via
     // events (ITERATION_PROGRESS / ASSISTANT_TURN / SESSION_DONE / ...).
     chrome.runtime.sendMessage(req).catch((e) => {
@@ -351,6 +394,7 @@ export function App() {
     // don't append it here to avoid duplication.
     setProgress(null);
     setRunning(false);
+    setPendingPlan(null);
     if (!sessionId) return;
     const req: AbortSessionReq = { type: 'ABORT_SESSION', sessionId };
     void chrome.runtime.sendMessage(req).catch(() => {});
@@ -361,6 +405,8 @@ export function App() {
     setSessionId(null);
     setTurns([]);
     setProgress(null);
+    setPlan(null);
+    setPendingPlan(null);
   }
 
   function onKeyDown(ev: KeyboardEvent): void {
@@ -413,6 +459,7 @@ export function App() {
         {turns.map((t, i) => (
           <TurnView key={i} turn={t} />
         ))}
+        {plan && plan.steps.length > 0 && <PlanChecklist plan={plan} />}
         {progress && <ProgressBanner progress={progress} />}
         {pendingConfirms.length > 0 && (
           <WriteConfirmCard
@@ -421,9 +468,26 @@ export function App() {
             onDecide={onDecideWrite}
           />
         )}
+        {pendingPlan && <PlanApprovalCard req={pendingPlan} onDecide={onDecidePlan} />}
       </div>
 
       <footer>
+        <div style={{ display: 'flex', gap: 6, padding: '0 2px 4px' }}>
+          <button
+            class="ghost-btn"
+            onClick={() => setMode((mo) => (mo === 'plan' ? 'chat' : 'plan'))}
+            title="计划模式:先研究并给出可审批的计划，批准后再执行（含写操作）"
+            style={{
+              fontSize: 12,
+              padding: '2px 10px',
+              borderRadius: 12,
+              border: '1px solid rgba(127,127,127,0.3)',
+              opacity: mode === 'plan' ? 1 : 0.65,
+            }}
+          >
+            {mode === 'plan' ? '📋 计划模式' : '💬 对话模式'}
+          </button>
+        </div>
         <div class={`composer ${inputBlocked && !running ? 'disabled' : ''}`}>
           <textarea
             placeholder={
@@ -438,9 +502,21 @@ export function App() {
             rows={1}
           />
           {running ? (
-            <button class="send-btn stop" onClick={onAbort} title="停止生成" aria-label="停止">
-              <IconStop size={12} />
-            </button>
+            <>
+              {input.trim() && (
+                <button
+                  class="send-btn"
+                  onClick={onSend}
+                  title="插话纠偏（不打断当前会话）"
+                  aria-label="插话"
+                >
+                  <IconArrowUp size={16} />
+                </button>
+              )}
+              <button class="send-btn stop" onClick={onAbort} title="停止生成" aria-label="停止">
+                <IconStop size={12} />
+              </button>
+            </>
           ) : (
             <button
               class="send-btn"
@@ -483,6 +559,7 @@ export function App() {
               if (!s) return;
               setSessionId(s.id);
               setTurns(historyToUiTurns(s.history));
+              setPlan(s.plan ?? null);
               setProgress(null);
               setRunning(false);
               setView('closed');
@@ -700,6 +777,93 @@ function WriteConfirmCard({
           取消
         </button>
       </div>
+    </div>
+  );
+}
+
+/** Plan-approval card (Phase 2 plan mode). Mirrors WriteConfirmCard. Shows the
+ * proposed goal + steps (editable, one per line) and approve / cancel. */
+function PlanApprovalCard({
+  req,
+  onDecide,
+}: {
+  req: PlanDecisionReq;
+  onDecide: (decision: 'approve' | 'reject', editedSteps?: string[]) => void;
+}) {
+  const original = req.plan.steps.map((s) => s.title);
+  const [text, setText] = useState(original.join('\n'));
+  const edited = text
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const changed = edited.length !== original.length || edited.some((l, i) => l !== original[i]);
+  return (
+    <div class="write-confirm">
+      <div class="title">📋 计划待审批</div>
+      {req.plan.goal && <div class="desc">{req.plan.goal}</div>}
+      <textarea
+        value={text}
+        onInput={(e) => setText((e.target as HTMLTextAreaElement).value)}
+        rows={Math.max(3, edited.length)}
+        title="每行一个步骤，可编辑后再批准"
+        style={{ width: '100%', boxSizing: 'border-box', fontSize: 13, margin: '6px 0' }}
+      />
+      <div class="actions">
+        <button
+          class="primary"
+          disabled={edited.length === 0}
+          onClick={() => onDecide('approve', changed ? edited : undefined)}
+        >
+          批准执行
+        </button>
+        <button class="secondary" onClick={() => onDecide('reject')}>
+          取消
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** Live plan/todo checklist (Phase 1). Re-renders in place on every PLAN_UPDATED
+ * event. Inline-styled so it needs no CSS additions. */
+function PlanChecklist({ plan }: { plan: PlanState }): preact.JSX.Element {
+  const done = plan.steps.filter((s) => s.status === 'completed').length;
+  return (
+    <div
+      style={{
+        margin: '4px 0 10px',
+        border: '1px solid rgba(127,127,127,0.25)',
+        borderRadius: 8,
+        padding: '8px 10px',
+        background: 'rgba(127,127,127,0.06)',
+        fontSize: 13,
+      }}
+    >
+      <div style={{ fontWeight: 600, marginBottom: 4, opacity: 0.85 }}>
+        📋 计划 {done}/{plan.steps.length}
+        {plan.goal ? ` · ${plan.goal}` : ''}
+      </div>
+      <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+        {plan.steps.map((s, i) => (
+          <li
+            key={i}
+            style={{
+              display: 'flex',
+              gap: 6,
+              alignItems: 'baseline',
+              opacity: s.status === 'completed' ? 0.55 : 1,
+              padding: '1px 0',
+            }}
+          >
+            <span style={{ width: 14, flexShrink: 0 }}>
+              {s.status === 'completed' ? '✓' : s.status === 'in_progress' ? '▸' : '○'}
+            </span>
+            <span style={{ textDecoration: s.status === 'completed' ? 'line-through' : 'none' }}>
+              {s.status === 'in_progress' && s.activeForm ? s.activeForm : s.title}
+            </span>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

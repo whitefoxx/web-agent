@@ -10,6 +10,7 @@
 
 import type { ParsedCommand } from '../messages';
 import type { ApiMessage } from './api-types';
+import type { PlanState } from './plan';
 import { log } from '../runtime/log';
 import {
   deleteSessionFromDb,
@@ -63,6 +64,9 @@ export interface SessionState {
   /** API engine's running OpenAI message array, persisted across follow-up
    * turns so native tool_calls / tool results stay paired 1:1. */
   apiMessages?: ApiMessage[];
+  /** Living todo/plan the agent maintains (Phase 1). Persisted so it survives
+   * SW restarts and shows in the history view. */
+  plan?: PlanState;
 }
 
 export function makeSession(id: string): SessionState {
