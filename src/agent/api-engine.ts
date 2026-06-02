@@ -18,7 +18,8 @@
 
 import { openAiToolsFromRegistry } from '../tools/manifest';
 import { systemPromptApi } from './api-system-prompt';
-import { loadLlmConfig } from '../config/llm-config';
+import { resolveSlots, type LlmProfile } from '../config/llm-config';
+import { visionDescribe, generateImage } from './specialist';
 import { appendTurn, saveSession } from './session';
 import type { AgentEngine, EngineContext, SessionDoneReason } from './engine';
 import type { ApiMessage, ContentPart, ToolCall } from './api-types';
@@ -59,15 +60,46 @@ const VIEW_IMAGE_TOOL = {
   },
 };
 
-/** Appended to the system prompt for vision profiles so the model knows the
- * view_image affordance exists (otherwise it won't reliably call it). */
-const VISION_SYSTEM_NOTE = `
+/** Image generation: offered when an `image` slot is configured. The engine
+ * intercepts the call and routes it to that slot's model's /images/generations. */
+const GENERATE_IMAGE_TOOL = {
+  type: 'function' as const,
+  function: {
+    name: 'generate_image',
+    description:
+      '根据文本描述生成图片。当用户要你“画一张/生成一张图”时调用,返回生成图片的 URL。拿到结果后,用 markdown 图片语法 ![](图片URL) 把图直接展示给用户(会内联渲染成图片),不要只贴纯文本链接。**不要**再用 view_image 去看你自己刚生成的图——那是多余的一次请求,除非用户明确要你检查/分析这张图的内容。',
+    parameters: {
+      type: 'object',
+      properties: {
+        prompt: { type: 'string', description: '图片内容的文本描述(尽量具体)' },
+        size: { type: 'string', description: '可选:尺寸,如 1024x1024' },
+      },
+      required: ['prompt'],
+    },
+  },
+};
 
-## 看图能力
-当前模型支持视觉,但你默认看不到图像本身——无论是用户在消息里给的图片地址,还是工具结果里的图片链接,对你来说都只是 URL 文本。
-- 当你**需要分析/理解图片内容**时(例如用户让你“看看这张图是什么”、或需要依据图片内容作答),调用 view_image 工具,传入要查看的图片完整 URL。
-- 如果图片地址只是**要传递的数据**(例如用户让你把某图片链接发到评论里、保存某个链接),**不要**调用 view_image——直接把 URL 当文本用即可。
-- 截图类工具(generic__screenshot)的结果会自动作为图像呈现,无需 view_image。`;
+/** Build the system-prompt note listing the specialist capabilities configured
+ * in this setup, so the orchestrator knows what it can delegate — and can tell
+ * the user when a needed capability isn't configured. */
+function specialistSystemNote(caps: { vision: boolean; image: boolean }): string {
+  const lines: string[] = [];
+  if (caps.vision)
+    lines.push(
+      '- 视觉理解(view_image):需要分析/理解图片内容时调用,传入图片完整 URL。仅在真正要看图时调;若图片地址只是要传递的数据(如发评论带链接),不要调用。',
+    );
+  if (caps.image)
+    lines.push('- 图像生成(generate_image):用户要画图/生成图片时调用,返回图片 URL。');
+  const header = '\n\n## 专门能力(多模型协作)';
+  if (lines.length === 0) {
+    return `${header}\n当前未配置任何专门能力模型(视觉理解 / 图像生成等)。若任务需要这些能力,告诉用户去「设置 → 模型分工」里为对应能力指派一个模型。`;
+  }
+  return (
+    `${header}\n你可调用以下专门能力(它们是工具,会路由到专门配置的模型):\n${lines.join('\n')}\n` +
+    '其他能力(如音频 / 视频生成)当前未配置——若任务需要,告知用户去「设置 → 模型分工」添加对应模型。\n' +
+    '截图类工具(generic__screenshot)的结果会自动作为图像呈现,无需 view_image。'
+  );
+}
 
 interface ChatCompletionResponse {
   choices: Array<{
@@ -93,6 +125,113 @@ function safeStringify(v: unknown): string {
   } catch {
     return String(v);
   }
+}
+
+interface SpecialistResult {
+  ok: boolean;
+  /** The tool message content handed back to the primary (the specialist's
+   * answer for a sub-call, or an ack for inline / an error message). */
+  toolContent: string;
+  /** URLs to inject into the PRIMARY's own context (only the inline-vision
+   * case — primary is multimodal); undefined for sub-calls. */
+  inlineImages?: string[];
+  traceResult?: unknown;
+}
+
+/** Route a specialist tool call (view_image / generate_image) to the capability
+ * slot's model. view_image is either inline (primary is multimodal → inject) or
+ * a sub-call to a separate vision model (→ return its description as text).
+ * generate_image always sub-calls the image-gen model. Never throws. */
+async function handleSpecialistCall(
+  name: string,
+  args: Record<string, unknown>,
+  ctx: {
+    visionProfile: LlmProfile | null;
+    visionInline: boolean;
+    imageProfile: LlmProfile | null;
+    signal?: AbortSignal;
+  },
+): Promise<SpecialistResult> {
+  if (name === 'view_image') {
+    const reqUrls = Array.isArray((args as { images?: unknown }).images)
+      ? ((args as { images: unknown[] }).images).filter((u): u is string => typeof u === 'string')
+      : [];
+    // Trust the model's intent: accept any http(s) URL (no image-pattern gating).
+    const valid = reqUrls
+      .filter((u) => /^https?:\/\//i.test(u.trim()))
+      .slice(0, MAX_VISION_IMAGES_PER_TURN);
+    if (valid.length === 0) {
+      return { ok: false, toolContent: '没有可用的图片地址(需为完整 http/https URL)。' };
+    }
+    const question = typeof args.purpose === 'string' ? args.purpose : '';
+    if (ctx.visionInline) {
+      const dropped = reqUrls.length - valid.length;
+      return {
+        ok: true,
+        toolContent: `已接收 ${valid.length} 张图片,将作为图像呈现给你查看${dropped > 0 ? `(${dropped} 个非 http/https 地址已忽略)` : ''}。`,
+        inlineImages: valid,
+        traceResult: { mode: 'inline', accepted: valid },
+      };
+    }
+    if (!ctx.visionProfile) return { ok: false, toolContent: '未配置视觉模型。' };
+    if (!ctx.visionProfile.apiKey || !ctx.visionProfile.baseUrl) {
+      return { ok: false, toolContent: '视觉模型未填 API Key 或 Base URL,请在「模型分工」检查。' };
+    }
+    log('api', `vision subcall → ${ctx.visionProfile.model} (${valid.length} image(s))`, {
+      baseUrl: ctx.visionProfile.baseUrl,
+    });
+    try {
+      const desc = await visionDescribe(ctx.visionProfile, valid, question, { signal: ctx.signal });
+      log('api', `vision subcall ← ${ctx.visionProfile.model} (${desc.length} chars)`);
+      return {
+        ok: true,
+        toolContent: desc,
+        traceResult: { mode: 'subcall', model: ctx.visionProfile.model, images: valid },
+      };
+    } catch (e) {
+      return {
+        ok: false,
+        toolContent: `视觉模型(${ctx.visionProfile.model})调用失败:${e instanceof Error ? e.message : String(e)}`,
+      };
+    }
+  }
+
+  if (name === 'generate_image') {
+    if (!ctx.imageProfile) return { ok: false, toolContent: '未配置图像生成模型。' };
+    if (!ctx.imageProfile.apiKey || !ctx.imageProfile.baseUrl) {
+      return { ok: false, toolContent: '图像生成模型未填 API Key 或 Base URL,请在「模型分工」检查。' };
+    }
+    const prompt = typeof args.prompt === 'string' ? args.prompt.trim() : '';
+    if (!prompt) return { ok: false, toolContent: 'prompt 不能为空。' };
+    const size = typeof args.size === 'string' ? args.size : undefined;
+    log('api', `image subcall → ${ctx.imageProfile.model}`, { baseUrl: ctx.imageProfile.baseUrl });
+    try {
+      const out = await generateImage(ctx.imageProfile, prompt, { size, signal: ctx.signal });
+      log('api', `image subcall ← ${ctx.imageProfile.model} (${out.urls.length} url, ${out.dataUrls.length} b64)`);
+      // base64 results have no URL to relay; if the primary is multimodal, inline
+      // them so the generated image isn't lost (it can describe/use it).
+      const inlineImages =
+        out.urls.length === 0 && ctx.visionInline && out.dataUrls.length ? out.dataUrls : undefined;
+      const content = out.urls.length
+        ? `已生成 ${out.urls.length} 张图片。请用 markdown 内联展示给用户(不要再 view_image 看它):\n${out.urls
+            .map((u) => `![生成的图片](${u})`)
+            .join('\n')}`
+        : `已生成 ${out.dataUrls.length} 张图片(模型返回 base64 数据${inlineImages ? ',已作为图像呈现给你' : ''})。`;
+      return {
+        ok: true,
+        toolContent: content,
+        inlineImages,
+        traceResult: { urls: out.urls, dataUrls: out.dataUrls.length },
+      };
+    } catch (e) {
+      return {
+        ok: false,
+        toolContent: `图像生成(${ctx.imageProfile.model})失败:${e instanceof Error ? e.message : String(e)}`,
+      };
+    }
+  }
+
+  return { ok: false, toolContent: `未知专门工具:${name}` };
 }
 
 /** Flatten a multimodal user `content` array down to plain text, for replaying
@@ -245,15 +384,33 @@ export const apiEngine: AgentEngine = {
       log('api', `session=${session.id} done`, { reason, err });
     }
 
-    const cfg = await loadLlmConfig();
-    if (!cfg.apiKey) {
-      finish('error', '未配置 API Key。请在设置里填入 API Key 后再试。');
+    // Resolve capability slots. The agent loop runs on `primary`; vision / image
+    // are delegated to their slots' models via tools (view_image/generate_image).
+    const slots = await resolveSlots();
+    const primary = slots.primary;
+    if (!primary?.apiKey) {
+      finish('error', '未配置主模型 API Key。请在「设置 → 模型分工」里为主模型指派一个已填 Key 的模型。');
       return;
     }
-    if (!cfg.baseUrl) {
-      finish('error', '未配置 Base URL。请在设置里选择 provider 或填入自定义 Base URL。');
+    if (!primary.baseUrl) {
+      finish('error', '主模型未配置 Base URL。');
       return;
     }
+    const cfg = primary; // {provider, baseUrl, apiKey, model}
+    // Vision routing: if the vision slot IS the primary (multimodal main), images
+    // go INLINE into the primary's own context; if it's a separate model, view_image
+    // makes a sub-call to it; if unset, no view_image tool.
+    const visionProfile = slots.vision;
+    const visionInline = !!visionProfile && visionProfile.id === primary.id;
+    const hasVisionTool = !!visionProfile;
+    const imageProfile = slots.image;
+    const hasImageTool = !!imageProfile;
+    log('api', 'slots resolved', {
+      primary: primary.model,
+      vision: visionProfile ? visionProfile.model : 'none',
+      visionMode: !visionProfile ? 'none' : visionInline ? 'inline(主模型自看)' : 'subcall(子调用专门模型)',
+      image: imageProfile ? imageProfile.model : 'none',
+    });
 
     session.status = 'running';
     session.iterations = 0;
@@ -298,10 +455,12 @@ export const apiEngine: AgentEngine = {
 
         ctx.emit({ type: 'iteration_progress', iteration: iter, iterationId, phase: 'awaiting' });
 
-        // Offer view_image only to vision profiles (a text model can't use it).
-        const tools = cfg.vision
-          ? [...openAiToolsFromRegistry(), VIEW_IMAGE_TOOL]
-          : openAiToolsFromRegistry();
+        // Offer specialist tools only for configured capability slots.
+        const tools = [
+          ...openAiToolsFromRegistry(),
+          ...(hasVisionTool ? [VIEW_IMAGE_TOOL] : []),
+          ...(hasImageTool ? [GENERATE_IMAGE_TOOL] : []),
+        ];
         if (tools.length !== lastToolsCount) {
           log(
             'api',
@@ -321,7 +480,9 @@ export const apiEngine: AgentEngine = {
               messages: [
                 {
                   role: 'system',
-                  content: systemPromptApi() + (cfg.vision ? VISION_SYSTEM_NOTE : ''),
+                  content:
+                    systemPromptApi() +
+                    specialistSystemNote({ vision: hasVisionTool, image: hasImageTool }),
                 },
                 ...messages,
               ],
@@ -414,40 +575,30 @@ export const apiEngine: AgentEngine = {
             ts: Date.now(),
           });
 
-          // Model-driven vision (view_image): intercepted here — it doesn't go
-          // through the dispatcher. Validate the URLs the model asked to see,
-          // ack via a text tool message, and queue them for the post-loop image
-          // user message. This is the pure-model-driven path for URL images.
-          if (call.function.name === 'view_image') {
-            const reqUrls = Array.isArray((args as { images?: unknown }).images)
-              ? ((args as { images: unknown[] }).images).filter(
-                  (u): u is string => typeof u === 'string',
-                )
-              : [];
-            // Trust the model's intent: accept any http(s) URL it asked to see,
-            // no image-pattern gating (a strict regex would wrongly reject valid
-            // images with unusual hosts/paths — the model decided it's an image).
-            const valid = reqUrls
-              .filter((u) => /^https?:\/\//i.test(u.trim()))
-              .slice(0, MAX_VISION_IMAGES_PER_TURN);
-            turnImages.push(...valid);
-            const dropped = reqUrls.length - valid.length;
-            const ack =
-              valid.length > 0
-                ? `已接收 ${valid.length} 张图片，将作为图像呈现给你查看${dropped > 0 ? `（${dropped} 个非 http/https 地址已忽略）` : ''}。`
-                : '没有可用的图片地址（需为完整 http/https URL）。';
-            messages.push({ role: 'tool', tool_call_id: call.id, content: ack });
-            const vTrace = {
+          // Specialist tools (view_image / generate_image) are intercepted here —
+          // they don't go through the dispatcher; the engine routes them to the
+          // capability slot's model.
+          if (call.function.name === 'view_image' || call.function.name === 'generate_image') {
+            const sr = await handleSpecialistCall(call.function.name, args, {
+              visionProfile,
+              visionInline,
+              imageProfile,
+              signal: ctx.signal,
+            });
+            if (sr.inlineImages?.length) turnImages.push(...sr.inlineImages);
+            messages.push({ role: 'tool', tool_call_id: call.id, content: sr.toolContent });
+            const sTrace = {
               id: traceId,
               action: 'execute_tool' as const,
-              tool: 'view_image',
+              tool: call.function.name,
               args,
-              status: 'completed' as const,
-              result: { accepted: valid, ignored: dropped },
+              status: (sr.ok ? 'completed' : 'failed') as 'completed' | 'failed',
+              result: sr.traceResult,
+              error: sr.ok ? undefined : sr.toolContent,
               durationMs: 0,
             };
-            ctx.emit({ type: 'tool_trace', trace: vTrace });
-            appendTurn(session, { role: 'tool_trace', trace: vTrace, ts: Date.now() });
+            ctx.emit({ type: 'tool_trace', trace: sTrace });
+            appendTurn(session, { role: 'tool_trace', trace: sTrace, ts: Date.now() });
             session.apiMessages = messages;
             await saveSession(session);
             continue;
@@ -458,10 +609,11 @@ export const apiEngine: AgentEngine = {
           // Auto-attach only DATA URLs (screenshots) from a tool result: their
           // base64 can't round-trip through a view_image tool-call argument, so
           // a model can't ask for them by reference. http image URLs are NOT
-          // auto-attached — the model requests those via view_image (above).
-          // Gated on `vision` so text-only models never get image content.
+          // auto-attached — the model requests those via view_image. Gated on
+          // `visionInline` (the PRIMARY can see images) — if vision is a separate
+          // specialist, a screenshot can't be auto-shown to the text primary.
           const images =
-            cfg.vision && r.ok
+            visionInline && r.ok
               ? collectImageRefs(r.result, MAX_VISION_IMAGES_PER_TURN).filter(isDataUrl)
               : [];
 

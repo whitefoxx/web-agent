@@ -172,6 +172,34 @@ OpenAI 兼容 API 里,工具(tool）消息**只能是纯文本**,图片必须放
 
 **未决**:`fetch-image.ts toVisionDataUrl`(SW 取图转 base64,绕 hotlink)已备好但**未接线**——实测 sina 图 GLM 能直接抓,故 view_image 目前传原始 URL;将来某图床 hotlink 抓不到再接。
 
+## 8.6 多模型协作 / 能力槽位(2026-06)
+
+不再「选一个 active 模型」,而是把每个**能力**指派给一个模型(profile)。
+
+**数据模型**(`src/config/llm-config.ts`):
+- **profile** = 一套凭据(provider/baseUrl/apiKey/model),不变。
+- **能力槽位** `slots: { primary, vision?, image? }`(可扩展 audio/video):每个能力 → 至多一个 profileId。
+  - `primary` 必填:agent loop 跑在它上面(orchestrator)。`loadLlmConfig()` 返回它。
+  - 一个 profile 可填多槽(多模态模型 = primary + vision)。每槽 ≤1 模型 → 无歧义。
+- `resolveSlots()` 一次读出 `{primary, vision, image}` 三个 profile(null=未配置/悬空)。`setSlot(cap, id|null)` 指派/清空。
+- **迁移**:旧 `{activeId, profiles}` → `slots.primary = activeId`;profile 上旧的 `vision:true` 标志 → `vision` 槽。
+
+**主模型怎么用专门模型**(`api-engine.ts` + `specialist.ts`):
+- 每个**已配置**的非主槽位,给主模型暴露一个工具:`view_image`(视觉)、`generate_image`(图像)。system prompt 动态列出已配置/未配置能力——任务需要未配置能力时,主模型据此告知用户去「模型分工」添加。
+- 主模型调工具 → 引擎**拦截**(`handleSpecialistCall`,不走 dispatcher)→ 路由到该槽 profile 的 API(`specialist.ts` 里 `visionDescribe` 调 `/chat/completions`、`generateImage` 调 `/images/generations`)→ 结果回灌主模型(tool result)。
+- **视觉两条路**(取决于 vision 槽指给谁):
+  - `vision 槽 === primary`(多模态主模型):`view_image` 把图 **inline** 注入主模型自己的上下文(§8.5 的机制)。
+  - `vision 槽 = 另一个模型`:`view_image` 对视觉模型发**一次性子调用**(「看这些图,回答:<purpose>」),把它的文字答案作为 tool result 返回主模型。
+  - 截图(data URL)只在 `visionInline` 时自动呈现——base64 没法走子调用,文本主模型看不了截图。
+
+**配置 UX**(SidePanel 设置):
+- 「模型分工」区:每个能力一个下拉(选 profile / 未配置),主模型必填。
+- 「API Keys」区:profile 增删改;卡片上用 badge(主/视觉/图像)显示它填了哪些槽。新建第一个 profile 自动当主模型。
+
+**测试**:`llm-config.test.ts`(槽位 + 迁移)、`specialist.test.ts`(子调用)。
+
+**评审揪出的坑(已修)**:① 主模型槽不能被清空(UI 隐藏「未配置」+ `setSlot` 拒绝在有 profile 时清 primary)——否则一下拉就把 agent 整个废了;② `deleteProfile` 删主模型时优先顶上一个**有 key+baseUrl 的可跑** profile;③ 图像生成返回 base64(无 URL)时,若主模型多模态则 inline 给它看,不丢图;④ specialist 子调用前校验 apiKey/baseUrl,缺了给清晰报错;⑤ `postJson` 对 200-但非-JSON(网关/HTML 拦截页)给清晰错误而非裸 SyntaxError;⑥ base64 图按 magic bytes 猜 MIME(不再一律 png)。
+
 ## 9. 已知限制 / 后续工作
 
 | 限制                                | 影响                                                                        | 后续                                                       |

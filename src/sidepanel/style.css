@@ -1341,6 +1341,16 @@ header {
 
 /* ───────── markdown ───────── */
 
+/* Images (e.g. generated/looked-at) fit the side panel width, never overflow. */
+.markdown img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 8px;
+  margin: 0.5em 0;
+  display: block;
+  border: 1px solid var(--border);
+}
+
 .markdown :first-child {
   margin-top: 0;
 }

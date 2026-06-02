@@ -1,21 +1,56 @@
 /**
- * LLM backend configuration — multi-profile storage.
+ * LLM backend configuration — multi-profile + capability slots.
  *
- * Each profile = a full set of credentials (provider + baseUrl + apiKey + model)
- * plus a user-given label and an id. The store remembers which profile is
- * `active`; api-engine reads only the active one via `loadLlmConfig`.
+ * A **profile** is one credential set (provider + baseUrl + apiKey + model) with
+ * a label and id. **Capability slots** then assign a profile to each job:
+ *   - `primary`  — the orchestrator the agent loop runs on (required)
+ *   - `vision`   — image understanding (optional)
+ *   - `image`    — image generation (optional)
+ * One profile may fill several slots (e.g. a multimodal model = primary+vision).
+ * Each slot points to AT MOST one profile → no ambiguity about "which model".
+ * The main model decides via tool calls when to use a specialist; the engine
+ * routes the call to that slot's profile API. See docs/architecture.md §8.6.
  *
- * Calls an OpenAI-compatible `/chat/completions` endpoint with native
- * function-calling (see agent/api-engine.ts). Works with any provider
- * speaking the OpenAI contract — DeepSeek / OpenAI / GLM / Kimi / MiniMax / …
+ * Calls an OpenAI-compatible `/chat/completions` (+ `/images/generations`)
+ * endpoint. Works with any provider speaking the OpenAI contract.
  *
- * Pre-history: the store was a single LlmConfig under the same storage key.
- * Two earlier shapes (dual-branch `{ mode, connector, api }` and discriminated
- * union `{ mode: 'api' | 'connector', ... }`) trace back to a removed
- * chat-tab connector mode. `normalize` migrates all of them by wrapping
- * the recovered single-config into a one-entry profile list, so upgrading
- * users keep their saved key. Persisted in chrome.storage.local.
+ * Pre-history: earlier shapes were a single LlmConfig, then `{ activeId,
+ * profiles }`, plus two removed chat-tab connector shapes. `normalize` migrates
+ * all of them — `activeId` becomes `slots.primary`, a profile's old `vision:true`
+ * flag becomes the `vision` slot. Persisted in chrome.storage.local.
  */
+
+/** A job a model can be assigned to. Extensible (audio/video later). */
+export type Capability = 'primary' | 'vision' | 'image';
+
+export interface CapabilityMeta {
+  id: Capability;
+  label: string;
+  required: boolean;
+  hint: string;
+}
+
+/** Ordered for the settings UI. `primary` first + required. */
+export const CAPABILITIES: CapabilityMeta[] = [
+  {
+    id: 'primary',
+    label: '主模型(推理 / 编排)',
+    required: true,
+    hint: 'agent 在它上面跑,负责推理和调用工具。必填。',
+  },
+  {
+    id: 'vision',
+    label: '视觉理解',
+    required: false,
+    hint: '分析图片内容。可与主模型选同一个(多模态主模型),也可指一个专门的视觉模型。',
+  },
+  {
+    id: 'image',
+    label: '图像生成',
+    required: false,
+    hint: '根据文本生成图片。主模型需要时调用,结果(图片 URL)回灌给主模型。',
+  },
+];
 
 export interface LlmConfig {
   /** Preset id (or 'custom'); informational, the call uses baseUrl. */
@@ -23,10 +58,6 @@ export interface LlmConfig {
   baseUrl: string;
   apiKey: string;
   model: string;
-  /** This profile's model is multimodal — the engine may feed images from tool
-   * results (screenshots, image URLs) to it as `image_url` content blocks.
-   * Off by default: a text-only model errors on image content. */
-  vision?: boolean;
 }
 
 export interface LlmProfile extends LlmConfig {
@@ -37,9 +68,16 @@ export interface LlmProfile extends LlmConfig {
 }
 
 export interface LlmProfileStore {
-  /** Empty string when no profiles exist yet. */
-  activeId: string;
   profiles: LlmProfile[];
+  /** capability → profileId. `primary` is the orchestrator. Missing = unassigned. */
+  slots: Partial<Record<Capability, string>>;
+}
+
+/** Slots resolved to actual profiles (null when unassigned / dangling). */
+export interface ResolvedSlots {
+  primary: LlmProfile | null;
+  vision: LlmProfile | null;
+  image: LlmProfile | null;
 }
 
 /* ───────── presets ───────── */
@@ -95,21 +133,27 @@ export const DEFAULT_CONFIG: LlmConfig = {
   model: PROVIDERS[0]?.defaultModel ?? '',
 };
 
-/** Read the **active** profile's config, in the legacy single-config shape
- * api-engine has always consumed. Returns DEFAULT_CONFIG when no profile is
- * active (or the store is empty), so the existing `!cfg.apiKey` readiness
- * check upstream keeps working. */
+/** Read the **primary** (orchestrator) profile's config — what the main agent
+ * loop consumes. Returns DEFAULT_CONFIG when there's no primary, so the
+ * existing `!cfg.apiKey` readiness check upstream keeps working. */
 export async function loadLlmConfig(): Promise<LlmConfig> {
-  const store = await loadProfiles();
-  const active = store.profiles.find((p) => p.id === store.activeId);
-  if (!active) return { ...DEFAULT_CONFIG };
+  const { primary } = await resolveSlots();
+  if (!primary) return { ...DEFAULT_CONFIG };
   return {
-    provider: active.provider,
-    baseUrl: active.baseUrl,
-    apiKey: active.apiKey,
-    model: active.model,
-    vision: active.vision ?? false,
+    provider: primary.provider,
+    baseUrl: primary.baseUrl,
+    apiKey: primary.apiKey,
+    model: primary.model,
   };
+}
+
+/** Resolve every capability slot to its assigned profile (null if unassigned or
+ * the assigned id no longer exists). One storage read. */
+export async function resolveSlots(): Promise<ResolvedSlots> {
+  const store = await loadProfiles();
+  const get = (c: Capability): LlmProfile | null =>
+    store.profiles.find((p) => p.id === store.slots[c]) ?? null;
+  return { primary: get('primary'), vision: get('vision'), image: get('image') };
 }
 
 /** Read the full multi-profile store (for the UI manager). */
@@ -118,7 +162,7 @@ export async function loadProfiles(): Promise<LlmProfileStore> {
     const got = await chrome.storage.local.get(STORAGE_KEY);
     return normalize(got[STORAGE_KEY] as unknown);
   } catch {
-    return { activeId: '', profiles: [] };
+    return { profiles: [], slots: {} };
   }
 }
 
@@ -126,57 +170,78 @@ export async function saveProfiles(store: LlmProfileStore): Promise<void> {
   await chrome.storage.local.set({ [STORAGE_KEY]: store });
 }
 
-/** Insert or update a profile by id. With `activate: true` (or when the
- * store has no current active), promotes the upserted profile to active. */
+/** Insert or update a profile by id. With `asPrimary: true` (or when no primary
+ * is set yet — the first profile created) assigns it to the primary slot. */
 export async function upsertProfile(
   profile: LlmProfile,
-  opts: { activate?: boolean } = {},
+  opts: { asPrimary?: boolean } = {},
 ): Promise<LlmProfileStore> {
   const store = await loadProfiles();
   const idx = store.profiles.findIndex((p) => p.id === profile.id);
   if (idx >= 0) store.profiles[idx] = profile;
   else store.profiles.push(profile);
-  if (opts.activate || !store.activeId) store.activeId = profile.id;
+  if (opts.asPrimary || !store.slots.primary) store.slots.primary = profile.id;
   await saveProfiles(store);
   return store;
 }
 
-/** Remove a profile. If it was active, the first remaining profile (or '' if
- * none remain) becomes active. */
+/** Remove a profile + clear it from every slot it filled. If it was the
+ * primary, the first remaining profile takes over (so the agent stays runnable). */
 export async function deleteProfile(id: string): Promise<LlmProfileStore> {
   const store = await loadProfiles();
   store.profiles = store.profiles.filter((p) => p.id !== id);
-  if (store.activeId === id) store.activeId = store.profiles[0]?.id ?? '';
+  for (const cap of Object.keys(store.slots) as Capability[]) {
+    if (store.slots[cap] === id) delete store.slots[cap];
+  }
+  if (!store.slots.primary) {
+    // Promote a RUNNABLE profile (has key + baseUrl) if possible, so deleting
+    // the primary doesn't silently leave the store unrunnable; fall back to
+    // first-by-order only if none are fully configured.
+    const next = store.profiles.find((p) => p.apiKey && p.baseUrl) ?? store.profiles[0];
+    if (next) store.slots.primary = next.id;
+  }
   await saveProfiles(store);
   return store;
 }
 
-export async function setActiveProfile(id: string): Promise<LlmProfileStore> {
+/** Assign a profile to a capability slot, or clear it (`profileId = null`).
+ * Refuses to clear `primary` while any profile exists — an empty primary means
+ * the agent can't run, so we never let a stray null orphan the orchestrator
+ * (the UI also hides the clear option for the required slot, belt-and-suspenders). */
+export async function setSlot(cap: Capability, profileId: string | null): Promise<LlmProfileStore> {
   const store = await loadProfiles();
-  if (store.profiles.some((p) => p.id === id)) {
-    store.activeId = id;
-    await saveProfiles(store);
+  if (profileId && store.profiles.some((p) => p.id === profileId)) {
+    store.slots[cap] = profileId;
+  } else {
+    if (cap === 'primary' && store.profiles.length > 0) return store; // never orphan primary
+    delete store.slots[cap];
   }
+  await saveProfiles(store);
   return store;
 }
 
-/** Backward-compat: treat as "update the active profile's fields with this
- * config". If no profile exists yet, creates one and activates it. */
+/** Backward-compat alias: "make this profile the primary (orchestrator)". */
+export async function setActiveProfile(id: string): Promise<LlmProfileStore> {
+  return setSlot('primary', id);
+}
+
+/** Backward-compat: "update the primary profile's fields with this config".
+ * If no profile exists yet, creates one and makes it primary. */
 export async function saveLlmConfig(config: LlmConfig): Promise<void> {
   const store = await loadProfiles();
-  const active = store.profiles.find((p) => p.id === store.activeId);
-  if (active) {
-    active.provider = config.provider;
-    active.baseUrl = config.baseUrl;
-    active.apiKey = config.apiKey;
-    active.model = config.model;
-    active.label = autoLabel(config);
+  const primary = store.profiles.find((p) => p.id === store.slots.primary);
+  if (primary) {
+    primary.provider = config.provider;
+    primary.baseUrl = config.baseUrl;
+    primary.apiKey = config.apiKey;
+    primary.model = config.model;
+    primary.label = autoLabel(config);
     await saveProfiles(store);
     return;
   }
   const id = newProfileId();
   store.profiles.push({ id, label: autoLabel(config), ...config });
-  store.activeId = id;
+  store.slots.primary = id;
   await saveProfiles(store);
 }
 
@@ -212,10 +277,10 @@ export function autoLabel(c: LlmConfig): string {
  *
  * Empty/unrecognized → empty store. */
 function normalize(raw: unknown): LlmProfileStore {
-  if (!raw || typeof raw !== 'object') return { activeId: '', profiles: [] };
+  if (!raw || typeof raw !== 'object') return { profiles: [], slots: {} };
   const obj = raw as Record<string, unknown>;
 
-  // Current shape.
+  // Current / multi-profile shape (with `profiles`).
   if (Array.isArray(obj.profiles)) {
     const profiles: LlmProfile[] = [];
     for (const p of obj.profiles) {
@@ -226,29 +291,44 @@ function normalize(raw: unknown): LlmProfileStore {
         baseUrl: String(pp.baseUrl ?? DEFAULT_CONFIG.baseUrl),
         apiKey: String(pp.apiKey ?? ''),
         model: String(pp.model ?? DEFAULT_CONFIG.model),
-        vision: pp.vision === true,
       };
       const id = typeof pp.id === 'string' && pp.id ? pp.id : newProfileId();
       const label =
         typeof pp.label === 'string' && pp.label.trim() ? pp.label.trim() : autoLabel(cfg);
       profiles.push({ id, label, ...cfg });
+      // NB: the old per-profile `vision:true` flag is DROPPED, not migrated to
+      // the vision slot. It meant "this model is multimodal" (a capability), NOT
+      // "use this model for vision" (an assignment). Auto-assigning it surprised
+      // users who wanted to split vision onto a dedicated model — the vision slot
+      // is assigned explicitly in 模型分工.
     }
-    let activeId = typeof obj.activeId === 'string' ? obj.activeId : '';
-    if (!profiles.some((p) => p.id === activeId)) activeId = profiles[0]?.id ?? '';
-    return { activeId, profiles };
+
+    // Slots: prefer an explicit `slots` map (new shape), clamped to existing
+    // profiles; otherwise migrate `activeId` → primary. vision/image are only
+    // ever set explicitly by the user.
+    const slots: Partial<Record<Capability, string>> = {};
+    const rawSlots = (obj.slots ?? {}) as Record<string, unknown>;
+    for (const cap of ['primary', 'vision', 'image'] as Capability[]) {
+      const want = rawSlots[cap];
+      if (typeof want === 'string' && profiles.some((p) => p.id === want)) slots[cap] = want;
+    }
+    if (!slots.primary) {
+      const activeId = typeof obj.activeId === 'string' ? obj.activeId : '';
+      const fallback = profiles.some((p) => p.id === activeId) ? activeId : profiles[0]?.id;
+      if (fallback) slots.primary = fallback;
+    }
+    return { profiles, slots };
   }
 
   // Legacy single-config shapes — recover the LlmConfig, then wrap.
   const single = normalizeSingle(obj);
-  // Treat a totally-empty recovery (no apiKey AND no baseUrl beyond default
-  // placeholder) as "user never configured anything" → empty store. That
-  // way a connector-only legacy install (no api creds to recover) shows the
-  // empty-list UI instead of a phantom "DeepSeek" profile with no key.
-  if (!single.apiKey && !single.baseUrl) return { activeId: '', profiles: [] };
+  // Totally-empty recovery (no apiKey AND no baseUrl) = "never configured" →
+  // empty store, so the empty-list UI shows instead of a phantom keyless profile.
+  if (!single.apiKey && !single.baseUrl) return { profiles: [], slots: {} };
   const id = newProfileId();
   return {
-    activeId: id,
     profiles: [{ id, label: autoLabel(single), ...single }],
+    slots: { primary: id },
   };
 }
 

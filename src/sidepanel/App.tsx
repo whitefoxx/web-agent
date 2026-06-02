@@ -45,14 +45,16 @@ import { makeSessionId } from '../agent/session';
 import {
   DEFAULT_CONFIG,
   PROVIDERS,
+  CAPABILITIES,
   loadLlmConfig,
   loadProfiles,
   upsertProfile,
   deleteProfile,
-  setActiveProfile,
+  setSlot,
   newProfileId,
   autoLabel,
   providerById,
+  type Capability,
   type LlmConfig,
   type LlmProfile,
   type LlmProfileStore,
@@ -874,7 +876,7 @@ function LlmBackendSection({
   config: LlmConfig;
   onSave: (c: LlmConfig) => void;
 }) {
-  const [store, setStore] = useState<LlmProfileStore>({ activeId: '', profiles: [] });
+  const [store, setStore] = useState<LlmProfileStore>({ profiles: [], slots: {} });
   const [loading, setLoading] = useState(true);
   /** null = list view, 'new' = create form, profile = edit form prefilled. */
   const [editing, setEditing] = useState<LlmProfile | 'new' | null>(null);
@@ -883,16 +885,17 @@ function LlmBackendSection({
     const s = await loadProfiles();
     setStore(s);
     setLoading(false);
-    const cfg = await loadLlmConfig();
-    onSave(cfg);
+    onSave(await loadLlmConfig());
   }
 
   useEffect(() => {
     void refresh();
   }, []);
 
-  async function handleActivate(id: string): Promise<void> {
-    await setActiveProfile(id);
+  async function handleSetSlot(cap: Capability, id: string | null): Promise<void> {
+    // Never let the user un-assign the required orchestrator while profiles exist.
+    if (cap === 'primary' && !id && store.profiles.length > 0) return;
+    await setSlot(cap, id);
     await refresh();
   }
 
@@ -902,8 +905,10 @@ function LlmBackendSection({
     await refresh();
   }
 
-  async function handleSave(profile: LlmProfile, activate: boolean): Promise<void> {
-    await upsertProfile(profile, { activate });
+  async function handleSave(profile: LlmProfile): Promise<void> {
+    // upsertProfile auto-assigns the primary slot when none is set yet (the
+    // first profile), so a fresh user is runnable without touching 模型分工.
+    await upsertProfile(profile);
     setEditing(null);
     await refresh();
   }
@@ -922,31 +927,71 @@ function LlmBackendSection({
       <ProfileEditForm
         initial={isNew ? blank : (editing as LlmProfile)}
         isNew={isNew}
-        onSave={(p) => handleSave(p, isNew)}
+        onSave={(p) => handleSave(p)}
         onCancel={() => setEditing(null)}
       />
     );
   }
 
-  const active = store.profiles.find((p) => p.id === store.activeId);
-  const ready = !!active?.apiKey;
-  const activeLabel = active ? active.label : '未配置 API Key';
-  const activeMeta = active
-    ? `${providerById(active.provider)?.label ?? active.provider} · ${active.model || '(未填 model)'}`
-    : '';
+  const primary = store.profiles.find((p) => p.id === store.slots.primary);
+  const ready = !!primary?.apiKey;
+  const slotShort: Record<Capability, string> = { primary: '主', vision: '视觉', image: '图像' };
+  const slotsForProfile = (id: string): string[] =>
+    CAPABILITIES.filter((c) => store.slots[c.id] === id).map((c) => slotShort[c.id]);
 
   return (
     <>
       <div class="status-card">
         <span class={`dot ${ready ? '' : 'warn'}`} />
         <div style="flex:1;min-width:0">
-          <div class="label">当前生效</div>
-          <div class="value">{activeLabel}</div>
-          {activeMeta && (
-            <div style="font-size:11.5px;color:var(--muted);margin-top:2px">{activeMeta}</div>
+          <div class="label">主模型</div>
+          <div class="value">{primary ? primary.label : '未指派'}</div>
+          {primary && (
+            <div style="font-size:11.5px;color:var(--muted);margin-top:2px">
+              {providerById(primary.provider)?.label ?? primary.provider} ·{' '}
+              {primary.model || '(未填 model)'}
+            </div>
           )}
         </div>
       </div>
+
+      {store.profiles.length > 0 && (
+        <div class="section">
+          <h4>模型分工</h4>
+          <p class="section-hint">
+            给每个能力指派一个模型。一个模型可担多职(如多模态模型既当主模型又做视觉)。未配置的能力,任务需要时助手会提示你来这里添加。
+          </p>
+          {CAPABILITIES.map((cap) => (
+            <div class="field" key={cap.id}>
+              <label>
+                {cap.label}
+                {cap.required && <span style="color:var(--warn)"> *</span>}
+              </label>
+              <select
+                value={store.slots[cap.id] ?? ''}
+                onChange={(e) =>
+                  void handleSetSlot(cap.id, (e.target as HTMLSelectElement).value || null)
+                }
+                style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--fg);font-size:13px"
+              >
+                {/* The required primary keeps a placeholder only until one is
+                    picked; once set it can be reassigned but not cleared. */}
+                {(!cap.required || !store.slots[cap.id]) && (
+                  <option value="" disabled={cap.required}>
+                    {cap.required ? '请选择…' : '未配置'}
+                  </option>
+                )}
+                {store.profiles.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.label}
+                  </option>
+                ))}
+              </select>
+              <span class="field-hint">{cap.hint}</span>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div class="section">
         <h4>
@@ -954,7 +999,7 @@ function LlmBackendSection({
           {store.profiles.length > 0 && <span class="muted"> · {store.profiles.length} 个</span>}
         </h4>
         <p class="section-hint">
-          可保存多套 key,点「切换」即时换用。Key 仅存于本机 chrome.storage。
+          保存多套 key,在上面「模型分工」里指派各能力。Key 仅存于本机 chrome.storage。
         </p>
         {loading ? (
           <div style="color:var(--muted);font-size:13px">加载中…</div>
@@ -970,8 +1015,7 @@ function LlmBackendSection({
               <ProfileCard
                 key={p.id}
                 profile={p}
-                active={p.id === store.activeId}
-                onActivate={() => void handleActivate(p.id)}
+                slots={slotsForProfile(p.id)}
                 onEdit={() => setEditing(p)}
                 onDelete={() => void handleDelete(p)}
               />
@@ -990,23 +1034,25 @@ function LlmBackendSection({
 
 function ProfileCard({
   profile,
-  active,
-  onActivate,
+  slots,
   onEdit,
   onDelete,
 }: {
   profile: LlmProfile;
-  active: boolean;
-  onActivate: () => void;
+  slots: string[];
   onEdit: () => void;
   onDelete: () => void;
 }): preact.JSX.Element {
   const providerLabel = providerById(profile.provider)?.label ?? profile.provider;
   return (
-    <div class={`profile-card${active ? ' active' : ''}`}>
+    <div class={`profile-card${slots.length ? ' active' : ''}`}>
       <div class="profile-card-main">
         <div class="profile-card-head">
-          {active && <span class="active-badge">✓ 在用</span>}
+          {slots.map((s) => (
+            <span key={s} class="active-badge">
+              {s}
+            </span>
+          ))}
           <span class="profile-card-label">{profile.label}</span>
         </div>
         <div class="profile-card-meta">
@@ -1015,11 +1061,6 @@ function ProfileCard({
         <div class="profile-card-key">{maskApiKey(profile.apiKey)}</div>
       </div>
       <div class="profile-card-actions">
-        {!active && (
-          <button class="btn sm outline" onClick={onActivate} title="设为当前生效">
-            切换
-          </button>
-        )}
         <button class="btn sm outline" onClick={onEdit} title="修改这条配置">
           编辑
         </button>
@@ -1053,7 +1094,6 @@ function ProfileEditForm({
   const [baseUrl, setBaseUrl] = useState<string>(initial.baseUrl);
   const [apiKey, setApiKey] = useState<string>(initial.apiKey);
   const [model, setModel] = useState<string>(initial.model);
-  const [vision, setVision] = useState<boolean>(initial.vision ?? false);
 
   function pickProvider(id: string): void {
     setProvider(id);
@@ -1069,7 +1109,6 @@ function ProfileEditForm({
     baseUrl: baseUrl.trim(),
     apiKey: apiKey.trim(),
     model: model.trim(),
-    vision,
   };
   const effectiveLabel = label.trim() || autoLabel(trimmed);
   const canSave = !!trimmed.apiKey && !!trimmed.baseUrl && !!trimmed.model;
@@ -1133,22 +1172,8 @@ function ProfileEditForm({
             onInput={(e) => setModel((e.target as HTMLInputElement).value)}
           />
           <span class="field-hint">
-            按 endpoint 实际支持的模型名填(例:deepseek-chat / gpt-4o / claude-sonnet-4-6)。
-          </span>
-        </div>
-        <div class="field">
-          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-            <input
-              type="checkbox"
-              checked={vision}
-              onInput={(e) => setVision((e.target as HTMLInputElement).checked)}
-              style="width:auto;margin:0;flex:none"
-            />
-            <span>多模态模型(支持图片)</span>
-          </label>
-          <span class="field-hint">
-            开启后,截图 / 图片链接等工具结果会作为图片喂给模型。仅在模型本身支持视觉时开启
-            (如 GLM-5V-Turbo / gpt-4o);纯文本模型开了会报错。
+            按 endpoint 实际支持的模型名填(例:deepseek-chat / gpt-4o / glm-4.6v / cogview-4)。
+            模型用于什么(主模型 / 视觉 / 图像生成)在「模型分工」里指派,不在这里设。
           </span>
         </div>
       </div>
