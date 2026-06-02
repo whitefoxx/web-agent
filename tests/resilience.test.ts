@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_RETRY_POLICY,
   DEFAULT_THRASH,
+  NoProgressTracker,
   ThrashTracker,
   isRetriableNetworkError,
   isRetriableStatus,
@@ -131,5 +132,29 @@ describe('ThrashTracker', () => {
   it('ships sane defaults', () => {
     expect(DEFAULT_THRASH.maxSameFailure).toBe(3);
     expect(DEFAULT_RETRY_POLICY.maxAttempts).toBe(3);
+  });
+});
+
+describe('NoProgressTracker', () => {
+  it('does not trip while tools keep succeeding', () => {
+    const t = new NoProgressTracker({ maxStalls: 3 });
+    for (let i = 0; i < 10; i++) expect(t.record(0, true)).toBeNull();
+  });
+  it('does not trip while the plan keeps progressing', () => {
+    const t = new NoProgressTracker({ maxStalls: 3 });
+    for (let i = 1; i <= 10; i++) expect(t.record(i, false)).toBeNull();
+  });
+  it('trips only after N turns with NO progress AND NO success', () => {
+    const t = new NoProgressTracker({ maxStalls: 3 });
+    expect(t.record(2, true)).toBeNull(); // baseline (completed rose to 2)
+    expect(t.record(2, false)).toBeNull(); // stall 1
+    expect(t.record(2, false)).toBeNull(); // stall 2
+    expect(t.record(2, false)).toMatch(/卡住/); // stall 3 → trip
+  });
+  it('a single success resets the stall counter', () => {
+    const t = new NoProgressTracker({ maxStalls: 2 });
+    expect(t.record(1, false)).toBeNull();
+    expect(t.record(1, true)).toBeNull(); // reset
+    expect(t.record(1, false)).toBeNull(); // back to 1 stall, not at threshold
   });
 });

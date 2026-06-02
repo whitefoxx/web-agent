@@ -143,3 +143,40 @@ export class ThrashTracker {
     return null;
   }
 }
+
+export interface NoProgressConfig {
+  /** Break after this many consecutive turns with NO plan progress AND NO
+   * successful tool call. */
+  maxStalls: number;
+}
+
+export const DEFAULT_NO_PROGRESS: NoProgressConfig = { maxStalls: 8 };
+
+/**
+ * Detects a stalled run: with an approved plan, N turns in a row where neither
+ * the completed-step count rose NOR any tool call succeeded — i.e. genuinely
+ * stuck, not merely a hard step. The double condition is deliberately
+ * conservative, so a legitimately long single step (many successful tool calls
+ * before its step completes) never trips it. One instance per run.
+ */
+export class NoProgressTracker {
+  private stalls = 0;
+  private lastCompleted = 0;
+  constructor(private readonly cfg: NoProgressConfig = DEFAULT_NO_PROGRESS) {}
+
+  /** Record a turn. `completed` = plan steps done so far; `anyToolSuccess` =
+   * whether any dispatched tool succeeded this turn. Returns a breaker reason
+   * once stalled `maxStalls` turns, else null. */
+  record(completed: number, anyToolSuccess: boolean): string | null {
+    if (completed > this.lastCompleted || anyToolSuccess) {
+      this.lastCompleted = Math.max(this.lastCompleted, completed);
+      this.stalls = 0;
+      return null;
+    }
+    this.stalls += 1;
+    if (this.stalls >= this.cfg.maxStalls) {
+      return `已连续 ${this.stalls} 轮无计划进展、也无成功操作,疑似卡住,先暂停。`;
+    }
+    return null;
+  }
+}
