@@ -106,6 +106,7 @@ describe('twitter profile command (marketplace)', () => {
     const page = {
       goto: vi.fn().mockResolvedValue(undefined),
       wait: vi.fn().mockResolvedValue(undefined),
+      getCurrentUrl: vi.fn().mockResolvedValue(''),
       getCookies: vi.fn(),
       evaluate: vi.fn(async (script: unknown) => {
         if (String(script).includes('AppTabBar_Profile_Link')) return '/home';
@@ -123,6 +124,7 @@ describe('twitter profile command (marketplace)', () => {
     const page = {
       goto: vi.fn().mockResolvedValue(undefined),
       wait: vi.fn().mockResolvedValue(undefined),
+      getCurrentUrl: vi.fn().mockResolvedValue(''),
       getCookies: vi.fn().mockResolvedValue([{ name: 'ct0', value: 'csrf' }]),
       evaluate: vi
         .fn()
@@ -153,6 +155,7 @@ describe('twitter profile command (marketplace)', () => {
     const createPage = (payload: unknown) => ({
       goto: vi.fn().mockResolvedValue(undefined),
       wait: vi.fn().mockResolvedValue(undefined),
+      getCurrentUrl: vi.fn().mockResolvedValue(''),
       getCookies: vi.fn().mockResolvedValue([{ name: 'ct0', value: 'csrf' }]),
       evaluate: vi.fn().mockResolvedValueOnce(null).mockResolvedValueOnce(payload),
     });

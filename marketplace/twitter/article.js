@@ -132,31 +132,42 @@ cli({
     const urlMatch = tweetId.match(/\/(?:status|article)\/(\d+)/);
     if (urlMatch)
       tweetId = urlMatch[1];
-    if (isArticleUrl) {
-      await page.goto(`https://x.com/i/article/${tweetId}`);
-      await page.wait(3);
-      const resolvedId = await page.evaluate(`
-        (function() {
-          var links = document.querySelectorAll('a[href*="/status/"]');
-          for (var i = 0; i < links.length; i++) {
-            var m = links[i].href.match(/\\/status\\/(\\d+)/);
-            if (m) return m[1];
-          }
-          var og = document.querySelector('meta[property="og:url"]');
-          if (og && og.content) {
-            var m2 = og.content.match(/\\/status\\/(\\d+)/);
-            if (m2) return m2[1];
-          }
-          return null;
-        })()
-      `);
-      if (!resolvedId || typeof resolvedId !== "string") {
-        throw new CommandExecutionError(`Could not resolve article ${tweetId} to a tweet ID. The article page may not contain a linked tweet.`);
+    // Trampoline idempotency: page.goto re-executes this func from the top after
+    // reinjection, so the leading article->status navigation would ping-pong. If a
+    // replay already landed on the final /i/status/<id> scrape page, skip the leading
+    // gotos and re-derive tweetId from the current URL (the canonical id lives there).
+    // See adapter-hot-plug.md §10.21.
+    const currentUrl = await page.getCurrentUrl().catch(() => "");
+    const onStatusPage = currentUrl.match(/\/i\/status\/(\d+)/);
+    if (onStatusPage) {
+      tweetId = onStatusPage[1];
+    } else {
+      if (isArticleUrl) {
+        await page.goto(`https://x.com/i/article/${tweetId}`);
+        await page.wait(3);
+        const resolvedId = await page.evaluate(`
+          (function() {
+            var links = document.querySelectorAll('a[href*="/status/"]');
+            for (var i = 0; i < links.length; i++) {
+              var m = links[i].href.match(/\\/status\\/(\\d+)/);
+              if (m) return m[1];
+            }
+            var og = document.querySelector('meta[property="og:url"]');
+            if (og && og.content) {
+              var m2 = og.content.match(/\\/status\\/(\\d+)/);
+              if (m2) return m2[1];
+            }
+            return null;
+          })()
+        `);
+        if (!resolvedId || typeof resolvedId !== "string") {
+          throw new CommandExecutionError(`Could not resolve article ${tweetId} to a tweet ID. The article page may not contain a linked tweet.`);
+        }
+        tweetId = resolvedId;
       }
-      tweetId = resolvedId;
+      await page.goto(`https://x.com/i/status/${tweetId}`);
+      await page.wait(3);
     }
-    await page.goto(`https://x.com/i/status/${tweetId}`);
-    await page.wait(3);
     const cookies = await page.getCookies({ url: "https://x.com" });
     const ct0 = cookies.find((c) => c.name === "ct0")?.value || null;
     if (!ct0)

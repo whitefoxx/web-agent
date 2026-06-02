@@ -346,8 +346,19 @@ cli({
       throw new CommandExecutionError(`Invalid listId: ${JSON.stringify(kwargs.listId)}`);
     }
     if (!username) throw new CommandExecutionError("Username is required");
-    await page.goto("https://x.com");
-    await page.wait(3);
+    // Trampoline idempotency: page.goto is a no-op when already at the URL, but
+    // the runner re-executes this func from the top after any navigate+reinject.
+    // Two sequential gotos to distinct pages (x.com warm-up → /<username>) would
+    // ping-pong forever. Gate the warm-up goto on "am I already on the final
+    // profile page?" so a replay sitting there skips it. The cookie/queryId/API
+    // steps below are origin-scoped (x.com) and run fine on the profile page,
+    // so only the leading navigation needs guarding. See adapter-hot-plug.md §10.21.
+    const __profileRe = new RegExp("^https?://(?:www\\.|mobile\\.)?x\\.com/" + username.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(?:[/?#]|$)", "i");
+    const __curUrl = await page.getCurrentUrl().catch(() => "");
+    if (!__profileRe.test(__curUrl)) {
+      await page.goto("https://x.com");
+      await page.wait(3);
+    }
     const cookies = await page.getCookies({ url: "https://x.com" });
     const ct0 = cookies.find((c) => c.name === "ct0")?.value || null;
     if (!ct0) throw new AuthRequiredError("x.com", "Not logged into x.com (no ct0 cookie)");

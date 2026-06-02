@@ -33,6 +33,7 @@ import { vi, type Mock } from 'vitest';
 
 export interface FakeXiaohongshuPage {
   goto: Mock;
+  getCurrentUrl?: Mock;
   evaluate: Mock;
   snapshot: Mock;
   click: Mock;
@@ -66,6 +67,7 @@ export function makeFakeXiaohongshuPage(
 ): FakeXiaohongshuPage {
   return {
     goto: vi.fn().mockResolvedValue(undefined),
+    getCurrentUrl: vi.fn().mockResolvedValue(''),
     evaluate: vi.fn().mockResolvedValue(undefined),
     snapshot: vi.fn().mockResolvedValue(undefined),
     click: vi.fn().mockResolvedValue(undefined),

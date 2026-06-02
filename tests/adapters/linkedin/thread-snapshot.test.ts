@@ -15,6 +15,7 @@ function makeFakePage(snapshot: unknown) {
   return {
     goto: vi.fn(async () => undefined),
     wait: vi.fn(async () => undefined),
+    getCurrentUrl: vi.fn().mockResolvedValue(''),
     evaluate: vi.fn(async () => snapshot),
   };
 }

@@ -37,6 +37,7 @@ export interface FakeWeiboPage {
   goto: Mock;
   wait: Mock;
   evaluate: Mock;
+  getCurrentUrl?: Mock;
 }
 
 /**
@@ -48,6 +49,7 @@ export function makeFixedPage(payload: unknown): FakeWeiboPage {
     goto: vi.fn().mockResolvedValue(undefined),
     wait: vi.fn().mockResolvedValue(undefined),
     evaluate: vi.fn().mockResolvedValue(payload),
+    getCurrentUrl: vi.fn().mockResolvedValue(''),
   };
 }
 
@@ -67,5 +69,6 @@ export function makeQueuePage(evaluateResults: unknown[] = []): FakeWeiboPage {
     goto: vi.fn().mockResolvedValue(undefined),
     wait: vi.fn().mockResolvedValue(undefined),
     evaluate,
+    getCurrentUrl: vi.fn().mockResolvedValue(''),
   };
 }

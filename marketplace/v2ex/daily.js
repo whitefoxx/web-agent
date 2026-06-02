@@ -16,27 +16,35 @@ cli({
     func: async (page) => {
         if (!page)
             throw new CommandExecutionError('Browser page required');
-        if (process.env.OPENCLI_VERBOSE) {
-            console.error('[opencli:v2ex] Navigating to /mission/daily');
-        }
-        await page.goto('https://www.v2ex.com/mission/daily');
-        // Cloudflare challenge bypass wait
-        for (let i = 0; i < 5; i++) {
-            await new Promise(r => setTimeout(r, 1500));
-            const title = await page.evaluate(`() => document.title`);
-            if (!title?.includes('Just a moment'))
-                break;
-            if (process.env.OPENCLI_VERBOSE)
-                console.error('[opencli:v2ex] Waiting for Cloudflare...');
-        }
-        // Evaluate DOM to find if we need to check in
-        const checkResult = await page.evaluate(`
+        // Trampoline idempotency: page.goto re-executes this func from the top after
+        // reinjection. Gate the leading goto(/mission/daily) + once-token extraction +
+        // 'claimed' early-return + the redeem goto on "am I already on the redeem page?",
+        // so the replay that lands on /mission/daily/redeem skips straight to the verify
+        // scrape instead of bouncing back to /mission/daily forever.
+        // See adapter-hot-plug.md §10.21.
+        const currentUrl = await page.getCurrentUrl().catch(() => '');
+        if (!/\/mission\/daily\/redeem/.test(currentUrl)) {
+            if (process.env.OPENCLI_VERBOSE) {
+                console.error('[opencli:v2ex] Navigating to /mission/daily');
+            }
+            await page.goto('https://www.v2ex.com/mission/daily');
+            // Cloudflare challenge bypass wait
+            for (let i = 0; i < 5; i++) {
+                await new Promise(r => setTimeout(r, 1500));
+                const title = await page.evaluate(`() => document.title`);
+                if (!title?.includes('Just a moment'))
+                    break;
+                if (process.env.OPENCLI_VERBOSE)
+                    console.error('[opencli:v2ex] Waiting for Cloudflare...');
+            }
+            // Evaluate DOM to find if we need to check in
+            const checkResult = await page.evaluate(`
       async () => {
         const btn = document.querySelector('input.super.normal.button');
         if (!btn || !btn.value.includes('领取')) {
           return { claimed: true, message: '今日奖励已发/无需领取' };
         }
-        
+
         const onclick = btn.getAttribute('onclick');
         if (onclick) {
           const match = onclick.match(/once=(\\d+)/);
@@ -44,30 +52,31 @@ cli({
             return { claimed: false, once: match[1], message: btn.value };
           }
         }
-        
-        return { 
-          claimed: false, 
+
+        return {
+          claimed: false,
           error: '找到了按钮，但未能提取 once token',
           debug_title: document.title,
           debug_body: document.body.innerText.substring(0, 200).replace(/\\n/g, ' ')
         };
       }
     `);
-        if (checkResult.error) {
-            if (process.env.OPENCLI_VERBOSE) {
-                console.error(`[opencli:v2ex:debug] Page Title: ${checkResult.debug_title}`);
-                console.error(`[opencli:v2ex:debug] Page Body: ${checkResult.debug_body}`);
+            if (checkResult.error) {
+                if (process.env.OPENCLI_VERBOSE) {
+                    console.error(`[opencli:v2ex:debug] Page Title: ${checkResult.debug_title}`);
+                    console.error(`[opencli:v2ex:debug] Page Body: ${checkResult.debug_body}`);
+                }
+                throw new CommandExecutionError(checkResult.error);
             }
-            throw new CommandExecutionError(checkResult.error);
+            if (checkResult.claimed) {
+                return [{ status: '✅ 已签到', message: checkResult.message }];
+            }
+            // Perform check in
+            if (process.env.OPENCLI_VERBOSE) {
+                console.error(`[opencli:v2ex] Found check-in token: once=${checkResult.once}. Checking in...`);
+            }
+            await page.goto(`https://www.v2ex.com/mission/daily/redeem?once=${checkResult.once}`);
         }
-        if (checkResult.claimed) {
-            return [{ status: '✅ 已签到', message: checkResult.message }];
-        }
-        // Perform check in
-        if (process.env.OPENCLI_VERBOSE) {
-            console.error(`[opencli:v2ex] Found check-in token: once=${checkResult.once}. Checking in...`);
-        }
-        await page.goto(`https://www.v2ex.com/mission/daily/redeem?once=${checkResult.once}`);
         await new Promise(resolve => setTimeout(resolve, 3000)); // wait longer for redirect
         // Verify result
         const verifyResult = await page.evaluate(`

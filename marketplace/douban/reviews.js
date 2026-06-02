@@ -65,7 +65,25 @@ cli({
   columns: ["movieTitle", "title", "myRating", "votes", "content", "url"],
   func: async (page, kwargs) => {
     const { limit = 20, uid: providedUid, full = false } = kwargs;
-    const uid = providedUid || await getSelfUid(page);
+    // Trampoline idempotency: page.goto re-executes this func from the top after
+    // each navigate+reinject. getSelfUid() goto /mine then fetchReviews goto
+    // /people/<uid>/reviews ping-pongs forever unless a replay landing on the
+    // reviews list skips the leading /mine navigation. See adapter-hot-plug.md §10.21.
+    const curUrl = await page.getCurrentUrl().catch(() => "");
+    const onReviewsList = /\/people\/[^/?#]+\/reviews(?:[?#]|$)/.test(curUrl);
+    const onReviewDetail = /\/(?:review\/\d+|people\/[^/?#]+\/reviews\/\d+)/.test(curUrl);
+    if (full && onReviewDetail && !onReviewsList) {
+      // full=true adds a per-review goto to a distinct review-detail page; a
+      // replay sitting there must NOT bounce back into the /mine→list cycle.
+      // Degrade gracefully so the caller's fallback runs instead of scraping
+      // the wrong page or ping-ponging.
+      return [];
+    }
+    let uid = providedUid;
+    if (!uid) {
+      const listMatch = curUrl.match(/\/people\/([^/?#]+)\/reviews(?:[?#]|$)/);
+      uid = listMatch ? listMatch[1] : await getSelfUid(page);
+    }
     const reviews = await fetchReviews(page, uid, limit, full);
     return reviews;
   }

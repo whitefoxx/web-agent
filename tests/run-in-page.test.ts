@@ -395,6 +395,142 @@ cli({
   });
 });
 
+describe('trampoline — multi-goto ping-pong (regression for adapter-hot-plug §10.21)', () => {
+  // Drives the full SW reinject loop against the in-page runner: run the func;
+  // on status 'navigating', model the SW navigate by moving location.href to the
+  // target (no redirect) + threading lastNavigatedUrl, then re-execute from the
+  // top — exactly what runInstalledFuncAdapter does. Returns the terminal
+  // outcome plus the navigation trail so a ping-pong is visible as an oscillating
+  // navs[] that never settles.
+  async function driveTrampoline(opts: {
+    source: string;
+    site: string;
+    name: string;
+    kwargs: Record<string, unknown>;
+    startUrl: string;
+    evalFor: (loc: string, js: string) => unknown;
+    cap?: number;
+  }): Promise<{ status: 'ok' | 'error' | 'exceeded'; result?: unknown; navs: string[] }> {
+    const cap = opts.cap ?? 5;
+    let href = opts.startUrl;
+    let lastNavigatedUrl: string | undefined;
+    const navs: string[] = [];
+    const immediate = ((fn: () => void) => {
+      fn();
+      return 0 as unknown as ReturnType<typeof setTimeout>;
+    }) as typeof setTimeout;
+    for (let i = 0; i <= cap; i++) {
+      const rpc = async (method: string, a: { args?: unknown[] }) => {
+        if (method === 'evaluate') return opts.evalFor(href, String((a.args ?? [])[0] ?? ''));
+        return undefined; // goto ack
+      };
+      const page = makeLocalPage({
+        rpc,
+        env: { location: { href }, setTimeout: immediate },
+        lastNavigatedUrl,
+      });
+      const r = await runAdapterInPage({
+        source: opts.source,
+        site: opts.site,
+        name: opts.name,
+        kwargs: opts.kwargs,
+        page,
+      });
+      if (r.status === 'navigating') {
+        navs.push(r.navigateUrl as string);
+        href = r.navigateUrl as string; // SW navigated the tab here
+        lastNavigatedUrl = r.navigateUrl as string;
+        continue;
+      }
+      return { status: r.status, result: r.result, navs };
+    }
+    return { status: 'exceeded', navs };
+  }
+
+  // Mirrors weibo/favorites' STRUCTURE: navigate home (to read a uid), then
+  // navigate to a DIFFERENT-origin per-user page to scrape. Two distinct
+  // sequential gotos = the ping-pong trigger.
+  const UNGUARDED = `import { cli, Strategy } from '@jackwener/opencli/registry';
+cli({ site:'demo', name:'fav', access:'read', domain:'demo.com', strategy: Strategy.COOKIE,
+  func: async (page) => {
+    await page.goto('https://home.demo.com');
+    const uid = await page.evaluate('uid');
+    await page.goto('https://www.demo.com/fav/' + uid);
+    return await page.evaluate('rows');
+  },
+});`;
+
+  // The fix: gate the pre-scrape navigation on "am I already on the final page?"
+  // so the replay that lands on the fav page skips straight to the scrape.
+  const GUARDED = `import { cli, Strategy } from '@jackwener/opencli/registry';
+cli({ site:'demo', name:'fav', access:'read', domain:'demo.com', strategy: Strategy.COOKIE,
+  func: async (page) => {
+    let favUrl = await page.getCurrentUrl().catch(() => '');
+    if (!/\\/fav\\/\\d+/.test(favUrl)) {
+      await page.goto('https://home.demo.com');
+      const uid = await page.evaluate('uid');
+      favUrl = 'https://www.demo.com/fav/' + uid;
+      await page.goto(favUrl);
+    }
+    return await page.evaluate('rows');
+  },
+});`;
+
+  const evalFor = (loc: string, js: string): unknown => {
+    if (js === 'uid') return '123';
+    if (js === 'rows') return /\/fav\/\d+/.test(loc) ? ['r1', 'r2'] : [];
+    return undefined;
+  };
+
+  it('UNGUARDED two-distinct-goto func ping-pongs until the reinject cap (the bug)', async () => {
+    const out = await driveTrampoline({
+      source: UNGUARDED,
+      site: 'demo',
+      name: 'fav',
+      kwargs: {},
+      startUrl: 'https://home.demo.com',
+      evalFor,
+      cap: 5,
+    });
+    expect(out.status).toBe('exceeded');
+    // The trail oscillates between the two pages — never settles.
+    expect(out.navs.length).toBeGreaterThan(2);
+    expect(out.navs).toContain('https://www.demo.com/fav/123');
+    expect(out.navs).toContain('https://home.demo.com');
+  });
+
+  it('GUARDED func converges in a single navigation and scrapes (the fix)', async () => {
+    const out = await driveTrampoline({
+      source: GUARDED,
+      site: 'demo',
+      name: 'fav',
+      kwargs: {},
+      startUrl: 'https://home.demo.com',
+      evalFor,
+      cap: 5,
+    });
+    expect(out.status).toBe('ok');
+    expect(out.result).toEqual(['r1', 'r2']);
+    // Exactly one navigation: home → fav. No bounce back.
+    expect(out.navs).toEqual(['https://www.demo.com/fav/123']);
+  });
+
+  it('GUARDED func entered DIRECTLY on the final page does not navigate at all', async () => {
+    const out = await driveTrampoline({
+      source: GUARDED,
+      site: 'demo',
+      name: 'fav',
+      kwargs: {},
+      startUrl: 'https://www.demo.com/fav/123',
+      evalFor,
+      cap: 5,
+    });
+    expect(out.status).toBe('ok');
+    expect(out.result).toEqual(['r1', 'r2']);
+    expect(out.navs).toEqual([]);
+  });
+});
+
 describe('fmtError', () => {
   it('Error → name: message', () => {
     expect(fmtError(new Error('boom'))).toBe('Error: boom');

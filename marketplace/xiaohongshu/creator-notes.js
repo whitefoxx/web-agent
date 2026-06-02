@@ -280,6 +280,17 @@ async function fetchNoteManagerTitleMap(page, neededCount) {
     }
 }
 async function fetchCreatorNotesByCapture(page, limit) {
+    // Trampoline idempotency: this path navigates /statistics then (for the
+    // title-map) /new/note-manager. page.goto re-injects + replays the whole
+    // func from the top, and the in-page capture state (window.__xhsCapture,
+    // pushState paging) is lost across reinject. If a replay lands already on
+    // /new/note-manager, the capture data is unrecoverable here — return [] so
+    // fetchCreatorNotes' API fallback runs instead of re-firing goto(/statistics)
+    // and ping-ponging. See adapter-hot-plug.md §10.21.
+    const currentUrl = await page.getCurrentUrl().catch(() => '');
+    if (/\/new\/note-manager/.test(currentUrl)) {
+        return [];
+    }
     // Land on dashboard root before installing the hook so the data-analysis
     // SPA navigation fires page_num=1's signed request UNDER the hook.
     await page.goto('https://creator.xiaohongshu.com/statistics');

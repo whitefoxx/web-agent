@@ -313,6 +313,19 @@ cli({
         const expectedName = requireStringArg(args, 'expected-name', '--expected-name');
         const note = clampNote(args.note || '');
 
+        // Trampoline idempotency (see adapter-hot-plug.md §10.21): page.goto re-runs
+        // this whole func from the top after each navigate. The profile-probe → invite-send
+        // → sent-page sequence below would, on a replay that lands on the sent page,
+        // bounce back to goto(profileUrl) and ping-pong forever — and worse, re-click
+        // Send (a one-shot side effect). If we are ALREADY on the invitation-manager
+        // sent page, the send has already happened: skip the probe+send entirely and
+        // run only the verification scrape.
+        const currentUrl = await page.getCurrentUrl().catch(() => '');
+        const onSentPage = /\/mynetwork\/invitation-manager\/sent\b/i.test(currentUrl);
+        // On a replay landing on the sent page the profile probe is gone; fall back to
+        // the args-derived identity so the verification result still carries recipient/url.
+        let safety = { actualValue: expectedName, observedUrl: profileUrl };
+        if (!onSentPage) {
         await page.goto(profileUrl);
         await page.wait(6);
         let probe = await probeProfile(page);
@@ -326,7 +339,7 @@ cli({
             await page.wait(2);
             probe = await probeProfile(page);
         }
-        const safety = assessProfileSafety(probe, expectedName, profileUrl);
+        safety = assessProfileSafety(probe, expectedName, profileUrl);
         if (safety.blockReason === 'auth_required') {
             throw new AuthRequiredError(LINKEDIN_DOMAIN, 'LinkedIn connect requires an active signed-in LinkedIn browser session.');
         }
@@ -358,6 +371,7 @@ cli({
             result = unwrapEvaluateResult(await page.evaluate(buildInviteScript(note)));
         }
         if (!result?.ok) throw new CommandExecutionError(`LinkedIn connect blocked: ${result?.reason || 'send_failed'}`);
+        }
         // LinkedIn can take a few seconds after the Send click to materialize the
         // new invite in /mynetwork/invitation-manager/sent/. Wait before the
         // first check, then retry page loads for propagation lag.

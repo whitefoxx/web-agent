@@ -106,6 +106,10 @@ export interface FakeTranscriptPage {
   goto: Mock<(url: string, opts?: unknown) => Promise<void>>;
   wait: Mock<(seconds: number) => Promise<void>>;
   evaluate: Mock<(script: string) => Promise<unknown>>;
+  /** Trampoline-guard probe. Production pages (makeLocalPage / PageShim) always
+   * expose this; defaulting to '' here never matches an adapter's "am I on the
+   * final page?" guard regex, so navigation runs exactly as before. */
+  getCurrentUrl?: Mock<() => Promise<string>>;
   startNetworkCapture?: Mock<(filter: string) => Promise<void>>;
   readNetworkCapture?: Mock<() => Promise<unknown>>;
 }
@@ -120,6 +124,7 @@ export function makeTranscriptPage(): FakeTranscriptPage {
   return {
     goto: vi.fn().mockResolvedValue(undefined),
     wait: vi.fn().mockResolvedValue(undefined),
+    getCurrentUrl: vi.fn().mockResolvedValue(''),
     evaluate: vi.fn(),
   };
 }
@@ -136,6 +141,7 @@ export function makeTranscriptCapturePage({
   return {
     goto: vi.fn().mockResolvedValue(undefined),
     wait: vi.fn().mockResolvedValue(undefined),
+    getCurrentUrl: vi.fn().mockResolvedValue(''),
     startNetworkCapture: vi.fn().mockResolvedValue(undefined),
     readNetworkCapture: vi.fn().mockResolvedValue(readNetworkCapture),
     evaluate: vi.fn(),

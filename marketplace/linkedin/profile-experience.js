@@ -634,7 +634,17 @@ cli({
     if (!page) throw new CommandExecutionError("Browser session required for linkedin profile-experience");
     const profileUrl = normalizeProfileUrl(args["profile-url"]);
     let experienceUrl;
-    if (!args["profile-url"] || new URL(profileUrl).pathname === "/in/me/") {
+    // Trampoline idempotency: the /in/me/ branch does two sequential gotos to
+    // distinct pages (profile then details/experience). On replay the runner
+    // re-executes from the top; if we are already sitting on the final
+    // experience page, skip the leading resolve-navigation so we don't bounce
+    // back to the profile and ping-pong forever. The inter-goto DOM read only
+    // builds the next URL (not returned data), so a pure skip is safe.
+    // See adapter-hot-plug.md §10.21.
+    const currentUrl = await page.getCurrentUrl().catch(() => "");
+    if ((!args["profile-url"] || new URL(profileUrl).pathname === "/in/me/") && /\/in\/[^/?#]+\/details\/experience\/?/i.test(currentUrl)) {
+      experienceUrl = currentUrl;
+    } else if (!args["profile-url"] || new URL(profileUrl).pathname === "/in/me/") {
       await page.goto(profileUrl);
       await page.wait(4);
       await assertLinkedInAuthenticated(page, "LinkedIn profile-experience");

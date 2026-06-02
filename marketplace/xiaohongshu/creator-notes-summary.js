@@ -355,13 +355,22 @@ async function fetchCreatorNotesByApi(page, limit) {
 }
 async function fetchCreatorNotes(page, limit) {
   let notes = [];
-  try {
-    notes = await fetchCreatorNotesByCapture(page, limit);
-  } catch (error) {
-    if (error instanceof CommandExecutionError) throw error;
-  }
-  if (notes.length === 0) {
-    notes = await fetchCreatorNotesByApi(page, limit);
+  // Trampoline idempotency: page.goto re-executes the whole func from the top
+  // after reinjection, so the leading capture (/statistics) + API
+  // (/statistics/data-analysis) fallbacks would ping-pong against the final
+  // DOM-scrape goto to /new/note-manager. Once a replay already sits on
+  // /new/note-manager those leading fallbacks yield empty notes anyway, so skip
+  // straight to the DOM-scrape block below. See adapter-hot-plug.md §10.21.
+  const currentUrl = await page.getCurrentUrl().catch(() => "");
+  if (!/\/new\/note-manager/.test(currentUrl)) {
+    try {
+      notes = await fetchCreatorNotesByCapture(page, limit);
+    } catch (error) {
+      if (error instanceof CommandExecutionError) throw error;
+    }
+    if (notes.length === 0) {
+      notes = await fetchCreatorNotesByApi(page, limit);
+    }
   }
   if (notes.length === 0) {
     await page.goto("https://creator.xiaohongshu.com/new/note-manager");

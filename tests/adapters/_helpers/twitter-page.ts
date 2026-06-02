@@ -60,6 +60,7 @@ export interface FakeTwitterPage {
   readNetworkCapture: Mock;
   getCookies: Mock;
   wait: Mock;
+  getCurrentUrl?: Mock;
   [k: string]: unknown;
 }
 
@@ -114,6 +115,11 @@ export function createPageMock(
     getCookies: vi.fn().mockResolvedValue([]),
 
     wait: vi.fn().mockResolvedValue(undefined),
+
+    // Production page (makeLocalPage / PageShim) always exposes getCurrentUrl;
+    // default to '' so the trampoline guard's "am I on the final page?" regex
+    // never matches and navigation proceeds exactly as before.
+    getCurrentUrl: vi.fn().mockResolvedValue(''),
 
     ...overrides,
   } as FakeTwitterPage;

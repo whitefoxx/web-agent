@@ -905,6 +905,118 @@ back/forward cache, so the message channel is closed.
 
 每次 goto 导航都刷一条。**无害**(就是上面那个 bfcache 断 port),但是噪音。根因:goto 把旧页面塞进 bfcache → 持有 runner `connect()` port 的那个页面被缓存 → Chrome **带着 `lastError` 拆掉 channel**;我们的 `onDisconnect` 没读 `lastError` → Chrome 报「Unchecked」。修法:`onDisconnect` 里 `void chrome.runtime.lastError;` 把它**消费掉**(这是 Chrome 文档给的标准姿势——「想知道断开是不是出错,在 onDisconnect 回调里读 lastError」)。顺带:SW 侧给 runner port 的 `postMessage`(INIT / RPC 回复)包了 `safePost` try/catch,免得对一个刚断的 port post 在 async 监听器里抛未捕获;keepalive port 的 onDisconnect 同样读一下 lastError。**教训**:port 异常断开会 set `lastError`,**onDisconnect 回调有义务读它**,否则每次断开都是一条「Unchecked」噪音。
 
+### 10.21 多次 `page.goto` 的 func 在 trampoline 上**来回打转**(ping-pong)直到 reinject 上限
+
+**症状**(`weibo__favorites`,用户已登录):调用 ~31s 后报
+`adapter exceeded 5 navigate-reinject cycles`,什么都没取到。日志里 tab 在
+`weibo.com` ↔ `www.weibo.com/u/page/fav/<uid>` 之间**反复横跳**,每次 reinject
+吃一个 cycle,跳满 6 次就放弃:
+
+```
+navigate → www.weibo.com/u/page/fav/1654935391  (iter 1/6)
+navigate → weibo.com                              (iter 2/6)
+navigate → www.weibo.com/u/page/fav/1654935391   (iter 3/6)
+navigate → weibo.com                              (iter 4/6)
+... 直到 exceeded
+```
+
+**根因**:installed func adapter 跑在**页面内**(USER_SCRIPT world),`page.goto`
+是个 **navigate-then-reinject trampoline**(见本文件头 + §10.10/§10.11):跨文档
+导航会销毁 runner 的执行上下文,SW 必须**重新注入 runner、从头重跑整个 func**。
+这套模型只对两类 func 透明:**无 goto**(~75%)和**单一有效 goto**(~24%)。
+
+`weibo/favorites` 是**两次跳到不同 logical page** 的 func:
+
+```js
+await page.goto("https://weibo.com");                       // ① 读 uid
+const uid = await getSelfUid(page);
+await page.goto("https://www.weibo.com/u/page/fav/" + uid); // ② 抓取
+```
+
+`weibo.com` 与 `www.weibo.com` 在 URL parser 眼里是**不同 origin**。重跑语义下:
+落到收藏页那次 replay 会**无条件重新执行 ① 的 `goto("https://weibo.com")`**
+(此刻 `sameLogicalPage(收藏页, weibo.com)` 为 false,`lastNavigatedUrl` 又只兜
+一层)→ 跳回首页;下一次 replay 又触发 ② → 跳回收藏页……死循环。本文件头其实早
+写了「multi-goto / interleaved funcs(~1%)fall back to the CDP PageShim」——
+但那是**built-in opencli 路径**才有的退路;**installed adapter 只有 userScripts
+一条路,没有 CDP PageShim 兜底**,所以多次跳转的 func 必须**自身写成幂等可重跑**。
+
+更一般地:trampoline 安全 ⟺ **从头重跑在每次导航后都做单调前进**——一旦执行已经
+越过某个 goto,重跑不能再往回跳。任何「`goto A`(无条件)… `goto B`,A≠B」且
+到了 B 之后重跑会重新触发 `goto A` 的 func,都会 ping-pong。
+
+**修法**:把抓取前的导航**用「我是不是已经在最终页」的 URL 守卫包起来**,让落到
+最终页的那次 replay 直接跳过前置导航、去抓取(单调前进):
+
+```js
+let favUrl = await page.getCurrentUrl().catch(() => "");
+if (!/\/u\/page\/fav\/\d+/.test(favUrl)) {
+  await page.goto("https://weibo.com");
+  await page.wait(2);
+  const uid = await getSelfUid(page);
+  favUrl = "https://www.weibo.com/u/page/fav/" + uid;
+  await page.goto(favUrl);
+}
+await page.wait(4);
+// ...抓取(不变)...
+```
+
+收敛成**一次**导航;未登录也快速 fail(getSelfUid 抛 AuthRequiredError),不再打转。
+
+**全量审计**(用 workflow 把 32 个 `≥2 .goto(` 的 adapter 各一个 agent 扫了一遍,
+按「重跑单调性」分类):
+
+| 类别 | 数量 | 处理 |
+| --- | --- | --- |
+| **SAFE** | 12 | 不动——两次 goto 在互斥分支 / 同一 logical page / 已有 URL 守卫(chatgpt·claude·gemini 的 send/ask、douban/subject、douban/marks、linkedin/salesnav-thread) |
+| **PING_PONG_FIXABLE** | 14 | 加 URL 守卫修掉(见下) |
+| **INTERLEAVED_NEEDS_CDP** | 6 | **本轮不修**,见下 |
+
+加上 weibo/favorites 共 **15 个**用同一守卫范式修掉:`douban/reviews`、
+`linkedin/{connect,profile-experience,profile-projects,thread-snapshot}`、
+`twitter/{article,followers,list-remove,profile}`、`v2ex/daily`、`weread/book`、
+`xiaohongshu/{creator-notes,creator-notes-summary}`、`youtube/transcript`。每个守卫
+**只包住「本来就坏的多跳路径」,arg 提供 / 单跳 / 抓取代码逐字不变**——这些 adapter
+现状是 100% 打转(根本跑不通),所以守卫**只可能改善、不可能让能跑的退化**。
+个别带「跨页读」的(`douban/reviews` 的 `full=true`、`xiaohongshu/creator-notes`
+的 capture 流水线)做**优雅降级**(replay 落到最终页时 `return []`,让上层 fallback
+接手),而不是抓错页的数据或继续打转。每个 adapter 源改完都轮了 `index.json` 的
+`sha256`(§11.4 的硬门控)。
+
+**6 个 INTERLEAVED_NEEDS_CDP 为何不修**:`linkedin/{jobs-preferences,profile-read,
+salesnav-message,search,services-read}`、`twitter/reply-dm` 在**两次导航之间读了页面
+DOM,且那份数据进了返回结果**(`goto A; r1=读A; goto B; r2=读B; return [r1,r2]`)。
+trampoline 的最后一次 replay 坐在 B 上,重跑时 `读A` 会读到 B 的 DOM → 数据错乱。
+URL 守卫救不了——它们真的需要「页面外的 CDP 控制器」那种「goto 后执行继续、不重跑」
+的模型,而 installed adapter 没有。**先记下来、留作后续**(要么改成用 `page.evaluate`
+里 `fetch` 同源取数据避免导航,要么单独给 installed adapter 接一条 CDP 执行路)。
+
+**回归护栏**:`tests/run-in-page.test.ts` 加了一个 `driveTrampoline` 驱动器,真把
+「跑 func → navigating 就挪 location.href + 重跑」的 SW reinject 循环模拟出来,
+断言:**无守卫的两跳 func 一定打到 reinject 上限**(复现 bug),**有守卫的一跳收敛
+并抓取成功**(证明修法)。这样这一类 bug 不靠真机也能拦住。
+
+**教训**:
+
+1. **「从头重跑」的执行模型对 func 有一个隐性契约:导航序列必须单调可重放**。无 goto
+   / 单跳天然满足,多跳必须靠 URL 守卫显式满足。这跟 §10.4(URL 漂移)、§10.11
+   (redirect)、§10.18(注入 scope)同形:**一个分布在多组件间的契约,每个组件都得
+   自己对上**——这里是「每个 `page.goto` 都得能在重跑里认出自己已经走过」。
+2. **静态审计要按「bug 形态」全量扫,别等用户一个个踩**(同 §10.18/§13.1)。一个
+   `weibo__favorites` 暴露的是一整类:`grep '≥2 .goto('` → 32 个候选 → workflow
+   并行分类 → 15 个真坏。下一次遇到任何「单点症状」先问「这是哪一类,全量有几个」。
+3. **守卫范式里 `page.getCurrentUrl()` 是生产必有、测试 fake 常缺的方法**——见下个小坑。
+
+**附带坑(测试 fake 不完整)**:加完守卫,15 个 adapter 的移植测试一片红——
+`page.getCurrentUrl()` 在 fake page 上**不是函数**,`.catch` 还没接上就先 throw
+`TypeError`(`await page.getCurrentUrl().catch(...)` 先求值 `page.getCurrentUrl()`)。
+生产里 `makeLocalPage`/`PageShim` **永远**有 getCurrentUrl,是这些早于守卫写的 fake
+page 工厂没补。修法:照 `zhihu-page.ts` 的既有约定,给相关 fake-page 工厂默认补
+`getCurrentUrl: vi.fn().mockResolvedValue('')`——返回**空串**(不匹配任何守卫正则)
+所以 func 照旧导航,既有断言全保。**教训**:**给 adapter 加了新的 `page.*` 调用,
+等于改了 page 契约,所有 fake page 都得跟着补全**;fake 的「最小可用」会在契约扩张时
+变成「不完整」(同 §10.8/§10.14「测样要覆盖真实形态多样性」)。
+
 ## 11. 市场布局 v2:per-file + sha256(为公开市场铺路)
 
 > 关键改动 commit:`<next>`(本节描述的整体 schema-v2 切换)。

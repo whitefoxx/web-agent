@@ -432,11 +432,24 @@ cli({
       if (!(error instanceof CliError) || error.code !== "AUTH_REQUIRED") {
         throw error;
       }
-      const { readerUrl: resolvedReaderUrl, snapshot } = await resolveShelfReader(page, bookId);
-      let readerUrl = resolvedReaderUrl;
-      if (!readerUrl) {
-        const cachedBook = snapshot.rawBooks.find((book) => String(book?.bookId || "").trim() === bookId);
-        readerUrl = await resolveSearchReaderUrl(String(cachedBook?.title || ""), String(cachedBook?.author || ""));
+      // Trampoline idempotency: page.goto is a no-op when already at the url,
+      // and the func re-executes from the top after every navigate-reinject.
+      // The fallback chains two distinct gotos (shelf -> /web/reader/), which
+      // ping-pongs forever. If the replay already lands on the final reader
+      // page, use the current URL as readerUrl and SKIP the shelf resolution
+      // (it reads shelf DOM/localStorage that isn't available here anyway).
+      // See adapter-hot-plug.md §10.21.
+      let readerUrl;
+      const currentUrl = await page.getCurrentUrl().catch(() => "");
+      if (/\/web\/reader\//.test(currentUrl)) {
+        readerUrl = currentUrl;
+      } else {
+        const { readerUrl: resolvedReaderUrl, snapshot } = await resolveShelfReader(page, bookId);
+        readerUrl = resolvedReaderUrl;
+        if (!readerUrl) {
+          const cachedBook = snapshot.rawBooks.find((book) => String(book?.bookId || "").trim() === bookId);
+          readerUrl = await resolveSearchReaderUrl(String(cachedBook?.title || ""), String(cachedBook?.author || ""));
+        }
       }
       if (!readerUrl) {
         throw error;

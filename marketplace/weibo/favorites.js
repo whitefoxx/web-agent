@@ -135,11 +135,22 @@ cli({
   columns: ["author", "text", "time", "source", "likes", "comments", "reposts", "url"],
   func: async (page, kwargs) => {
     const limit = parsePositiveInt(kwargs.limit, "limit", DEFAULT_LIMIT);
-    await page.goto("https://weibo.com");
-    await page.wait(2);
-    const uid = await getSelfUid(page);
-    const favUrl = "https://www.weibo.com/u/page/fav/" + uid;
-    await page.goto(favUrl);
+    // Idempotent navigation (hot-plug trampoline): the in-page runner re-executes
+    // this whole func from the top after every page.goto. This func navigates
+    // TWICE to different origins — weibo.com (to read the uid) then
+    // www.weibo.com/u/page/fav/<uid> (to scrape). If the leading
+    // goto("https://weibo.com") ran unconditionally on the re-execution that
+    // lands on the favorites page, it would bounce back home and ping-pong
+    // forever. Gate every pre-scrape step on "am I already on the favorites
+    // page?" so the replay makes monotonic progress. See adapter-hot-plug.md §10.21.
+    let favUrl = await page.getCurrentUrl().catch(() => "");
+    if (!/\/u\/page\/fav\/\d+/.test(favUrl)) {
+      await page.goto("https://weibo.com");
+      await page.wait(2);
+      const uid = await getSelfUid(page);
+      favUrl = "https://www.weibo.com/u/page/fav/" + uid;
+      await page.goto(favUrl);
+    }
     await page.wait(4);
     for (let i = 0; i < 3; i++) {
       await page.evaluate("() => window.scrollBy(0, 800)");

@@ -167,9 +167,17 @@ cli({
     const threadUrl = requireLinkedInThreadUrl(requireStringArg(args, 'thread-url', '--thread-url'), '--thread-url');
     const maxScrolls = parseMaxScrolls(args['max-scrolls']);
 
-    await page.goto('https://www.linkedin.com/messaging/');
-    await page.wait(4);
-    await page.goto(threadUrl);
+    // Trampoline idempotency: page.goto re-executes this func from the top after
+    // reinjection. The inbox warm-up + thread goto are two gotos to DISTINCT pages,
+    // so an unconditional replay would bounce inbox<->thread forever. Skip the
+    // leading navigation when the replay already landed on the target thread page.
+    // See adapter-hot-plug.md §10.21.
+    const currentUrl = await page.getCurrentUrl().catch(() => '');
+    if (!/\/messaging\/thread\//.test(currentUrl)) {
+      await page.goto('https://www.linkedin.com/messaging/');
+      await page.wait(4);
+      await page.goto(threadUrl);
+    }
     await page.wait(10);
 
     const snapshot = unwrapEvaluateResult(await page.evaluate(buildThreadSnapshotScript(maxScrolls)));

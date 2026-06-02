@@ -209,17 +209,31 @@ cli({
       throw new ArgumentError("twitter profile username must be a valid Twitter/X handle", "Example: opencli twitter profile @jack");
     }
     if (!username) {
-      await page.goto("https://x.com/home");
-      await page.wait({ selector: '[data-testid="primaryColumn"]' });
-      const href = unwrapBrowserResult(await page.evaluate(`() => {
-        const link = document.querySelector('a[data-testid="AppTabBar_Profile_Link"]');
-        return link ? link.getAttribute('href') : null;
-      }`));
-      if (!href || typeof href !== "string")
-        throw new AuthRequiredError("x.com", "Could not detect logged-in user. Are you logged in?");
-      username = normalizeTwitterScreenName(href);
-      if (!username)
-        throw new AuthRequiredError("x.com", "Could not detect logged-in user. Are you logged in?");
+      // Trampoline idempotency: hot-plug funcs re-execute from the top after a
+      // page.goto() navigation. The no-username path does TWO distinct gotos —
+      // x.com/home (to detect the logged-in handle) then x.com/<handle> (the
+      // final scrape page). On the re-execution that lands on the profile page,
+      // skip the leading /home detection by recovering <handle> from the current
+      // URL; otherwise goto("x.com/home") would bounce us off the profile and
+      // ping-pong forever. normalizeTwitterScreenName() accepts a full URL and
+      // returns "" for reserved paths (e.g. /home), so a replay mid-block at
+      // /home falls through to normal detection. See adapter-hot-plug.md §10.21.
+      const currentUsername = normalizeTwitterScreenName(await page.getCurrentUrl().catch(() => ""));
+      if (currentUsername) {
+        username = currentUsername;
+      } else {
+        await page.goto("https://x.com/home");
+        await page.wait({ selector: '[data-testid="primaryColumn"]' });
+        const href = unwrapBrowserResult(await page.evaluate(`() => {
+          const link = document.querySelector('a[data-testid="AppTabBar_Profile_Link"]');
+          return link ? link.getAttribute('href') : null;
+        }`));
+        if (!href || typeof href !== "string")
+          throw new AuthRequiredError("x.com", "Could not detect logged-in user. Are you logged in?");
+        username = normalizeTwitterScreenName(href);
+        if (!username)
+          throw new AuthRequiredError("x.com", "Could not detect logged-in user. Are you logged in?");
+      }
     }
     await page.goto(`https://x.com/${username}`);
     await page.wait(3);

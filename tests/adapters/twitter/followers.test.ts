@@ -37,6 +37,7 @@ describe('twitter followers command (marketplace)', () => {
     const page = {
       goto: vi.fn().mockResolvedValue(undefined),
       wait: vi.fn().mockResolvedValue(undefined),
+      getCurrentUrl: vi.fn().mockResolvedValue(''),
       evaluate: vi.fn(async (script: unknown) => {
         if (String(script).includes('AppTabBar_Profile_Link')) return '/home';
         throw new Error(`Unexpected evaluate: ${String(script).slice(0, 80)}`);
@@ -52,6 +53,7 @@ describe('twitter followers command (marketplace)', () => {
     const page = {
       goto: vi.fn().mockResolvedValue(undefined),
       wait: vi.fn().mockResolvedValue(undefined),
+      getCurrentUrl: vi.fn().mockResolvedValue(''),
       autoScroll: vi.fn().mockResolvedValue(undefined),
       evaluate: vi.fn(async (script: unknown) => {
         const text = String(script);

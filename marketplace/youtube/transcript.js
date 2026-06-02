@@ -391,14 +391,25 @@ cli({
     const mode = kwargs.mode || "grouped";
     const watchUrl = "https://www.youtube.com/watch?v=" + encodeURIComponent(videoId);
     const canCapture = typeof page.startNetworkCapture === "function" && typeof page.readNetworkCapture === "function";
-    if (canCapture) {
-      try {
-        await page.startNetworkCapture("/api/timedtext");
-      } catch {
+    // Trampoline idempotency: page.goto re-executes this func from the top after
+    // navigation. The no-segments path below falls back to goto(youtube.com
+    // homepage), so an unconditional goto(watchUrl) would ping-pong between the
+    // homepage and the watch page forever. Skip the leading watch navigation when
+    // the replay has already landed on the bare homepage; there the player
+    // evaluate returns null and flow degrades into the fetch fallback (which
+    // fetches /watch?v=... directly). See adapter-hot-plug.md §10.21.
+    const curUrl = await page.getCurrentUrl().catch(() => "");
+    const onHomepage = /^https?:\/\/(?:www\.)?youtube\.com\/?(?:[?#]|$)/.test(curUrl);
+    if (!onHomepage) {
+      if (canCapture) {
+        try {
+          await page.startNetworkCapture("/api/timedtext");
+        } catch {
+        }
       }
+      await page.goto(watchUrl, { waitUntil: "none" });
+      await page.wait(3);
     }
-    await page.goto(watchUrl, { waitUntil: "none" });
-    await page.wait(3);
     const playerResult = await page.evaluate(`
       (async () => {
         const langPref = ${JSON.stringify(lang)};

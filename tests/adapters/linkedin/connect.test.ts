@@ -27,6 +27,7 @@ function makeFakePage(
   return {
     goto: vi.fn(async () => undefined),
     wait: vi.fn(async () => undefined),
+    getCurrentUrl: vi.fn().mockResolvedValue(''),
     evaluate: vi.fn(async (script: unknown) => {
       const text = String(script);
       if (text.includes('custom-message') || text.includes('invite_dialog_not_found'))
@@ -41,6 +42,7 @@ function makeSequentialFakePage(values: unknown[]) {
   return {
     goto: vi.fn(async () => undefined),
     wait: vi.fn(async () => undefined),
+    getCurrentUrl: vi.fn().mockResolvedValue(''),
     evaluate: vi.fn(async (script: unknown) => {
       const text = String(script);
       if (text.includes('custom-message') || text.includes('invite_dialog_not_found'))

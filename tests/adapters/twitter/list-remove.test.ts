@@ -50,6 +50,7 @@ function buildRemovePage(afterPayload: unknown) {
   return {
     goto: vi.fn().mockResolvedValue(undefined),
     wait: vi.fn().mockResolvedValue(undefined),
+    getCurrentUrl: vi.fn().mockResolvedValue(''),
     getCookies: vi.fn().mockResolvedValue([{ name: 'ct0', value: 'token' }]),
     nativeClick: vi.fn().mockResolvedValue(undefined),
     evaluate: vi
@@ -85,6 +86,7 @@ describe('twitter list-remove registration (marketplace)', () => {
     const page = {
       goto: vi.fn().mockResolvedValue(undefined),
       wait: vi.fn().mockResolvedValue(undefined),
+      getCurrentUrl: vi.fn().mockResolvedValue(''),
       getCookies: vi.fn().mockResolvedValue([{ name: 'ct0', value: 'token' }]),
       evaluate: vi
         .fn()

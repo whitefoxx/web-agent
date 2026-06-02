@@ -634,7 +634,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "douban/reviews.js",
-      "sha256": "63cdcbd1dfd955532f5022d63cffe9a51c0b02b971de69fe7d4c198ed24a25c5"
+      "sha256": "8601cfc72ad7ee915fe5ba97f43a53c3f04d856a15c585e31777987ff537e9fb"
     },
     {
       "site": "douban",
@@ -1266,7 +1266,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "linkedin/connect.js",
-      "sha256": "2c4f45a0a78700c9280f56a051581f8d5e50592a161070c6fbd8540241a2a91f"
+      "sha256": "2336edac975457edaaaa81d95b89088993ecc8ce0d5b2db2b0aadab8fff5a7e2"
     },
     {
       "site": "linkedin",
@@ -1356,7 +1356,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "linkedin/profile-experience.js",
-      "sha256": "cf741fc991639906a08bd357be8410adc38d92050d0f6ee0dff87d5514a2144d"
+      "sha256": "fc180dee76d3e4ca8df057b3371e4ba9b017e42e3b8397e05efc1a4b447bce2c"
     },
     {
       "site": "linkedin",
@@ -1369,7 +1369,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "linkedin/profile-projects.js",
-      "sha256": "7ebf0859f92f8772a50ced1392af0fc2c51262d62bc1e6f6425e69d07b6c08a9"
+      "sha256": "0deede0b23ce4014b1af7812c3d7e021e6a1905c833bd63b646bdc3daac7b55a"
     },
     {
       "site": "linkedin",
@@ -1480,7 +1480,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "linkedin/thread-snapshot.js",
-      "sha256": "de76bd6d64cf173ebf137e4b9e3fba4afb093faf224b82938d1da19841c7b97f"
+      "sha256": "5be8364bdfc5aeb47f4f72cc1af48668325b0bbea103db153de0b73df80ea200"
     },
     {
       "site": "linkedin",
@@ -2191,7 +2191,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "twitter/article.js",
-      "sha256": "64747e9b9e380bfb9fdac6443c462619ed1ac9f7e8059e67f04adc673af6f619"
+      "sha256": "dcf0070486dbbb7c4eeb3c6bf4a384eb94a64ab906fc57fced0f02167e73929d"
     },
     {
       "site": "twitter",
@@ -2308,7 +2308,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "twitter/followers.js",
-      "sha256": "1e57f83adf010bd65133a669fa3fc3b5b8359a791677273eb641b62fb552a7f8"
+      "sha256": "eb296511dba1370445b29c62f3f6d32ded28efeac5a4ca154232ee16edcdce7a"
     },
     {
       "site": "twitter",
@@ -2399,7 +2399,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "twitter/list-remove.js",
-      "sha256": "8cead33091d4980a57909c4919a37debaeec818571ca856ff5c982c1c6f00791"
+      "sha256": "1e9a6f40c947dad6fada2c896a413f5e14a5857a7107116ee4ec5b66d5d408db"
     },
     {
       "site": "twitter",
@@ -2451,7 +2451,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "twitter/profile.js",
-      "sha256": "7f7ea76a5c91ca625b21e4cbd862ae9fcec3479d319f3e0e2fc35aad2142e703"
+      "sha256": "21ac7d65800ef31252a508a161c6a3e1292c9a5795f47db9c3c5c8ebefe074af"
     },
     {
       "site": "twitter",
@@ -2620,7 +2620,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "v2ex/daily.js",
-      "sha256": "a337278f4d936501b4a7e2ecae59955049e4b3740f39f54e99d6fc8c198dc5dd"
+      "sha256": "2c44a6a24cb312c308a73ad9b4dcb2aa2bb9f8bff106a37a2c1583dba4f99809"
     },
     {
       "site": "v2ex",
@@ -2789,7 +2789,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "weibo/favorites.js",
-      "sha256": "90277da5c378871da38a15fc331618cdb0034c891351e6388a2f37d0162def65"
+      "sha256": "6fc21cce75f62627f411b92cd8779c2ce2e587ec549f6e94bd68f40fdc15f5c7"
     },
     {
       "site": "weibo",
@@ -3010,7 +3010,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "weread/book.js",
-      "sha256": "8b3f2bf88055e091682e0d7f95c6a7a7021ffdf459013bc272aa4c196741da47"
+      "sha256": "39954e6ba01467b6fb401a12d8c270e3698d282a7370b40a862c8ce8a48b75b1"
     },
     {
       "site": "weread",
@@ -3201,7 +3201,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "xiaohongshu/creator-notes.js",
-      "sha256": "10c951d28f8b0c0c3af9f9769fa04f74a2c2f661ae4ee0a9136fe61058da17c8"
+      "sha256": "a59f627c4380a9b294d9f5210a690510d26b8f79af9056fdca2c6883ebd7ecf0"
     },
     {
       "site": "xiaohongshu",
@@ -3214,7 +3214,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "xiaohongshu/creator-notes-summary.js",
-      "sha256": "e39e1bbd8c6e71e6396b63a6cb1f461fa57eafc3fdb50bab60af32a396122a1d"
+      "sha256": "02c5ed4f7a9d10f62a88ca3fba9b9ccb3cd352bf3c3ad0ec6dc05c7ef9fd9509"
     },
     {
       "site": "xiaohongshu",
@@ -3422,7 +3422,7 @@
       "author": "opencli",
       "version": "1.0.0",
       "source": "youtube/transcript.js",
-      "sha256": "b2ace63e0f896be8085e2b6a2f832953dc9d036ddf46a9f80a30592f8797488a"
+      "sha256": "92d53ec83c4033bca2bed81ea6bd3dc0b0babd2eced0e612a144268cde7b6bbb"
     },
     {
       "site": "youtube",

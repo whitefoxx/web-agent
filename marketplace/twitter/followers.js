@@ -135,18 +135,34 @@ cli({
       throw new ArgumentError("twitter followers user must be a valid Twitter/X handle", "Example: opencli twitter followers @elonmusk --limit 100");
     }
     if (!targetUser) {
-      await page.goto("https://x.com/home");
-      await page.wait({ selector: '[data-testid="primaryColumn"]' });
-      const href = unwrapBrowserResult(await page.evaluate(`() => {
+      // Trampoline idempotency: the no-user branch does two distinct unconditional
+      // gotos (/home to detect self, then /<user>), which ping-pong forever — after
+      // goto(/<user>) reinjects + replays the func, the leading goto(/home) bounces
+      // back off the profile page and the cycle repeats. If we're already on the
+      // self's profile page (/<user>, optionally /<user>/followers), recover the
+      // handle from the URL and skip the /home self-detection navigation; the later
+      // goto(/<user>) then becomes a no-op and the scrape proceeds.
+      // normalizeScreenName rejects reserved paths (e.g. "home"), so sitting on
+      // /home will not false-match. See adapter-hot-plug.md §10.21.
+      const currentUrl = await page.getCurrentUrl().catch(() => "");
+      const selfMatch = /^https?:\/\/(?:x|twitter|mobile\.twitter)\.com\/([A-Za-z0-9_]{1,15})(?:\/(?:followers|verified_followers))?(?:[?#].*)?$/.exec(currentUrl);
+      const recoveredUser = selfMatch ? normalizeScreenName(selfMatch[1]) : "";
+      if (recoveredUser) {
+        targetUser = recoveredUser;
+      } else {
+        await page.goto("https://x.com/home");
+        await page.wait({ selector: '[data-testid="primaryColumn"]' });
+        const href = unwrapBrowserResult(await page.evaluate(`() => {
                 const link = document.querySelector('a[data-testid="AppTabBar_Profile_Link"]');
                 return link ? link.getAttribute('href') : null;
             }`));
-      if (!href || typeof href !== "string") {
-        throw new AuthRequiredError("x.com", "Could not find logged-in user profile link. Are you logged in?");
-      }
-      targetUser = normalizeScreenName(href);
-      if (!targetUser) {
-        throw new AuthRequiredError("x.com", "Could not find logged-in user profile link. Are you logged in?");
+        if (!href || typeof href !== "string") {
+          throw new AuthRequiredError("x.com", "Could not find logged-in user profile link. Are you logged in?");
+        }
+        targetUser = normalizeScreenName(href);
+        if (!targetUser) {
+          throw new AuthRequiredError("x.com", "Could not find logged-in user profile link. Are you logged in?");
+        }
       }
     }
     if (!targetUser) {

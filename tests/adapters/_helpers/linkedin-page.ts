@@ -35,6 +35,7 @@ export interface FakeLinkedInPage {
   scroll: Mock;
   getCookies: Mock;
   evaluate: Mock;
+  getCurrentUrl?: Mock;
 }
 
 const DEFAULT_COOKIES = [{ name: 'JSESSIONID', value: '"ajax:1234567890"' }];
@@ -59,5 +60,6 @@ export function makeFakeLinkedInPage(
       .fn()
       .mockResolvedValue(opts.cookies === undefined ? DEFAULT_COOKIES : opts.cookies),
     evaluate: opts.evaluate ?? vi.fn(),
+    getCurrentUrl: vi.fn().mockResolvedValue(''),
   };
 }

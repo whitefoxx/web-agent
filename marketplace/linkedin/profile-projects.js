@@ -293,7 +293,21 @@ cli({
     if (!page) throw new CommandExecutionError("Browser session required for linkedin profile-projects");
     const profileUrl = normalizeProfileUrl(args["profile-url"]);
     let projectsUrl;
-    if (!args["profile-url"] || new URL(profileUrl).pathname === "/in/me/") {
+    // Trampoline idempotency: page.goto is a no-op when already at the URL, and a
+    // navigation re-executes this func from the top. The /in/me/ branch below does
+    // TWO distinct gotos (resolve profile, then projects); after landing on the final
+    // /details/projects/ page a replay would re-fire the leading goto and ping-pong.
+    // Gate the leading resolve+goto block on "am I already on the final scrape page?"
+    // so the replay skips straight to the scrape. See adapter-hot-plug.md §10.21.
+    const currentUrl = await page.getCurrentUrl().catch(() => "");
+    let alreadyOnProjects = false;
+    try {
+      alreadyOnProjects = /\/in\/[^/?#]+\/details\/projects\/?$/.test(new URL(currentUrl).pathname);
+    } catch {
+    }
+    if (alreadyOnProjects) {
+      projectsUrl = currentUrl;
+    } else if (!args["profile-url"] || new URL(profileUrl).pathname === "/in/me/") {
       await page.goto(profileUrl);
       await page.wait(4);
       await assertLinkedInAuthenticated(page, "LinkedIn profile-projects");
