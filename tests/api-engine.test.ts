@@ -217,6 +217,22 @@ describe('runApiSession — engine integration scenarios', () => {
     expect(r.doneReason).toBe('no_more_commands');
   });
 
+  it('plan mode: simple=true auto-proceeds without the approval gate', async () => {
+    const decide = vi.fn(async () => ({ decision: 'approve' as const }));
+    const r = await runScenario({
+      mode: 'plan',
+      responses: [
+        toolMsg('submit_plan', { goal: '打开首页', steps: ['打开小红书首页'], simple: true }),
+        textMsg('已打开'),
+      ],
+      requestPlanDecision: decide,
+    });
+    expect(decide).not.toHaveBeenCalled(); // no approval popup for a simple task
+    expect(r.session.plan?.approved).toBe(true);
+    expect(r.notices.some((t) => /直接开始/.test(t))).toBe(true);
+    expect(r.doneReason).toBe('no_more_commands');
+  });
+
   it('plan mode: reflects once before finishing (reflect/re-plan)', async () => {
     const r = await runScenario({
       mode: 'plan',

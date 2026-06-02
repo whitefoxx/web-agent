@@ -156,7 +156,7 @@ const SUBMIT_PLAN_TOOL = {
   function: {
     name: 'submit_plan',
     description:
-      '提交一个分步执行计划给用户审批(规划模式)。研究清楚后调用:goal 为一句话目标,steps 为有序步骤清单(每步一句话、具体可执行,写操作要显式列为步骤)。用户批准后你才进入执行阶段。',
+      '提交一个分步执行计划(规划模式)。goal 一句话目标;steps 有序步骤(每步一句、具体可执行,写操作显式列为步骤)。simple=false(默认)会把计划弹给用户确认/修改后再执行;simple=true 用于简单低风险任务,系统直接开始执行、不打扰用户(写操作执行时仍会单独二次确认)。',
     parameters: {
       type: 'object',
       properties: {
@@ -165,6 +165,11 @@ const SUBMIT_PLAN_TOOL = {
           type: 'array',
           description: '有序的步骤清单',
           items: { type: 'string' },
+        },
+        simple: {
+          type: 'boolean',
+          description:
+            '是否为简单低风险任务:true=直接开始不弹审批;false=弹给用户确认/修改(复杂、多步、不确定、或含重要写操作时用 false)',
         },
       },
       required: ['goal', 'steps'],
@@ -767,11 +772,6 @@ export async function runApiSession(ctx: EngineContext, deps: ApiEngineDeps = {}
   async function runPlanningPhase(): Promise<
     'approved' | 'answered' | 'rejected' | 'error' | 'aborted'
   > {
-    ctx.emit({
-      type: 'notice',
-      level: 'info',
-      text: '🗺️ 规划模式:正在研究任务,随后会给你一份计划待批准…',
-    });
     for (let pIter = 0; pIter < PLAN_MAX_STEPS; pIter++) {
       if (ctx.signal.aborted) return 'aborted';
       const iterationId = `${session.id}__plan${pIter}`;
@@ -902,6 +902,28 @@ export async function runApiSession(ctx: EngineContext, deps: ApiEngineDeps = {}
             await ackTool('计划为空,请给出具体的步骤列表。');
             emitFinal('failed', { error: 'empty plan' });
             continue;
+          }
+          // Simple / low-risk task → auto-proceed without the approval card (a
+          // brief notice instead). Writes are STILL individually confirmed at
+          // execution time, so skipping the approach-review gate stays safe.
+          if ((args as { simple?: unknown }).simple === true) {
+            session.plan = {
+              goal: proposed.goal,
+              steps: proposed.steps,
+              updatedAt: Date.now(),
+              approved: true,
+            };
+            ctx.emit({ type: 'plan_updated', plan: session.plan });
+            ctx.emit({
+              type: 'notice',
+              level: 'info',
+              text: `任务较简单,直接开始:${proposed.goal || proposed.steps[0]?.title || ''}`,
+            });
+            await ackTool(
+              '这是简单任务,已直接进入执行(无需审批)。按步骤执行,写操作仍会单独二次确认。',
+            );
+            emitFinal('completed', { result: session.plan });
+            return 'approved';
           }
           const decision = await ctx.requestPlanDecision(proposed);
           if (ctx.signal.aborted) return 'aborted';
@@ -1230,7 +1252,9 @@ export async function runApiSession(ctx: EngineContext, deps: ApiEngineDeps = {}
           ctx.emit({
             type: 'notice',
             level: 'info',
-            text: incomplete ? '计划仍有未完成步骤,提醒模型收尾…' : '计划已完成,让模型最后自检一遍…',
+            text: incomplete
+              ? '计划仍有未完成步骤,提醒模型收尾…'
+              : '计划已完成,让模型最后自检一遍…',
           });
           session.apiMessages = messages;
           await saveSession(session);

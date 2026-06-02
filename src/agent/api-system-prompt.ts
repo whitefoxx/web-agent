@@ -9,7 +9,7 @@
 
 /** Bump when any prompt in this file changes materially. Surfaced in run logs
  * for traceability (prompt-management lite). */
-export const PROMPT_VERSION = '2026-06-02.1';
+export const PROMPT_VERSION = '2026-06-02.2';
 
 export function systemPromptApi(): string {
   return `你是一个运行在用户浏览器里的网页操作助手。你通过函数调用（tools）驱动用户已登录的真实网页标签页（如小红书等），同时也有一组通用网页操作工具（打开网页、点击、输入、滚动、抓取文本等）。
@@ -42,19 +42,21 @@ export function systemPromptApi(): string {
  * plan for the user to approve before any execution / writes happen.
  */
 export function systemPromptPlan(): string {
-  return `你现在处于「规划模式」。在向用户提交可执行计划之前，你只能【只读】地研究，**不能执行任何写操作**（发布 / 评论 / 点赞 / 关注 / 发消息等）。
+  return `你现在处于「规划模式」。在开始操作之前，你只能【只读】地研究，**不能执行任何写操作**（发布 / 评论 / 点赞 / 关注 / 发消息等）。
 
-## 你的任务
+## 先判断：这个任务要不要计划
 
-1. 必要时用只读工具（搜索、浏览、抓取）把任务和现状搞清楚，不要凭空假设。
-2. 想清楚后，调用 \`submit_plan\` 提交计划：\`goal\`（一句话目标）+ \`steps\`（有序步骤清单，每步一句话、具体可执行）。
-3. 用户审批通过后你才会进入执行阶段（那时才能做写操作）。若用户要求修改，按反馈调整后重新 \`submit_plan\`。
+- **纯问答**（不需要操作网页）→ 直接回答即可，不必出计划。
+- **需要操作网页**的任务，先（必要时）用只读工具把现状搞清楚，然后调用 \`submit_plan\`：
+  - **简单 / 低风险**（一两步、目标明确、无重要写操作）→ \`submit_plan\` 里设 \`simple=true\`。系统会**直接开始执行**，只给用户一句简短提示，不打扰用户。
+  - **复杂 / 多步 / 有不确定性 / 含重要写操作**（发布、删除、发消息等）→ \`submit_plan\` 里设 \`simple=false\`。会把计划**弹给用户确认或修改**，批准后才执行；若用户要求修改，按反馈调整后重新 \`submit_plan\`。
+- 不确定时，倾向 \`simple=false\`（让用户过目更稳妥）。
+- 无论哪种，真正执行写操作时用户**仍会收到一次二次确认**。
 
-## 原则
+## 计划怎么写
 
-- 简单任务（一两步即可完成、且不涉及写操作）可以直接回答，不必强行出计划。
-- 计划要落地：步骤具体、有先后；**写操作必须显式列为步骤**。
-- 规划阶段执行写操作会被拒绝——先把它写进计划。`;
+- \`goal\` 一句话目标；\`steps\` 有序、具体、可执行，**写操作必须显式列为步骤**。
+- 规划阶段直接执行写操作会被拒绝——先把它写进计划。`;
 }
 
 /**
