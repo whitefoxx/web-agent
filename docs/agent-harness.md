@@ -350,6 +350,53 @@ sleep / toolCallKey / ThrashTracker`),`tests/resilience.test.ts` 全覆盖;
 
 ---
 
+### 10.14 steering 插话在「最后一轮」必丢 —— drain 只在循环顶部、内存队列被 finally 清掉(2026-06-03 修)
+
+**症状**:运行中插话(steering),会话没被打断(符合设计),但插的话**没生效**;重开会话时,
+那条中途插入的 message **不见了**。
+
+**根因**:steer 的整条生命周期里,**唯一**把它写进 `session.history` + 落盘的地方,是
+`api-engine` 循环**顶部**那一次 `takeSteerMessages()`。但循环的终止出口——模型给出最终答复
+(无 tool_call)走 `return finish('no_more_commands')`——是**直接 return、不回到顶部**,不会
+再 drain。时间线:
+
+1. 模型进入**最后一轮** `complete()`,流式吐最终答复;
+2. 用户恰恰这时看到答复跑偏、插话 → SW `handleSteer` 把文本塞进**内存** `steerQueue`
+   (session 还 active,所以排得进去——这就是"没打断会话"的表象);
+3. 这一轮返回纯文本、`toolCalls` 为空 → `return finish('no_more_commands')`,循环结束,**再没
+   回到顶部 drain**;
+4. 这条 steer 从没 `push` 进 `messages`、从没 `appendTurn`、从没落盘;
+5. SW 的 `finally` `steerQueue.delete(session.id)` 把内存队列丢掉 → **永久丢失**。
+
+重开会话是 `historyToUiTurns(s.history)` 从落盘 history 重建;用户当时看到的 `↪ …` 气泡只是
+`App.tsx` 的**本地乐观 UI**,从没持久化。**结论:steering 只在"模型后面还有下一轮(还会再调
+工具)"时有效;一旦在最后一轮插话(恰恰是看到最终答复才想纠正的高频场景),必丢。** 次要触发
+路径:答复刚结束、UI `running` 还没翻 false 的瞬间插话,SW `!activeSessions.has` 直接静默
+`return` 丢弃,症状一模一样。
+
+旧测试 `steering: a mid-run injected message reaches the very next turn` 一直绿,是因为它的
+`responses` 第一条是 **tool call**,强行制造了第二轮才 drain,从没覆盖"最后一轮是纯文本"这条
+路径——假安全感。
+
+**修法**(核心 + 加固):
+
+- **引擎(治本)**:顶部 drain 抽成 `drainSteers()`(fold 进 `messages` + `appendTurn` + 落盘,
+  返回是否 fold 了),并在**每个** `return finish('no_more_commands')` 出口
+  (`!toolCalls` 与 `finish_reason!=='tool_calls'` 两处)**先 drain 一次**:有 steer 就 `continue`
+  多走一轮让模型真正回应它,没有才 finish。
+- **SW(堵 race)**:`handleSteer` 在 session 已 idle 时不再静默 `return`,改走
+  `rerouteSteerAsFollowUp` —— `loadSession` 后当作一次正常后续 `driveApiSession` 续跑(load
+  期间若又变 active 则改回入队 `enqueueSteer`)。晚到的 steer 因此变成普通后续轮,绝不静默丢。
+- **回归测试**:steer 落在**纯文本最后一轮**(`takeSteerMessages` 在第 2 次调用才返回它)→ 断言
+  它逼出第二次 `complete()`、进了下一轮 context、且进了 `session.history`。1303 vitest 全绿。
+
+**教训**:**「插话」的持久化不能搭车在循环的 drain 时机上**——drain 点(顶部)与退出点(中途
+`return`)不重合时,凡是"只在 drain 点持久化"的东西,在"插话恰好发生在最后一轮"时必然丢。规则:
+**任何"被 fold 进上下文才算数"的用户输入,必须在每一个 loop-exit 之前再 drain 一次**;承载它的
+队列是纯内存(`finally` 会清),所以落盘必须发生在丢队列之前;UI 的乐观气泡 ≠ 持久化,二者要对账。
+
+---
+
 ## 11. 完成状态(2026-06-02)
 
 Phase 0–4 + 三个选项(流式 / 指标-lite / 长期记忆)+ Round 2 补齐项(R1–R7)**全部落地**。

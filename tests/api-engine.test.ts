@@ -210,6 +210,33 @@ describe('runApiSession — engine integration scenarios', () => {
     );
   });
 
+  it('steering: a steer landing on the FINAL (text) turn is still answered + persisted', async () => {
+    // The steer is NOT pending at iter-0's top drain — it arrives during the
+    // model's first (would-be-final) text turn. Pre-fix the loop exited at the
+    // `no_more_commands` return without re-draining, so the steer was dropped
+    // and gone on reload (the reported bug). drainSteers() now runs before every
+    // finish → one more turn instead of a silent drop. §10.14
+    let calls = 0;
+    const r = await runScenario({
+      responses: [textMsg('初步答复'), textMsg('已按要求修正')],
+      takeSteerMessages: () => {
+        calls++;
+        // call #1 = iter-0 top drain (nothing yet); call #2 = the pre-finish
+        // drain at the end of iter 0, where the steer has now landed.
+        return calls === 2 ? ['只列前 3 条'] : [];
+      },
+    });
+    // The steer forced a second model turn instead of finishing on the first.
+    expect(r.completeCalls).toHaveLength(2);
+    // …it was folded into that next turn's context…
+    expect(
+      r.completeCalls[1]!.messages.some((m) => m.role === 'user' && m.content === '只列前 3 条'),
+    ).toBe(true);
+    // …and persisted to history, so it survives reopening the session.
+    expect(r.session.history.some((t) => t.role === 'user' && t.text === '只列前 3 条')).toBe(true);
+    expect(r.doneReason).toBe('no_more_commands');
+  });
+
   it('emits per-run metrics on finish', async () => {
     // Just assert the run completes cleanly with a tool turn (metrics are logged,
     // not emitted; this guards the metrics wiring doesn't throw).

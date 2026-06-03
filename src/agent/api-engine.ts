@@ -692,6 +692,24 @@ export async function runApiSession(ctx: EngineContext, deps: ApiEngineDeps = {}
   ];
   await saveSession(session);
 
+  /** Fold any queued steering messages ("插话" injected mid-run) into the live
+   * context, persisting them as user turns + apiMessages immediately so a steer
+   * is never lost even if the run ends right after. Returns true if ≥1 was
+   * folded — a caller at a loop-exit should then `continue` so the model gets a
+   * turn to actually answer it instead of finishing. See docs/agent-harness.md §10.14. */
+  async function drainSteers(): Promise<boolean> {
+    const steers = ctx.takeSteerMessages();
+    if (!steers.length) return false;
+    for (const s of steers) {
+      messages.push({ role: 'user', content: s });
+      appendTurn(session, { role: 'user', text: s, ts: Date.now() });
+      log('api', `steered: ${s.slice(0, 60)}`);
+    }
+    session.apiMessages = messages;
+    await saveSession(session);
+    return true;
+  }
+
   log('api', `session=${session.id} run() begin`, {
     userText: ctx.userText.slice(0, 80),
     model: cfg.model,
@@ -1084,18 +1102,11 @@ export async function runApiSession(ctx: EngineContext, deps: ApiEngineDeps = {}
     for (let iter = 0; ; iter++) {
       if (ctx.signal.aborted) return finish('user_abort');
       // Steering: fold in any messages the user injected mid-run. Safe at the
-      // top of an iteration — all prior tool_calls are answered, so inserting
-      // a user message can't orphan a tool_call.
-      const steers = ctx.takeSteerMessages();
-      if (steers.length) {
-        for (const s of steers) {
-          messages.push({ role: 'user', content: s });
-          appendTurn(session, { role: 'user', text: s, ts: Date.now() });
-          log('api', `steered: ${s.slice(0, 60)}`);
-        }
-        session.apiMessages = messages;
-        await saveSession(session);
-      }
+      // top of an iteration — all prior tool_calls are answered, so inserting a
+      // user message can't orphan a tool_call. The SAME drain also runs before
+      // every finish (below), so a steer that lands on the final turn isn't
+      // dropped + lost on reload. See docs/agent-harness.md §10.14.
+      await drainSteers();
       // Soft token limit → summarize older history before the next call so a
       // long loop doesn't blow the context window (slice 3).
       await compactIfNeeded();
@@ -1260,6 +1271,11 @@ export async function runApiSession(ctx: EngineContext, deps: ApiEngineDeps = {}
           await saveSession(session);
           continue;
         }
+        // A steer can land DURING this final turn (the user reacts to the
+        // streaming answer). Drain before finishing: if one is pending, fold it
+        // in and loop once more so the model actually answers it. Without this
+        // it'd be discarded here and vanish on reload. §10.14
+        if (await drainSteers()) continue;
         return finish('no_more_commands');
       }
 
@@ -1547,7 +1563,12 @@ export async function runApiSession(ctx: EngineContext, deps: ApiEngineDeps = {}
         await saveSession(session);
       }
 
-      if (choice.finish_reason !== 'tool_calls') return finish('no_more_commands');
+      if (choice.finish_reason !== 'tool_calls') {
+        // §10.14: a steer can arrive during this turn too — fold + loop instead
+        // of dropping it.
+        if (await drainSteers()) continue;
+        return finish('no_more_commands');
+      }
     }
   } finally {
     session.apiMessages = messages;

@@ -385,14 +385,42 @@ function handleAbort(m: AbortSessionReq): void {
   entry.abort.abort();
 }
 
-/** Queue a steering message for a running session (the engine drains it on its
- * next turn). Ignored if the session isn't currently being driven. */
+/** Queue a steering message for a running session — the engine drains it at the
+ * top of its loop AND right before it finishes (api-engine `drainSteers`), so a
+ * steer landing on the final turn still gets folded in. If the session already
+ * went idle (the steer lost the race against completion), don't drop the user's
+ * typed text: re-route it as a normal follow-up turn. See docs/agent-harness.md §10.14. */
 function handleSteer(m: SteerMessageReq): void {
-  if (!activeSessions.has(m.sessionId)) return;
-  const q = steerQueue.get(m.sessionId) ?? [];
-  q.push(m.text);
-  steerQueue.set(m.sessionId, q);
-  log(SCOPE, `steer queued for ${m.sessionId}`, { pending: q.length });
+  if (activeSessions.has(m.sessionId)) {
+    enqueueSteer(m.sessionId, m.text);
+    return;
+  }
+  void rerouteSteerAsFollowUp(m);
+}
+
+function enqueueSteer(sessionId: string, text: string): void {
+  const q = steerQueue.get(sessionId) ?? [];
+  q.push(text);
+  steerQueue.set(sessionId, q);
+  log(SCOPE, `steer queued for ${sessionId}`, { pending: q.length });
+}
+
+/** A steer that arrived after its session went idle (race against the final
+ * turn finishing). Continue the saved session with the steer as a fresh user
+ * turn so it's persisted + answered instead of silently lost. */
+async function rerouteSteerAsFollowUp(m: SteerMessageReq): Promise<void> {
+  const session = await loadSession(m.sessionId);
+  if (!session) {
+    log(SCOPE, `steer dropped: unknown session ${m.sessionId}`);
+    return;
+  }
+  if (activeSessions.has(m.sessionId)) {
+    // A new turn started while we were loading — queue for that run instead.
+    enqueueSteer(m.sessionId, m.text);
+    return;
+  }
+  log(SCOPE, `steer for idle ${m.sessionId} → follow-up turn`);
+  await driveApiSession(session, m.text);
 }
 
 function handleRequestLogs(_m: RequestLogsReq): LogsResponse {
