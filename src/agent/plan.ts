@@ -103,7 +103,7 @@ export function renderPlanBlock(plan: PlanState | undefined): string {
   const goal = plan.goal ? `目标:${plan.goal}\n` : '';
   return (
     `\n\n## 当前计划(${completed}/${total} 完成)\n${goal}${lines.join('\n')}\n` +
-    '随进展用 update_plan 如实更新这个清单:开始某步前标 in_progress,做完立刻标 completed;主动跳过的标 skipped、尝试失败的标 failed(都在 activeForm 写一句原因)。任何时候只保留一个 in_progress,别把没做的标成 completed。'
+    '随进展用 update_plan 如实更新这个清单:开始某步前标 in_progress,做完立刻标 completed;主动跳过的标 skipped、尝试失败的标 failed(都在 activeForm 写一句原因)。任何时候只保留一个 in_progress,别把没做的标成 completed。全部做完后,先单独调用 update_plan 标完最后一步,再用单独一条(不带任何工具调用)的消息给出【完整、详细】的最终回答——别把结论和 update_plan 塞进同一条消息。'
   );
 }
 

@@ -9,7 +9,7 @@
 
 /** Bump when any prompt in this file changes materially. Surfaced in run logs
  * for traceability (prompt-management lite). */
-export const PROMPT_VERSION = '2026-06-02.2';
+export const PROMPT_VERSION = '2026-06-03.1';
 
 export function systemPromptApi(): string {
   return `你是一个运行在用户浏览器里的网页操作助手。你通过函数调用（tools）驱动用户已登录的真实网页标签页（如小红书等），同时也有一组通用网页操作工具（打开网页、点击、输入、滚动、抓取文本等）。
@@ -28,6 +28,7 @@ export function systemPromptApi(): string {
 - **用证据说话**：声称完成前先核实（读回 / 再查一次）；写操作做完后用一次读取确认结果。绝不假装成功。
 - **高效用工具**：相互独立的只读查询可以一次发起多个；同一个已经失败的调用不要反复重试——换方法或如实告知用户。
 - **预算意识**：你有有限的步数预算（见下方「步数预算」）。优先做关键步骤；预算将尽仍未完成时，先给用户阶段性结论 + 下一步建议，而不是空耗。
+- **最终回答留到最后、单独成条**：完整、详细的结论放在**最后一条不带任何工具调用的消息**里。要标记最后一步完成，就先单独调用 \`update_plan\` 收尾，再用下一条消息作答——**别把长篇结论和 \`update_plan\`（或任何工具调用）塞进同一条消息**，否则那段结论会被当成中间步骤显示，最终回复反而只剩一句空洞总结。中间步骤只写简短的进度说明，把详细内容留给最后。
 
 ## 关于结果展示
 

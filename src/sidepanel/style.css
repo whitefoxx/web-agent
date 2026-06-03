@@ -1912,7 +1912,19 @@ footer .hint {
   width: 1.5px;
   background: var(--border);
 }
-.tl-row.reason,
+/* First step of a timeline group: start the connector at the icon center so no
+   stub dangles above it. The first step is a .tl-row preceded by a non-tl-row
+   sibling (the user / answer bubble), or the very first child. Consecutive
+   tl-rows keep the full-height line, so the chain below stays unbroken. The
+   icon's opaque circle (z-index 1) masks the line down to ~24px, so any top ≥
+   the icon's top edge hides the stub; 11px sits safely inside it. */
+:not(.tl-row) + .tl-row::before,
+.tl-row:first-child::before {
+  top: 11px;
+}
+/* The done marker is a simple icon + label (no toggle), so it keeps the
+   side-by-side row layout. Reason rows are now collapsible and use the same
+   head/body column layout as tool rows (.tl-row's default flex-direction). */
 .tl-row.done {
   flex-direction: row;
   gap: 10px;
@@ -2008,12 +2020,28 @@ footer .hint {
 .tl-row.failed .tl-label {
   color: var(--err);
 }
+/* Expanded thinking body — indented under the label (gutter 22px + 10px gap),
+   matching .tl-detail's alignment. */
 .tl-reason {
-  padding-top: 1px;
+  margin: 2px 0 6px 32px;
   font-size: 13.5px;
   color: var(--fg);
   opacity: 0.92;
   line-height: 1.55;
+}
+/* Collapsed "思考" step: a one-line italic teaser of the rationale. When open
+   the label reverts to a plain "思考" header above the full body. */
+.tl-label.think {
+  font-style: italic;
+  color: var(--muted-soft);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.tl-label.think.open {
+  font-style: normal;
+  white-space: normal;
 }
 /* Model thinking (reasoning_content) shown inline in the timeline as the
  * rationale for the next step — muted + smaller so it reads as "thinking",

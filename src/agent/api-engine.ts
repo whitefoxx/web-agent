@@ -1314,7 +1314,7 @@ export async function runApiSession(ctx: EngineContext, deps: ApiEngineDeps = {}
             // Every step is already in a terminal state → one goal self-check.
             messages.push({
               role: 'user',
-              content: `[自检] ${goalLine}计划每一步都有结果了。最后自检一遍:是否真的达成了上面的目标?有没有遗漏、质量不足或值得补强的地方?如需补做,用 update_plan 加步骤后继续;若确认无误,直接给用户最终答复。`,
+              content: `[自检] ${goalLine}计划每一步都有结果了。最后自检一遍:是否真的达成了上面的目标?有没有遗漏、质量不足或值得补强的地方?如需补做,用 update_plan 加步骤后继续;若确认无误,用一条【不带任何工具调用】的消息给出【完整、详细】的最终答复(别只给一句总结)。`,
             });
             appendTurn(session, { role: 'user', text: '[自检] 对照计划复盘', ts: Date.now() });
             ctx.emit({

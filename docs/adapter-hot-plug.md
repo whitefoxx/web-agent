@@ -1389,3 +1389,28 @@ marketplace 改为手动维护(§10 / commit `e9c211c`)后,bundle 后的 adapter
 - get_transcript 保留为「快速首选」(命中即 pot-free 秒返回),但**去掉构造 params 的兜底**(从不对、只会 400),并明确:它失败就让 **player 路径接管**。
 
 **教训**:① 浏览器里跑的诊断**别走「让用户粘控制台」**——富文本会把引号/反斜杠转义掉;**把诊断塞进 adapter 的返回值、靠现有日志回传**才稳。② `valuePreview` 里 `t:object` 这种「`typeof null`」的坑要会读。③ 一个守卫(`onHomepage`)同时管「首次导航」和「重入去抖」必然分不清两种语义——**去抖要用「是否已到目标态(onThisWatch)」判据,而不是「是否在某个中转态」**。④ 别为一个 `FAILED_PRECONDITION` 死磕私有 API,**先回到已被证明能用的路径**(player 抓取)。
+
+### 10.28 Timeline 收尾打磨:思考步骤可折叠 + 首步去掉悬空竖线 + 多步任务最终答复跑到中间步骤
+
+承接 §10.21/§10.22 的 plan-card / timeline 工作,这轮三处打磨。前两处纯 UI,第三处是行为 bug(用户点出「可能跟 `update_plan` 有关」——确实)。
+
+**1)思考步骤现在可折叠(对齐 tool 行)**
+
+此前 timeline 里 `kind==='reasoning'` 的行(模型 `reasoning_content` 思考 + 叙述)是**常驻展开**的一坨文字,而 tool 行早就能折叠(`TimelineToolRow` 的 `open` 状态)。把 reasoning 行抽成 `TimelineReasonRow` 组件,复用 tool 行的 head/body 折叠骨架:**默认收起**,收起态在 `.tl-label.think` 显示一行斜体 teaser(优先叙述、否则思考首行,`\s+`→空格压平),展开后显示完整思考 + 叙述。整条 timeline 因此读成「一行一步」的干净链路,而非夹着大段推理。CSS:把 `.tl-row.reason` 从原来的 `flex-direction:row`(图标+文字并排)改回 `.tl-row` 默认 column(head 在上、body 在下);`.tl-row.done` 保留并排(它无折叠)。
+
+**2)第一个 step 不再画上方那截悬空竖线**
+
+连接线是每行一条 `.tl-row::before`(`top:-7px; bottom:-7px`,故意上下各探出 7px 让相邻行的线连续;图标不透明圆点盖住其后的线)。一组 timeline 的**第一行**,其图标**上方**那截(到 `-7px`)没有上一行可连,是悬空线头。修法:`:not(.tl-row) + .tl-row::before`(前一兄弟不是 tl-row,即紧跟 user/answer 气泡后的首行)+ `.tl-row:first-child::before`,把 `top` 从 `-7px` 改成 `11px`(落在图标圆点内、被圆点盖住 → 线实际从图标底缘 ~24px 才露出 → 上方无线头)。连续的 tl-row(含 `✅ 完成` 的 done 行)不命中该选择器、仍保留满高线,**向下链路不断**。
+
+**3)多步任务:最详细的回答跑到了中间某步,最后反而只剩一句总结**
+
+**症状**:多步 task 跑完,**中间某个 step** 里贴着一大段详尽结论,而最后那条 answer(`✅ 完成` 之后的气泡)反倒是空洞总结。
+
+**根因**:`classifyTurn`(`App.tsx`)的判据是「某条 assistant turn 之后、下一条 user 消息之前**还有 tool turn**,就归为中间 `reasoning` 步;否则才是最终 `answer`」。而模型**习惯把详细结论和收尾的 `update_plan`(标最后一步 completed)塞进同一条消息**——这条消息带了 tool_call(update_plan),于是其正文被判成中间 reasoning 步显示;真正不带 tool_call 的末条消息只剩总结、成了 answer。即:**详细内容因为「与一个 update_plan 同条」被降级成中间步**(正是用户「跟 update_plan 有关」的直觉)。
+
+**修法**(纯 prompt,不动 `classifyTurn`——它的语义没错):让模型**最终回答单独成条、且不带任何工具调用**;要标最后一步完成就**先单独 `update_plan` 收尾,下一条消息再作答**。三处同一规则层层兜住:
+- `systemPromptApi()` 的「工作方式(多步任务)」新增「最终回答留到最后、单独成条」一条(并 bump `PROMPT_VERSION` → `2026-06-03.1`);
+- `renderPlanBlock()`(有计划时每轮注入的计划块)结尾补「全部做完后先单独 update_plan 标完最后一步,再单独一条作答」——正好命中多步场景;
+- 自检消息(`api-engine.ts`,各步落定后的 `[自检]`)把「直接给用户最终答复」改成「用一条**不带任何工具调用**的消息给出**完整、详细**的最终答复(别只给一句总结)」。
+
+**教训**:① 看似 UI 归类 bug,根子在**模型把「终态动作 + 终态答复」耦合在同一条消息**——修 prompt 比改归类对(「turn 后面还有 tool 就算中间步」本身没错)。② 「内容显示在错误 step」类问题,先看**分类判据的输入**(这里是 turn 序列里 tool 的相对位置),即可反推是模型的消息编排触发的。③ 同一收尾规则在 system prompt / 每轮计划块 / 自检三处各落一遍,才兜得住模型不同时机的收尾。

@@ -37,7 +37,7 @@ import {
   IconSparkle,
 } from './Icons';
 import { toolActivity, screenshotDataUrl, planSites, type ActivityIcon } from './activity';
-import type { UiTurn } from './types';
+import type { UiAssistantTurn, UiTurn } from './types';
 import {
   type AbortSessionReq,
   type SteerMessageReq,
@@ -1333,26 +1333,7 @@ function TurnView({
     return <TimelineToolRow trace={turn.trace} onImage={onImage} />;
   }
   if (kind === 'reasoning') {
-    const reason = turn.text?.trim();
-    // Most models emit empty content + tool_calls and put the actual rationale
-    // ("why I'm calling this tool next") in reasoning_content → reasoningText.
-    // Surface it in the timeline so the run reads as a clear chain of intent,
-    // not a bare list of tool calls.
-    const thinking = turn.reasoningText?.trim();
-    if (!reason && !thinking) return null;
-    return (
-      <div class="tl-row reason">
-        <span class="tl-gutter">
-          <span class="tl-icon dot">
-            <IconDot size={7} />
-          </span>
-        </span>
-        <span class="tl-reason">
-          {thinking && <div class="tl-thinking">{thinking}</div>}
-          {reason && <Markdown text={reason} />}
-        </span>
-      </div>
-    );
+    return <TimelineReasonRow turn={turn} />;
   }
   const looksLikeParseFailure =
     turn.commands.length === 0 &&
@@ -1428,6 +1409,44 @@ function DoneRow(): preact.JSX.Element {
         </span>
       </span>
       <span class="tl-label">完成</span>
+    </div>
+  );
+}
+
+/** A "thinking" step in the activity timeline: the model's rationale for the
+ * next move (reasoning_content) and/or its narration. Collapsible like a tool
+ * row — collapsed it shows a one-line teaser; expanded it shows the full
+ * thinking + narration. Default collapsed so the timeline reads as a clean
+ * chain of steps rather than a wall of reasoning. */
+function TimelineReasonRow({ turn }: { turn: UiAssistantTurn }): preact.JSX.Element | null {
+  const [open, setOpen] = useState(false);
+  const reason = turn.text?.trim();
+  // Most models emit empty content + tool_calls and put the actual rationale
+  // ("why I'm calling this tool next") in reasoning_content → reasoningText.
+  const thinking = turn.reasoningText?.trim();
+  if (!reason && !thinking) return null;
+  // Collapsed label: a one-line teaser (narration preferred, else thinking) so
+  // adjacent thinking steps stay distinguishable without expanding each one.
+  const preview = (reason || thinking || '').replace(/\s+/g, ' ').trim();
+  return (
+    <div class="tl-row reason">
+      <div class="tl-head" onClick={() => setOpen((o) => !o)} style={{ cursor: 'pointer' }}>
+        <span class="tl-gutter">
+          <span class="tl-icon dot">
+            <IconDot size={7} />
+          </span>
+        </span>
+        <span class="tl-main">
+          <span class={`tl-label think ${open ? 'open' : ''}`}>{open ? '思考' : preview}</span>
+        </span>
+        <IconChevronDown size={13} class={`tl-chev ${open ? 'open' : ''}`} />
+      </div>
+      {open && (
+        <div class="tl-reason">
+          {thinking && <div class="tl-thinking">{thinking}</div>}
+          {reason && <Markdown text={reason} />}
+        </div>
+      )}
     </div>
   );
 }
