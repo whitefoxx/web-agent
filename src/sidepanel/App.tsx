@@ -1235,7 +1235,12 @@ function TurnView({
   }
   if (kind === 'reasoning') {
     const reason = turn.text?.trim();
-    if (!reason) return null;
+    // Most models emit empty content + tool_calls and put the actual rationale
+    // ("why I'm calling this tool next") in reasoning_content → reasoningText.
+    // Surface it in the timeline so the run reads as a clear chain of intent,
+    // not a bare list of tool calls.
+    const thinking = turn.reasoningText?.trim();
+    if (!reason && !thinking) return null;
     return (
       <div class="tl-row reason">
         <span class="tl-gutter">
@@ -1244,7 +1249,8 @@ function TurnView({
           </span>
         </span>
         <span class="tl-reason">
-          <Markdown text={reason} />
+          {thinking && <div class="tl-thinking">{thinking}</div>}
+          {reason && <Markdown text={reason} />}
         </span>
       </div>
     );

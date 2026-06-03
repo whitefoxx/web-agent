@@ -2015,6 +2015,19 @@ footer .hint {
   opacity: 0.92;
   line-height: 1.55;
 }
+/* Model thinking (reasoning_content) shown inline in the timeline as the
+ * rationale for the next step — muted + smaller so it reads as "thinking",
+ * not as narration or the final answer. */
+.tl-thinking {
+  font-size: 12.5px;
+  color: var(--muted);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.tl-thinking + * {
+  margin-top: 4px;
+}
 .tl-reason p {
   margin: 0 0 4px;
 }
