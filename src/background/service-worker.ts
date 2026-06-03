@@ -696,9 +696,23 @@ async function driveApiSession(
     } satisfies SessionDoneEvt);
   } finally {
     activeSessions.delete(session.id);
+    // Backstop (§10.14): a steer can still be in the queue here — it landed
+    // after the engine's last drain, via a finish path that doesn't re-drain
+    // (checkpoint / error / abort) OR the microtask race against this cleanup.
+    // Don't drop it: re-drive it as a follow-up turn so it's persisted +
+    // answered instead of vanishing on reload.
+    const leftoverSteers = steerQueue.get(session.id) ?? [];
     steerQueue.delete(session.id);
     stopKeepalivePingIfIdle(); // release the SW once no session is running
     await saveSession(session);
+    if (leftoverSteers.length) {
+      log(SCOPE, `re-driving ${leftoverSteers.length} leftover steer(s) for ${session.id}`);
+      void rerouteSteerAsFollowUp({
+        type: 'STEER_MESSAGE',
+        sessionId: session.id,
+        text: leftoverSteers.join('\n'),
+      });
+    }
   }
 }
 
