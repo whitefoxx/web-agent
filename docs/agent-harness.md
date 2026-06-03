@@ -428,6 +428,9 @@ status 只在模型主动调用 `update_plan` 时才变(`api-engine` 把整张�
 tool_choice),但只让模型填真值、不替它伪造。诚实 > 好看:宁可显示失败/跳过,也不要假的 ✓。状态机的
 真值要么由真实执行结果写入(完成/失败),要么由显式决策写入(跳过),绝不由"反正结束了"推断。
 
+> **更新(§10.17)**:本节的「强制 update_plan 对账」因 GLM thinking mode 拒绝 object tool_choice
+> 而 400,已改为 nudge-only(`tool_choice:'auto'` + 提示)。诚实兜底不变。
+
 ---
 
 ### 10.16 选了「先计划再执行」却没让确认计划 + 中途要计划无入口(2026-06-03 修)
@@ -461,6 +464,39 @@ tool_choice),但只让模型填真值、不替它伪造。诚实 > 好看:宁可
 不能让模型用"我觉得简单"把它优化掉。要兜住,就在关键时点给**确定性入口**:强制 `tool_choice`(逼出
 计划 / 逼出对账,见 [§10.15]),而不是发个软提醒寄希望于模型配合。意图识别这类"宁滥勿缺"的入口,
 误报代价低(多弹一次可拒绝的卡)就可以接受。
+
+> **更新(§10.17)**:本节的「强制 submit_plan」因 GLM thinking mode 拒绝 object tool_choice 而 400,
+> 已改为有界 firm nudge + 优雅放行(超过 `MAX_PLAN_NUDGES` 就让答案通过、不再报错)。
+
+---
+
+### 10.17 强制 tool_choice 在 GLM-5 thinking mode 下 400 整个会话(2026-06-03 修)
+
+**症状**:选了「先计划再执行」,跑了一会儿(模型在规划阶段还做了 8 次 youtube 搜索、然后输出
+6724 字直接作答),最后 **400 报错**会话挂掉:
+`invalid_parameter_error: The tool_choice parameter does not support being set to required or object in thinking mode`。
+
+**根因**:§10.16(强制 submit_plan)、§10.15(强制 update_plan 对账)、§10.16(重规划)都用
+**对象形式的 `tool_choice`**(`{type:'function', function:{name}}`)来"保证"模型一定调某工具。但
+用户的 provider(阿里云 maas 的 **glm-5**)在 **thinking mode** 下**硬拒绝** object/`required`
+形式的 tool_choice → 400 → 规划阶段 `complete()` 抛错 → 整个会话 `error`。**强制 tool_choice
+不可移植。** 另外能看到:模型在规划阶段直接用只读工具把任务做了(搜了 8 次)、再想直接作答——
+我那个"强制 submit_plan"本意正是拦它,却因 400 反而把会话搞挂。
+
+**修法**:**删掉所有 object `tool_choice` 强制**,改成可移植的「有界 firm 提示 + 优雅兜底」:
+
+- 规划阶段模型直接作答 → firm nudge(明确"把『先研究X』写成计划步骤,不要现在就执行"),至多
+  `MAX_PLAN_NUDGES`(3)次;超了**优雅放行**(`return 'answered'` + 一条 warning notice),不再
+  死循环到 `error`。
+- §10.15 对账、§10.16 重规划同样改 `tool_choice:'auto'` + 提示(不再强制)。诚实兜底不变:对账
+  不替模型造假、放行不假装有计划。
+- 测试:新增「模型死活不计划 → 优雅放行不报错」用例;去掉原来断言 forced tool_choice 的部分。
+  1311→1312 全绿。
+
+**教训**:**「强制模型一定调某工具」没有可移植的硬保证**——object/`required` 的 tool_choice 至少在
+GLM thinking mode 会 400。portable 的只有 `'auto'` + 强提示 + 有界重试 + 优雅兜底。任何"强制/对账/
+重规划"机制都必须能在 provider 拒绝时**降级**,而不是把异常抛成整个会话失败。这条把 §10.15、§10.16
+里"forced tool_choice"的实现都收敛成了 nudge-only。
 
 ---
 

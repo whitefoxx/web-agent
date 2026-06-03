@@ -751,7 +751,6 @@ export async function runApiSession(ctx: EngineContext, deps: ApiEngineDeps = {}
   const noProgress = new NoProgressTracker();
   let lastPromptTokens = 0;
   let reflectedOnce = false; // plan-mode finishing reflection fires at most once
-  let forceReconcile = false; // one-shot: force the next turn to settle the plan truthfully
 
   // Structured-LLM compaction: when prompt tokens cross the soft limit,
   // summarize the older half of the message array into one progress-ledger
@@ -799,7 +798,10 @@ export async function runApiSession(ctx: EngineContext, deps: ApiEngineDeps = {}
   async function runPlanningPhase(): Promise<
     'approved' | 'answered' | 'rejected' | 'error' | 'aborted'
   > {
-    let forceSubmitPlan = false; // one-shot: force the next planning turn to call submit_plan
+    // Bounded nudging instead of a forced tool_choice — some providers (GLM-5
+    // in thinking mode) hard-400 on an object/required tool_choice. §10.17
+    const MAX_PLAN_NUDGES = 3;
+    let planNudges = 0;
     for (let pIter = 0; pIter < PLAN_MAX_STEPS; pIter++) {
       if (ctx.signal.aborted) return 'aborted';
       const iterationId = `${session.id}__plan${pIter}`;
@@ -819,8 +821,6 @@ export async function runApiSession(ctx: EngineContext, deps: ApiEngineDeps = {}
       ];
 
       let resp: ChatCompletionResponse;
-      const submitNow = forceSubmitPlan; // one-shot: force submit_plan this turn
-      forceSubmitPlan = false;
       try {
         resp = await complete({
           apiKey: cfg.apiKey,
@@ -833,9 +833,7 @@ export async function runApiSession(ctx: EngineContext, deps: ApiEngineDeps = {}
               ...messages,
             ],
             tools,
-            tool_choice: submitNow
-              ? ({ type: 'function', function: { name: 'submit_plan' } } as const)
-              : 'auto',
+            tool_choice: 'auto',
             max_tokens: 4096,
           },
         });
@@ -881,13 +879,23 @@ export async function runApiSession(ctx: EngineContext, deps: ApiEngineDeps = {}
       await saveSession(session);
 
       // Plan mode: the user explicitly wants to confirm a plan — don't let the
-      // model answer directly and skip it. Nudge + FORCE submit_plan next turn so
-      // a confirmable plan always appears (even for "simple" tasks). §10.16
+      // model answer directly and skip it. Firmly nudge toward submit_plan;
+      // bounded so we don't loop forever — if the model still won't plan, let its
+      // answer through rather than erroring (some models just won't). §10.16/§10.17
       if (!toolCalls || toolCalls.length === 0) {
+        if (planNudges >= MAX_PLAN_NUDGES) {
+          ctx.emit({
+            type: 'notice',
+            level: 'warning',
+            text: '模型未提交可确认的计划,已直接作答(当前模型/端点可能不便强制计划)。',
+          });
+          return 'answered';
+        }
+        planNudges++;
         messages.push({
           role: 'user',
           content:
-            '「先计划再执行」模式下,请先用 submit_plan 给出可确认的计划(哪怕任务简单也要),不要直接作答;研究够了就提交。',
+            '「先计划再执行」模式下,请现在就用 submit_plan 提交计划供用户确认——可以把"先研究X"写成计划里的步骤,不要直接作答、也不要现在就执行。',
         });
         appendTurn(session, {
           role: 'user',
@@ -896,7 +904,6 @@ export async function runApiSession(ctx: EngineContext, deps: ApiEngineDeps = {}
         });
         session.apiMessages = messages;
         await saveSession(session);
-        forceSubmitPlan = true;
         continue;
       }
 
@@ -1180,10 +1187,6 @@ export async function runApiSession(ctx: EngineContext, deps: ApiEngineDeps = {}
 
       let lastStreamLen = 0;
       let resp: ChatCompletionResponse;
-      // One-shot: a finish-time reconcile (§10.15) forces THIS turn to call
-      // update_plan so the plan is settled truthfully before we finish.
-      const reconcileNow = forceReconcile;
-      forceReconcile = false;
       try {
         resp = await complete({
           apiKey: cfg.apiKey,
@@ -1214,9 +1217,7 @@ export async function runApiSession(ctx: EngineContext, deps: ApiEngineDeps = {}
               ...messages,
             ],
             tools,
-            tool_choice: reconcileNow
-              ? ({ type: 'function', function: { name: 'update_plan' } } as const)
-              : 'auto',
+            tool_choice: 'auto',
             max_tokens: 4096,
           },
         });
@@ -1305,7 +1306,6 @@ export async function runApiSession(ctx: EngineContext, deps: ApiEngineDeps = {}
               level: 'info',
               text: '让模型如实对账计划各步结果(完成/跳过/失败)…',
             });
-            forceReconcile = true; // guarantee the next turn actually settles it
           } else {
             // Every step is already in a terminal state → one goal self-check.
             messages.push({

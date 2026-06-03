@@ -272,27 +272,34 @@ describe('runApiSession — engine integration scenarios', () => {
     expect(r.doneReason).toBe('no_more_commands');
   });
 
-  it('plan mode: answering without a plan is forced into submit_plan (§10.16)', async () => {
+  it('plan mode: answering without a plan is nudged into submit_plan (§10.16)', async () => {
     const decide = vi.fn(async () => ({ decision: 'approve' as const }));
     const r = await runScenario({
       mode: 'plan',
       responses: [
-        textMsg('这个不用计划,我直接说……'), // bare answer in planning → must be forced
-        toolMsg('submit_plan', { goal: 'G', steps: ['一', '二'] }), // the forced submit
+        textMsg('这个不用计划,我直接说……'), // bare answer in planning → gets nudged
+        toolMsg('submit_plan', { goal: 'G', steps: ['一', '二'] }), // model then submits
         textMsg('开始执行'),
       ],
       requestPlanDecision: decide,
     });
-    expect(decide).toHaveBeenCalledTimes(1); // forced to produce a confirmable plan
+    expect(decide).toHaveBeenCalledTimes(1); // the nudge produced a confirmable plan
     expect(r.session.plan?.steps.map((s) => s.title)).toEqual(['一', '二']);
-    const forced = r.completeCalls.find(
-      (c) =>
-        !!c.toolChoice &&
-        typeof c.toolChoice === 'object' &&
-        (c.toolChoice as { function?: { name?: string } }).function?.name === 'submit_plan',
-    );
-    expect(forced).toBeTruthy(); // the turn after the bare answer forced submit_plan
     expect(r.doneReason).toBe('no_more_commands');
+  });
+
+  it('plan mode: gives up nudging and lets the answer through instead of erroring (§10.17)', async () => {
+    // A model that refuses to plan (only ever answers) must not loop to an
+    // error — after MAX_PLAN_NUDGES it falls through to the answer.
+    const decide = vi.fn(async () => ({ decision: 'approve' as const }));
+    const r = await runScenario({
+      mode: 'plan',
+      responses: [textMsg('我就直接答,不计划')], // always answers, never submits a plan
+      requestPlanDecision: decide,
+    });
+    expect(decide).not.toHaveBeenCalled();
+    expect(r.doneReason).toBe('no_more_commands'); // graceful, not 'error'
+    expect(r.notices.some((t) => /未提交可确认的计划/.test(t))).toBe(true);
   });
 
   it('mid-run re-plan: an interjection asking for a plan re-enters the approval gate (§10.16)', async () => {
@@ -351,14 +358,6 @@ describe('runApiSession — engine integration scenarios', () => {
       ],
     });
     expect(r.notices.some((t) => /对账/.test(t))).toBe(true);
-    // the turn right after the finish-attempt was FORCED to call update_plan
-    const forced = r.completeCalls.find(
-      (c) =>
-        !!c.toolChoice &&
-        typeof c.toolChoice === 'object' &&
-        (c.toolChoice as { function?: { name?: string } }).function?.name === 'update_plan',
-    );
-    expect(forced).toBeTruthy();
     // truthful end state preserved — 一 done, 二 skipped — NOT faked as all-complete
     const byTitle = Object.fromEntries(r.session.plan!.steps.map((s) => [s.title, s.status]));
     expect(byTitle['一']).toBe('completed');
