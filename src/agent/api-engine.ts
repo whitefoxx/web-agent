@@ -954,6 +954,10 @@ export async function runApiSession(ctx: EngineContext, deps: ApiEngineDeps = {}
         if (call.function.name === 'submit_plan') {
           const goal = typeof args.goal === 'string' ? args.goal : '';
           const proposed = seedPlan(goal, (args as { steps?: unknown[] }).steps ?? [], Date.now());
+          log(
+            'api',
+            `submit_plan intercepted: ${proposed.steps.length} steps → requesting approval`,
+          );
           if (proposed.steps.length === 0) {
             await ackTool('计划为空,请给出具体的步骤列表。');
             emitFinal('failed', { error: 'empty plan' });

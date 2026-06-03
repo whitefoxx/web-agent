@@ -188,9 +188,20 @@ export function App() {
   // Plan decisions the user already answered — ignore late re-sends (§10.19) so
   // a resolved card can't pop back up.
   const handledPlanDecisions = useRef<Set<string>>(new Set());
+  // The live log stream (subscribeLog + LOG_ENTRY) used to setLogs on EVERY log
+  // line, re-rendering the whole panel constantly — a render storm that thrashed
+  // the plan-approval card's paint (and would loop outright with any render-time
+  // log). `logs` only shows in the logs view, so accumulate ONLY while it's open;
+  // on open we pull the SW buffer via requestLogs(). viewRef so the
+  // once-registered listeners read the latest view. §10.21
+  const viewRef = useRef<View>('closed');
   useEffect(() => {
     sessionIdRef.current = sessionId;
   }, [sessionId]);
+  useEffect(() => {
+    viewRef.current = view;
+    if (view === 'logs') void requestLogs();
+  }, [view]);
 
   function eventBelongsToCurrentSession(eventSessionId: string | undefined): boolean {
     if (!eventSessionId) return true; // global event (no session scope)
@@ -202,7 +213,9 @@ export function App() {
     void requestLogs();
     const handler = (m: unknown) => onIncomingMessage(m as Message);
     chrome.runtime.onMessage.addListener(handler);
-    const unsubLog = subscribeLog((e) => setLogs((cur) => append(cur, e, 500)));
+    const unsubLog = subscribeLog((e) => {
+      if (viewRef.current === 'logs') setLogs((cur) => append(cur, e, 500));
+    });
     // Pin the SW alive while the SidePanel is open. MV3 SWs are killed
     // after ~30s of no chrome.* activity, which would otherwise orphan a
     // long-running iteration (LLM thinking phases >30s with no chrome.*
@@ -331,7 +344,8 @@ export function App() {
         break;
       }
       case 'LOG_ENTRY':
-        setLogs((cur) => append(cur, (m as LogEntryEvt).entry, 500));
+        if (viewRef.current === 'logs')
+          setLogs((cur) => append(cur, (m as LogEntryEvt).entry, 500));
         break;
       default:
         break;

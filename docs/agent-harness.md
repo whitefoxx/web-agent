@@ -571,6 +571,35 @@ GLM thinking mode 会 400。portable 的只有 `'auto'` + 强提示 + 有界重�
 
 ---
 
+### 10.21 plan 审批卡「渲染了但不显示」—— 每条日志都 setLogs → 全树重渲染风暴(2026-06-03 修)
+
+**症状**:`submit_plan` 触发了,但审批卡始终不显示(还是只在 timeline 里看到 submit_plan)。重发(§10.19)
+也没用——说明不是丢包,是**稳定**地不显示。
+
+**定位手段**:加了一条 **panel→SW 诊断中继**(`PANEL_DIAG` 消息,SW 侧 `log()`,这样打到用户**本来就在看
+的 SW 控制台**)。一次复现就把链路走通拍死了:`submit_plan intercepted` → `requesting plan decision`
+→ `[panel] PLAN_DECISION_REQ recv {match:true}` → `[panel] handled (passed gate)` →
+`[panel] pendingPlan state changed {has:true}` → `[panel] PlanApprovalCard render`。也就是说**消息送达、过了
+session 门、setPendingPlan 改了状态、卡片组件确实在 render**——根本不是丢包/门/不渲染。而且 render 那行
+**刷屏(死循环)**。
+
+**根因**:面板对**每一条**日志(`subscribeLog` 本地流 + `LOG_ENTRY` 来自 SW 的转发)都 `setLogs(...)`,
+而 `setLogs` 是顶层 state → **整棵组件树重渲染**。但 `logs` 只在「日志」页才显示。于是一次 run 里 SW 疯狂打
+日志 = 面板**疯狂全树重渲染**(渲染风暴),把审批卡的 paint 冲掉了(渲染了但来不及/不稳定地上屏)。我那条
+「render 时打一条 log」的诊断更是把它变成**铁的死循环**:render → log → `LOG_ENTRY` → `setLogs` →
+重渲染 → render → …,反而让机制现了原形。
+
+**修法**(§10.21):`logs` 只在日志页显示,所以**只在日志页打开时**才累积——`subscribeLog` 和 `LOG_ENTRY`
+两处 `setLogs` 都 gate 在 `viewRef.current === 'logs'`;打开日志页时用 `requestLogs()` 从 SW 缓冲区拉历史。
+`viewRef`(像 `sessionIdRef`)让只注册一次的监听器读到最新 view。诊断中继用完即删。
+
+**教训**:① **高频事件(每条日志)驱动顶层 setState = 全树重渲染**,是个潜伏的性能/footgun,平时没事,
+一旦有个需要稳定 paint 的重交互组件(审批卡)就被冲掉。把高频流 gate 到「它的产物真正被显示时」。
+② **「render 了」≠「paint 了/显示了」**——别在 render 里看到日志就以为没问题。③ 定位 SW↔面板这类跨上下文
+问题,**架一条打到你已在看的那个控制台的诊断中继**,一次复现就能把每一环拍死,别靠猜。
+
+---
+
 ## 11. 完成状态(2026-06-02)
 
 Phase 0–4 + 三个选项(流式 / 指标-lite / 长期记忆)+ Round 2 补齐项(R1–R7)**全部落地**。
