@@ -3,6 +3,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  looksLikeReplanRequest,
   parsePlanSteps,
   planProgress,
   renderPlanBlock,
@@ -121,5 +122,19 @@ describe('renderPlanBlock', () => {
   it('is empty when there is no plan', () => {
     expect(renderPlanBlock(undefined)).toBe('');
     expect(renderPlanBlock({ steps: [], updatedAt: 0 })).toBe('');
+  });
+});
+
+describe('looksLikeReplanRequest', () => {
+  it('matches interjections asking for a confirmable plan', () => {
+    expect(looksLikeReplanRequest('先给我一个计划确认一下')).toBe(true);
+    expect(looksLikeReplanRequest('重新规划下')).toBe(true);
+    expect(looksLikeReplanRequest('give me a plan to confirm')).toBe(true);
+    expect(looksLikeReplanRequest('把计划列出来给我过目')).toBe(true);
+  });
+  it('ignores unrelated interjections', () => {
+    expect(looksLikeReplanRequest('这个计划挺好的')).toBe(false); // plan word, no request verb
+    expect(looksLikeReplanRequest('帮我总结一下')).toBe(false); // no plan word
+    expect(looksLikeReplanRequest('')).toBe(false);
   });
 });

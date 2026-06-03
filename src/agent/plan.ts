@@ -106,3 +106,16 @@ export function renderPlanBlock(plan: PlanState | undefined): string {
     '随进展用 update_plan 如实更新这个清单:开始某步前标 in_progress,做完立刻标 completed;主动跳过的标 skipped、尝试失败的标 failed(都在 activeForm 写一句原因)。任何时候只保留一个 in_progress,别把没做的标成 completed。'
   );
 }
+
+/** Heuristic: does a mid-run interjection ask the agent to (re)produce a plan
+ * for the user to confirm? Intent is detected from the steer text (the user
+ * opted into this over a dedicated button). Deliberately loose — a false
+ * positive just shows an extra approvable plan, which the user can reject.
+ * docs/agent-harness.md §10.16. */
+export function looksLikeReplanRequest(text: string): boolean {
+  const t = text.trim();
+  if (!t) return false;
+  const hasPlan = /计划|规划|plan/i.test(t);
+  const hasWant = /确认|确定|过目|审|先给|给我|列出|重新|改成|改个|review|confirm/i.test(t);
+  return hasPlan && hasWant;
+}

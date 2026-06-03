@@ -50,7 +50,14 @@ import {
   type BudgetConfig,
 } from './budget';
 import { applyCompaction, buildCompactionMessages, findCompactionBoundary } from './compaction';
-import { isTerminal, parsePlanSteps, planProgress, renderPlanBlock, seedPlan } from './plan';
+import {
+  isTerminal,
+  looksLikeReplanRequest,
+  parsePlanSteps,
+  planProgress,
+  renderPlanBlock,
+  seedPlan,
+} from './plan';
 import { selectTools } from './tool-select';
 import { createStreamAccumulator, parseSSEChunk } from './stream';
 import { newRunMetrics, renderRunSummary } from './metrics';
@@ -157,7 +164,7 @@ const SUBMIT_PLAN_TOOL = {
   function: {
     name: 'submit_plan',
     description:
-      '提交一个分步执行计划(规划模式)。goal 一句话目标;steps 有序步骤(每步一句、具体可执行,写操作显式列为步骤)。simple=false(默认)会把计划弹给用户确认/修改后再执行;simple=true 用于简单低风险任务,系统直接开始执行、不打扰用户(写操作执行时仍会单独二次确认)。',
+      '提交一个分步执行计划(规划模式)。goal 一句话目标;steps 有序步骤(每步一句、具体可执行,写操作显式列为步骤)。提交后会把计划弹给用户确认/修改,用户确认后才进入执行。',
     parameters: {
       type: 'object',
       properties: {
@@ -166,11 +173,6 @@ const SUBMIT_PLAN_TOOL = {
           type: 'array',
           description: '有序的步骤清单',
           items: { type: 'string' },
-        },
-        simple: {
-          type: 'boolean',
-          description:
-            '是否为简单低风险任务:true=直接开始不弹审批;false=弹给用户确认/修改(复杂、多步、不确定、或含重要写操作时用 false)',
         },
       },
       required: ['goal', 'steps'],
@@ -693,6 +695,10 @@ export async function runApiSession(ctx: EngineContext, deps: ApiEngineDeps = {}
   ];
   await saveSession(session);
 
+  // Set when a drained steer reads as a "give me a plan to confirm" request
+  // (§10.16). Consumed at the top of the execution loop → re-enters planning.
+  let pendingReplan = false;
+
   /** Fold any queued steering messages ("插话" injected mid-run) into the live
    * context, persisting them as user turns + apiMessages immediately so a steer
    * is never lost even if the run ends right after. Returns true if ≥1 was
@@ -704,6 +710,7 @@ export async function runApiSession(ctx: EngineContext, deps: ApiEngineDeps = {}
     for (const s of steers) {
       messages.push({ role: 'user', content: s });
       appendTurn(session, { role: 'user', text: s, ts: Date.now() });
+      if (looksLikeReplanRequest(s)) pendingReplan = true; // §10.16: 插话要计划
       log('api', `steered: ${s.slice(0, 60)}`);
     }
     session.apiMessages = messages;
@@ -792,6 +799,7 @@ export async function runApiSession(ctx: EngineContext, deps: ApiEngineDeps = {}
   async function runPlanningPhase(): Promise<
     'approved' | 'answered' | 'rejected' | 'error' | 'aborted'
   > {
+    let forceSubmitPlan = false; // one-shot: force the next planning turn to call submit_plan
     for (let pIter = 0; pIter < PLAN_MAX_STEPS; pIter++) {
       if (ctx.signal.aborted) return 'aborted';
       const iterationId = `${session.id}__plan${pIter}`;
@@ -811,6 +819,8 @@ export async function runApiSession(ctx: EngineContext, deps: ApiEngineDeps = {}
       ];
 
       let resp: ChatCompletionResponse;
+      const submitNow = forceSubmitPlan; // one-shot: force submit_plan this turn
+      forceSubmitPlan = false;
       try {
         resp = await complete({
           apiKey: cfg.apiKey,
@@ -823,7 +833,9 @@ export async function runApiSession(ctx: EngineContext, deps: ApiEngineDeps = {}
               ...messages,
             ],
             tools,
-            tool_choice: 'auto',
+            tool_choice: submitNow
+              ? ({ type: 'function', function: { name: 'submit_plan' } } as const)
+              : 'auto',
             max_tokens: 4096,
           },
         });
@@ -868,8 +880,25 @@ export async function runApiSession(ctx: EngineContext, deps: ApiEngineDeps = {}
       session.apiMessages = messages;
       await saveSession(session);
 
-      // Answered directly without a plan → a simple task; treat as done.
-      if (!toolCalls || toolCalls.length === 0) return 'answered';
+      // Plan mode: the user explicitly wants to confirm a plan — don't let the
+      // model answer directly and skip it. Nudge + FORCE submit_plan next turn so
+      // a confirmable plan always appears (even for "simple" tasks). §10.16
+      if (!toolCalls || toolCalls.length === 0) {
+        messages.push({
+          role: 'user',
+          content:
+            '「先计划再执行」模式下,请先用 submit_plan 给出可确认的计划(哪怕任务简单也要),不要直接作答;研究够了就提交。',
+        });
+        appendTurn(session, {
+          role: 'user',
+          text: '[规划] 要求先给出可确认的计划',
+          ts: Date.now(),
+        });
+        session.apiMessages = messages;
+        await saveSession(session);
+        forceSubmitPlan = true;
+        continue;
+      }
 
       for (const call of toolCalls) {
         if (ctx.signal.aborted) return 'aborted';
@@ -923,28 +952,9 @@ export async function runApiSession(ctx: EngineContext, deps: ApiEngineDeps = {}
             emitFinal('failed', { error: 'empty plan' });
             continue;
           }
-          // Simple / low-risk task → auto-proceed without the approval card (a
-          // brief notice instead). Writes are STILL individually confirmed at
-          // execution time, so skipping the approach-review gate stays safe.
-          if ((args as { simple?: unknown }).simple === true) {
-            session.plan = {
-              goal: proposed.goal,
-              steps: proposed.steps,
-              updatedAt: Date.now(),
-              approved: true,
-            };
-            ctx.emit({ type: 'plan_updated', plan: session.plan });
-            ctx.emit({
-              type: 'notice',
-              level: 'info',
-              text: `任务较简单,直接开始:${proposed.goal || proposed.steps[0]?.title || ''}`,
-            });
-            await ackTool(
-              '这是简单任务,已直接进入执行(无需审批)。按步骤执行,写操作仍会单独二次确认。',
-            );
-            emitFinal('completed', { result: session.plan });
-            return 'approved';
-          }
+          // Explicit plan mode: the user chose 先计划再执行 — ALWAYS show the
+          // approval card so they confirm/edit before execution. No model-judged
+          // "simple" auto-skip; that silently bypassed the user's choice. §10.16
           const decision = await ctx.requestPlanDecision(proposed);
           if (ctx.signal.aborted) return 'aborted';
           if (decision.decision === 'approve') {
@@ -1109,6 +1119,20 @@ export async function runApiSession(ctx: EngineContext, deps: ApiEngineDeps = {}
       // every finish (below), so a steer that lands on the final turn isn't
       // dropped + lost on reload. See docs/agent-harness.md §10.14.
       await drainSteers();
+      // Mid-run re-plan (§10.16): an interjection asking for a plan to confirm
+      // re-enters the planning phase (submit_plan → approval card) before
+      // continuing, so the user gets a confirmable plan even mid-execution.
+      if (pendingReplan) {
+        pendingReplan = false;
+        ctx.emit({ type: 'notice', level: 'info', text: '按你的中途要求,重新规划并请你确认…' });
+        const replan = await runPlanningPhase();
+        if (replan === 'aborted') return finish('user_abort');
+        if (replan === 'error') return finish('error', planError || '重新规划失败');
+        if (replan === 'rejected') {
+          ctx.emit({ type: 'notice', level: 'info', text: '你取消了新计划,保留原计划继续。' });
+        }
+        // 'approved' → session.plan is the revised plan; fall through to execute it.
+      }
       // Soft token limit → summarize older history before the next call so a
       // long loop doesn't blow the context window (slice 3).
       await compactIfNeeded();

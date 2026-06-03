@@ -180,12 +180,16 @@ describe('runApiSession — engine integration scenarios', () => {
   });
 
   it('plan mode uses the read-only planning prompt + submit_plan tool', async () => {
-    const r = await runScenario({ mode: 'plan', responses: [textMsg('简单任务,直接答')] });
+    const r = await runScenario({
+      mode: 'plan',
+      responses: [toolMsg('submit_plan', { goal: 'G', steps: ['一'] })],
+      requestPlanDecision: async () => ({ decision: 'reject' as const }),
+    });
     const sys = r.completeCalls[0]!.messages[0]!;
     expect(sys.role).toBe('system');
     expect(String(sys.content)).toContain('规划模式');
     expect(r.completeCalls[0]!.tools.some((t) => t.function.name === 'submit_plan')).toBe(true);
-    expect(r.doneReason).toBe('no_more_commands'); // answered directly, no plan needed
+    expect(r.doneReason).toBe('no_more_commands'); // user canceled the proposed plan
   });
 
   it('spawn_subagent: runs isolated and returns only a digest', async () => {
@@ -251,7 +255,7 @@ describe('runApiSession — engine integration scenarios', () => {
     expect(r.doneReason).toBe('no_more_commands');
   });
 
-  it('plan mode: simple=true auto-proceeds without the approval gate', async () => {
+  it('plan mode: even a "simple" plan still goes through the approval card', async () => {
     const decide = vi.fn(async () => ({ decision: 'approve' as const }));
     const r = await runScenario({
       mode: 'plan',
@@ -261,9 +265,55 @@ describe('runApiSession — engine integration scenarios', () => {
       ],
       requestPlanDecision: decide,
     });
-    expect(decide).not.toHaveBeenCalled(); // no approval popup for a simple task
+    // §10.16: the model's self-judged "simple" no longer bypasses the user's
+    // explicit 先计划再执行 choice — the approval card always shows.
+    expect(decide).toHaveBeenCalledTimes(1);
     expect(r.session.plan?.approved).toBe(true);
-    expect(r.notices.some((t) => /直接开始/.test(t))).toBe(true);
+    expect(r.doneReason).toBe('no_more_commands');
+  });
+
+  it('plan mode: answering without a plan is forced into submit_plan (§10.16)', async () => {
+    const decide = vi.fn(async () => ({ decision: 'approve' as const }));
+    const r = await runScenario({
+      mode: 'plan',
+      responses: [
+        textMsg('这个不用计划,我直接说……'), // bare answer in planning → must be forced
+        toolMsg('submit_plan', { goal: 'G', steps: ['一', '二'] }), // the forced submit
+        textMsg('开始执行'),
+      ],
+      requestPlanDecision: decide,
+    });
+    expect(decide).toHaveBeenCalledTimes(1); // forced to produce a confirmable plan
+    expect(r.session.plan?.steps.map((s) => s.title)).toEqual(['一', '二']);
+    const forced = r.completeCalls.find(
+      (c) =>
+        !!c.toolChoice &&
+        typeof c.toolChoice === 'object' &&
+        (c.toolChoice as { function?: { name?: string } }).function?.name === 'submit_plan',
+    );
+    expect(forced).toBeTruthy(); // the turn after the bare answer forced submit_plan
+    expect(r.doneReason).toBe('no_more_commands');
+  });
+
+  it('mid-run re-plan: an interjection asking for a plan re-enters the approval gate (§10.16)', async () => {
+    const decide = vi.fn(async () => ({ decision: 'approve' as const }));
+    let steered = false;
+    const r = await runScenario({
+      mode: 'chat',
+      responses: [
+        toolMsg('submit_plan', { goal: '新计划', steps: ['甲', '乙'] }), // the re-plan submits
+        textMsg('按新计划做完了'),
+      ],
+      takeSteerMessages: () => {
+        if (steered) return [];
+        steered = true;
+        return ['先给我一个计划确认一下'];
+      },
+      requestPlanDecision: decide,
+    });
+    expect(decide).toHaveBeenCalledTimes(1); // the interjection produced a confirmable plan
+    expect(r.session.plan?.steps.map((s) => s.title)).toEqual(['甲', '乙']);
+    expect(r.notices.some((t) => /重新规划/.test(t))).toBe(true);
     expect(r.doneReason).toBe('no_more_commands');
   });
 
