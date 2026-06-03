@@ -14,10 +14,7 @@
  * that can host the closure). They surface in the UI as "needs func support".
  */
 
-import {
-  registerCommand,
-  unregister as registryUnregister,
-} from '../runtime/registry.js';
+import { registerCommand, unregister as registryUnregister } from '../runtime/registry.js';
 import { validatePipeline } from '../runtime/opencli/pipeline';
 import {
   putInstalled,
@@ -129,7 +126,10 @@ function deriveId(defs: CapturedDef[]): string | null {
  * and registers the runnable (pipeline) ones. Idempotent on (id): a re-install
  * replaces the previous registration + row.
  */
-export async function installFromCaptured(req: InstallRequest, now: number): Promise<InstallResult> {
+export async function installFromCaptured(
+  req: InstallRequest,
+  now: number,
+): Promise<InstallResult> {
   const { defs, source, origin } = req;
   if (!Array.isArray(defs) || defs.length === 0) {
     return {
@@ -160,7 +160,10 @@ export async function installFromCaptured(req: InstallRequest, now: number): Pro
   const kind = classifyKind(defs);
   const row: InstalledAdapter = {
     id,
-    title: defs.length === 1 ? `${defs[0].site}/${defs[0].name}` : `${defs[0].site} (${defs.length} cmds)`,
+    title:
+      defs.length === 1
+        ? `${defs[0].site}/${defs[0].name}`
+        : `${defs[0].site} (${defs.length} cmds)`,
     source,
     defs,
     kind,
@@ -196,7 +199,8 @@ export async function loadInstalledOnBoot(): Promise<{ adapters: number; command
     if (n > 0) adapters++;
     commands += n;
   }
-  if (adapters > 0) log('install', `restored ${adapters} installed adapters (${commands} commands)`);
+  if (adapters > 0)
+    log('install', `restored ${adapters} installed adapters (${commands} commands)`);
   return { adapters, commands };
 }
 
@@ -230,4 +234,74 @@ export async function listInstalledAdapters(): Promise<InstalledAdapter[]> {
     warn('install', 'listInstalledAdapters failed', e);
     return [];
   }
+}
+
+/** SHA-256 hex of a UTF-8 string. Mirrors marketplace.ts's sha256Hex; inlined
+ * here to keep the SW layer free of any sidepanel import. */
+async function sha256Hex(text: string): Promise<string> {
+  const buf = new TextEncoder().encode(text);
+  const hashBuf = await crypto.subtle.digest('SHA-256', buf);
+  return Array.from(new Uint8Array(hashBuf))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+export interface StaleMarketAdapter {
+  id: string;
+  title: string;
+}
+
+/**
+ * Detect installed *marketplace* adapters whose stored source has drifted from
+ * the bundled catalog — i.e. the source was hand-edited + its index.json sha256
+ * rotated (a common case here, since marketplace adapters are hand-maintained
+ * and the user must reinstall to pick up a fix). Returns the drifted ids so the
+ * SidePanel can silently re-install them from the catalog.
+ *
+ * Compares sha256(installed.source) against the catalog's promised sha256
+ * (NOT the semver version, which is informational). Adapters no longer present
+ * in the catalog are left alone (never auto-uninstalled). Best-effort: any I/O
+ * failure yields an empty list (a missing/locked catalog must not block boot).
+ */
+export async function findStaleMarketplaceAdapters(): Promise<StaleMarketAdapter[]> {
+  let rows: InstalledAdapter[];
+  try {
+    rows = await listInstalled();
+  } catch {
+    return [];
+  }
+  const market = rows.filter((r) => r.origin?.type === 'marketplace');
+  if (market.length === 0) return [];
+
+  let wantById: Map<string, string>;
+  try {
+    const url = chrome.runtime.getURL('marketplace/index.json');
+    const resp = await fetch(url, { cache: 'no-store' });
+    if (!resp.ok) return [];
+    const data = (await resp.json()) as {
+      adapters?: { site: string; name: string; sha256: string }[];
+    };
+    wantById = new Map((data.adapters ?? []).map((a) => [`${a.site}/${a.name}`, a.sha256]));
+  } catch {
+    return [];
+  }
+
+  const stale: StaleMarketAdapter[] = [];
+  for (const row of market) {
+    const want = wantById.get(row.id);
+    if (!want) continue; // dropped from the catalog — leave the installed copy be
+    let got: string;
+    try {
+      got = await sha256Hex(row.source);
+    } catch {
+      continue;
+    }
+    if (got !== want) stale.push({ id: row.id, title: row.title });
+  }
+  if (stale.length > 0) {
+    log('install', `found ${stale.length} stale marketplace adapter(s)`, {
+      ids: stale.map((s) => s.id),
+    });
+  }
+  return stale;
 }

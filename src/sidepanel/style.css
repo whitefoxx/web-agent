@@ -2416,3 +2416,35 @@ footer .hint {
   background: var(--surface-hover);
   color: var(--fg);
 }
+
+/* Transient toast shown when stale marketplace adapters were auto-updated on
+ * open. Click to dismiss; otherwise auto-hides after a few seconds. */
+.adapter-update-toast {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 8px 12px 0;
+  padding: 8px 12px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--fg);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  cursor: pointer;
+  animation: adapter-toast-in 0.18s ease-out;
+}
+.adapter-update-toast svg {
+  flex: none;
+  color: var(--muted);
+}
+@keyframes adapter-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

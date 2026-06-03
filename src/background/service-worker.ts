@@ -85,6 +85,7 @@ import {
   uninstall as uninstallAdapter,
   setEnabled as setAdapterEnabled,
   listInstalledAdapters,
+  findStaleMarketplaceAdapters,
 } from '../adapters/install-manager';
 import {
   configureWebchatWorld,
@@ -336,6 +337,13 @@ chrome.runtime.onMessage.addListener((msg: unknown, _sender, sendResponse): bool
       void handleListInstalled().then(
         (resp) => sendResponse(resp),
         (e) => sendResponse({ ok: false, error: msgOf(e) }),
+      );
+      return true;
+    }
+    case 'LIST_STALE_ADAPTERS': {
+      void findStaleMarketplaceAdapters().then(
+        (stale) => sendResponse({ type: 'LIST_STALE_ADAPTERS_RESP', stale }),
+        () => sendResponse({ type: 'LIST_STALE_ADAPTERS_RESP', stale: [] }),
       );
       return true;
     }

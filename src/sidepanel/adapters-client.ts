@@ -7,6 +7,7 @@
  */
 
 import { evalAdapterInSandbox } from './sandbox-host';
+import { fetchMarketIndex, fetchAdapterSource, entryId, type MarketIndex } from './marketplace';
 import type {
   InstallAdapterReq,
   InstallAdapterResp,
@@ -15,6 +16,9 @@ import type {
   ListInstalledReq,
   ListInstalledResp,
   InstalledAdapterSummary,
+  ListStaleAdaptersReq,
+  ListStaleAdaptersResp,
+  StaleAdapterInfo,
 } from '../messages';
 
 export interface InstallOutcome {
@@ -72,6 +76,54 @@ export async function listInstalled(): Promise<InstalledAdapterSummary[]> {
   } catch {
     return [];
   }
+}
+
+/** Ask the SW which installed marketplace adapters have drifted from the
+ * bundled catalog (sha256 mismatch). */
+export async function listStaleAdapters(): Promise<StaleAdapterInfo[]> {
+  try {
+    const resp = (await chrome.runtime.sendMessage({
+      type: 'LIST_STALE_ADAPTERS',
+    } satisfies ListStaleAdaptersReq)) as ListStaleAdaptersResp | undefined;
+    return resp?.stale ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Auto-update drifted marketplace adapters: detect the stale ones (SW), then
+ * re-fetch each from the catalog (sha256-verified) and re-install through the
+ * sandbox — the same idempotent path as a manual reinstall, so no reload is
+ * needed for the user to pick up an adapter fix. Returns the titles updated.
+ * Best-effort: a per-adapter failure is swallowed (retried on the next open).
+ */
+export async function reconcileStaleAdapters(): Promise<string[]> {
+  const stale = await listStaleAdapters();
+  if (stale.length === 0) return [];
+  let idx: MarketIndex;
+  try {
+    idx = await fetchMarketIndex();
+  } catch {
+    return [];
+  }
+  const byId = new Map(idx.adapters.map((a) => [entryId(a), a]));
+  const updated: string[] = [];
+  for (const s of stale) {
+    const entry = byId.get(s.id);
+    if (!entry) continue;
+    try {
+      const src = await fetchAdapterSource(entry);
+      const r = await installAdapterFromSource(src, {
+        type: 'marketplace',
+        url: `bundled:${s.id}`,
+      });
+      if (r.ok) updated.push(s.title);
+    } catch {
+      /* leave it stale; next sidepanel open retries */
+    }
+  }
+  return updated;
 }
 
 export async function uninstallAdapter(id: string): Promise<void> {

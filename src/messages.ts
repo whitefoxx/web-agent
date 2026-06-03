@@ -336,6 +336,23 @@ export interface AdaptersChangedEvt {
   type: 'ADAPTERS_CHANGED';
 }
 
+/** SidePanel → SW: which installed marketplace adapters have drifted from the
+ * bundled catalog (their stored source's sha256 no longer matches index.json)?
+ * The SidePanel re-installs the returned ids from the catalog. */
+export interface ListStaleAdaptersReq {
+  type: 'LIST_STALE_ADAPTERS';
+}
+
+export interface StaleAdapterInfo {
+  id: string;
+  title: string;
+}
+
+export interface ListStaleAdaptersResp {
+  type: 'LIST_STALE_ADAPTERS_RESP';
+  stale: StaleAdapterInfo[];
+}
+
 /* ───────── Long-term memory (SidePanel ↔ SW) ───────── */
 
 export interface ListMemoriesReq {
@@ -385,6 +402,8 @@ export type Message =
   | SetAdapterEnabledReq
   | ListInstalledReq
   | ListInstalledResp
+  | ListStaleAdaptersReq
+  | ListStaleAdaptersResp
   | AdaptersChangedEvt
   | ListMemoriesReq
   | ListMemoriesResp

@@ -73,6 +73,7 @@ import type { PlanState } from '../agent/plan';
 import type { MemoryFact } from '../agent/memory-store';
 import type { LogEntry, LogConfig } from '../runtime/log';
 import { getLogConfig, setLogConfig, subscribeLog } from '../runtime/log';
+import { reconcileStaleAdapters } from './adapters-client';
 import { makeSessionId } from '../agent/session';
 import {
   DEFAULT_CONFIG,
@@ -170,6 +171,7 @@ export function App() {
     completionTokens: number;
   } | null>(null);
   const [lightbox, setLightbox] = useState<string | null>(null);
+  const [adapterUpdateNote, setAdapterUpdateNote] = useState<string | null>(null);
   // Header menu state machine. 'closed' = no overlay; 'menu' = dropdown
   // showing; any other value = a settings page is open. Click outside the
   // menu/page region drops back to 'closed'.
@@ -221,6 +223,17 @@ export function App() {
   /* load LLM config */
   useEffect(() => {
     void loadLlmConfig().then(setLlmConfig);
+  }, []);
+
+  /* On open: silently re-install any marketplace adapter whose bundled source
+   * drifted (sha256 mismatch) so the user always runs the latest fix without a
+   * manual uninstall/reinstall. A brief toast reports what was updated. */
+  useEffect(() => {
+    void reconcileStaleAdapters().then((updated) => {
+      if (updated.length === 0) return;
+      setAdapterUpdateNote(`已自动更新 ${updated.length} 个市场 adapter:${updated.join('、')}`);
+      setTimeout(() => setAdapterUpdateNote(null), 8000);
+    });
   }, []);
 
   /* autoscroll on new turn */
@@ -560,6 +573,13 @@ export function App() {
           </span>
         </span>
       </header>
+
+      {adapterUpdateNote && (
+        <div class="adapter-update-toast" onClick={() => setAdapterUpdateNote(null)}>
+          <IconRefresh size={14} />
+          <span>{adapterUpdateNote}</span>
+        </div>
+      )}
 
       <div class="messages" ref={messagesRef}>
         {turns.length === 0 && !running && <WelcomeCard />}
