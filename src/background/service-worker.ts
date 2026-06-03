@@ -368,11 +368,39 @@ chrome.runtime.onMessage.addListener((msg: unknown, _sender, sendResponse): bool
 
 /* ───────── handlers ───────── */
 
+/** Wait (briefly) for a session to leave activeSessions after we aborted it, so
+ * a takeover doesn't run two drivers for the same id. Resolves true once idle,
+ * false on timeout. §10.20 */
+function waitForSessionIdle(sessionId: string, timeoutMs: number): Promise<boolean> {
+  if (!activeSessions.has(sessionId)) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const startedAt = Date.now();
+    const iv = setInterval(() => {
+      if (!activeSessions.has(sessionId)) {
+        clearInterval(iv);
+        resolve(true);
+      } else if (Date.now() - startedAt >= timeoutMs) {
+        clearInterval(iv);
+        resolve(false);
+      }
+    }, 50);
+  });
+}
+
 async function handleUserMessage(m: UserMessageReq): Promise<void> {
   log(SCOPE, `USER_MESSAGE sessionId=${m.sessionId}`, { text: m.text.slice(0, 80) });
+  // The panel only sends USER_MESSAGE when it believes the session is idle (a
+  // running session gets a STEER instead), so an active session here is a desync
+  // — usually a run stuck awaiting a plan decision (the dropped-card hang). Don't
+  // hard-error "already running"; abort the stale run and take over, so a
+  // reopened/errored session can always be continued. §10.20
   if (activeSessions.has(m.sessionId)) {
-    sendErrorDone(m.sessionId, `session ${m.sessionId} is already running`);
-    return;
+    log(SCOPE, `USER_MESSAGE for active ${m.sessionId} → abort stale run + take over`);
+    activeSessions.get(m.sessionId)?.abort.abort();
+    if (!(await waitForSessionIdle(m.sessionId, 2000))) {
+      warn(SCOPE, `stale run ${m.sessionId} didn't free in time; forcing takeover`);
+      activeSessions.delete(m.sessionId);
+    }
   }
   const session = (await loadSession(m.sessionId)) ?? makeSession(m.sessionId);
   await driveApiSession(session, m.text, m.mode);
@@ -575,20 +603,37 @@ function requestWriteConfirmation(
 function requestPlanDecision(sessionId: string, plan: PlanState): Promise<PlanDecision> {
   const decisionId = `p_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
   log(SCOPE, `requesting plan decision`, { decisionId, steps: plan.steps.length });
+  const req: PlanDecisionReq = { type: 'PLAN_DECISION_REQ', sessionId, decisionId, plan };
   return new Promise<PlanDecision>((resolve) => {
+    // Re-send the card request periodically. A single SW→panel message can be
+    // dropped/raced under MV3 (or miss a panel that reloaded mid-run), which
+    // would hang the whole run awaiting a decision the user was never shown.
+    // The panel dedups by decisionId and ignores re-sends for a decided one. §10.19
+    const resend = setInterval(() => sendToSidepanel(req), 3000);
     const timer = setTimeout(() => {
       if (!pendingPlanDecisions.has(decisionId)) return;
       pendingPlanDecisions.delete(decisionId);
+      clearInterval(resend);
       warn(SCOPE, `plan-decision timeout ${decisionId}`);
       resolve({ decision: 'reject' });
     }, PLAN_DECISION_TIMEOUT_MS);
-    pendingPlanDecisions.set(decisionId, {
-      resolve: (d: PlanDecision) => {
-        clearTimeout(timer);
-        resolve(d);
-      },
-    });
-    const req: PlanDecisionReq = { type: 'PLAN_DECISION_REQ', sessionId, decisionId, plan };
+    const resolver = (d: PlanDecision): void => {
+      clearTimeout(timer);
+      clearInterval(resend);
+      resolve(d);
+    };
+    pendingPlanDecisions.set(decisionId, { resolve: resolver });
+    // The user Stopping (or a takeover) must unblock this await — otherwise the
+    // run stays stuck in activeSessions and "继续" hits "already running". §10.20
+    const signal = activeSessions.get(sessionId)?.abort.signal;
+    const onAbort = (): void => {
+      if (!pendingPlanDecisions.has(decisionId)) return;
+      pendingPlanDecisions.delete(decisionId);
+      log(SCOPE, `plan-decision aborted ${decisionId}`);
+      resolver({ decision: 'reject' });
+    };
+    if (signal?.aborted) onAbort();
+    else signal?.addEventListener('abort', onAbort, { once: true });
     sendToSidepanel(req);
   });
 }
@@ -714,15 +759,6 @@ async function driveApiSession(
       });
     }
   }
-}
-
-function sendErrorDone(sessionId: string, error: string): void {
-  sendToSidepanel({
-    type: 'SESSION_DONE',
-    sessionId,
-    reason: 'error',
-    error,
-  } satisfies SessionDoneEvt);
 }
 
 function msgOf(e: unknown): string {

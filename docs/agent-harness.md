@@ -534,6 +534,43 @@ GLM thinking mode 会 400。portable 的只有 `'auto'` + 强提示 + 有界重�
 
 ---
 
+### 10.19 / 10.20 plan 审批卡不弹 → 会话卡死 → "already running" / 继续变新会话(2026-06-03 修)
+
+**症状**(连环):① 模型调了 `submit_plan`(时间线能看到),但**审批卡没弹出来**,会话卡在「规划中…」
+不动(实为在等用户确认);② 之后想「继续」该会话,报 **`session ... is already running`**;③ 出错后
+直接再发一句,**历史/上下文没了,像开了个新会话**。
+
+**根因**:
+
+1. **单条关键消息丢失(MV3)**:`requestPlanDecision` 只 `sendToSidepanel` **一次** `PLAN_DECISION_REQ`。
+   SW→panel 的 `chrome.runtime.sendMessage` 在 MV3 下可能丢/竞态(traces 多,偶尔丢一条没人注意;但
+   审批卡是**单条**——丢了就永远不弹),于是 `requestPlanDecision` 永久 await → 卡死。**§10.16 删掉
+   `simple` 后审批卡路径变成必经**,把这个潜伏 bug 暴露了。
+2. **卡死的会话留在 `activeSessions` 里**:`requestPlanDecision` 的 await **不理会 abort 信号**,Stop 也
+   解不开;会话一直 active。`handleUserMessage` 见 active 就**硬报** `already running`(②)。
+3. **出错丢绑定**:panel 在硬 error 时 `setSessionId(null)`,下一条消息 `sid = makeSessionId()` →
+   **新会话**,丢上下文(③)。
+
+**修法**(§10.20):
+
+- **审批卡重发 + 去重**:`requestPlanDecision` 每 3s 重发 `PLAN_DECISION_REQ` 直到被回应/超时;panel 按
+  `decisionId` **去重**(已在显示的不重置、已决策的忽略迟到重发)。丢一条/面板刚重载也能补上。
+- **await 可被 abort**:`requestPlanDecision` 监听该会话的 abort signal,Stop/接管时 resolve 成 reject →
+  引擎 `ctx.signal.aborted` → `return 'aborted'` → finally 清理 `activeSessions`。
+- **接管而非报错**:`handleUserMessage` 遇到 active 会话(= panel 以为 idle 的 desync,通常就是卡死的
+  run)→ abort 它、`waitForSessionIdle`(≤2s)、还不退就强制 `activeSessions.delete`,然后接管驱动。
+  「继续」永远能成。
+- **永不丢绑定**:panel 在**所有**结束原因(含硬 error)下都保留 `sessionId`;历史在 IDB,直接再发就
+  续上同一会话(满上下文)。从历史页打开本来就会 `setTurns(historyToUiTurns(history))` 显示历史。
+
+**教训**:① **MV3 下「单条关键 SW→panel 消息」是单点故障**——必须重发 + 去重(traces 靠量掩盖了丢包,
+交互请求没有这层冗余)。② **引擎里任何长 await(审批/二次确认)都必须可被 abort**,否则会把会话永久钉
+在 `activeSessions` 里、后续全部 `already running`。③ **出错别丢会话绑定**——历史是持久化的,让用户能
+直接续,而不是悄悄开新会话。④ 写确认(`WRITE_CONFIRM`)是同一类长 await,目前靠 `handleUserMessage` 的
+接管兜底;若以后单独 Stop 写确认,也应让它 abort-aware。
+
+---
+
 ## 11. 完成状态(2026-06-02)
 
 Phase 0–4 + 三个选项(流式 / 指标-lite / 长期记忆)+ Round 2 补齐项(R1–R7)**全部落地**。

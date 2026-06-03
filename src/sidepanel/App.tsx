@@ -185,6 +185,9 @@ export function App() {
   // is registered once in useEffect and would otherwise capture a stale
   // closure). Updated by the effect just below.
   const sessionIdRef = useRef<string | null>(null);
+  // Plan decisions the user already answered — ignore late re-sends (§10.19) so
+  // a resolved card can't pop back up.
+  const handledPlanDecisions = useRef<Set<string>>(new Set());
   useEffect(() => {
     sessionIdRef.current = sessionId;
   }, [sessionId]);
@@ -319,9 +322,14 @@ export function App() {
       case 'PLAN_UPDATED':
         setPlan((m as PlanUpdatedEvt).plan);
         break;
-      case 'PLAN_DECISION_REQ':
-        setPendingPlan(m as PlanDecisionReq);
+      case 'PLAN_DECISION_REQ': {
+        const req = m as PlanDecisionReq;
+        // Dedup the SW's re-sends (§10.19): ignore one already decided, and keep
+        // the current card (don't reset in-progress edits) on a repeat.
+        if (handledPlanDecisions.current.has(req.decisionId)) break;
+        setPendingPlan((cur) => (cur && cur.decisionId === req.decisionId ? cur : req));
         break;
+      }
       case 'LOG_ENTRY':
         setLogs((cur) => append(cur, (m as LogEntryEvt).entry, 500));
         break;
@@ -373,6 +381,7 @@ export function App() {
   function onDecidePlan(decision: 'approve' | 'reject', editedSteps?: string[]): void {
     setPendingPlan((cur) => {
       if (!cur) return null;
+      handledPlanDecisions.current.add(cur.decisionId);
       const resp: PlanDecisionResp = {
         type: 'PLAN_DECISION_RESP',
         decisionId: cur.decisionId,
@@ -418,14 +427,12 @@ export function App() {
     setProgress(null);
     setStreaming(null);
     setRunStats(null);
-    // NOTE: deliberately NOT clearing sessionId on 'no_more_commands' /
-    // 'user_abort' — follow-up messages stay in the same session so the LLM
-    // keeps full context. On a real 'error' we drop the binding so the user
-    // starts fresh. EXCEPTION: a `recoverable` error means the SW was just
-    // recycled mid-turn; the history is persisted in IDB and the banner
-    // promises "接着聊（基于历史上下文）", so we KEEP the binding — the next
-    // message resumes the same session with full context.
-    if (m.reason === 'error' && !m.recoverable) setSessionId(null);
+    // Keep the sessionId binding across ALL end reasons — no_more_commands /
+    // user_abort / checkpoint / error alike. The history is persisted in IDB, so
+    // the user can just type again to CONTINUE the same session with full
+    // context. (Previously a hard error dropped the binding and silently started
+    // a fresh session — that's what looked like "继续把它当成了新会话".) The SW
+    // takes over any stale active run on the next message, so this is safe. §10.20
     // A checkpoint already surfaced an explanatory SESSION_NOTICE inline, and
     // the session stays resumable ("继续"), so don't append a redundant system
     // line — just stop the spinner (handled above) and keep the binding.
