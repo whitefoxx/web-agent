@@ -2221,6 +2221,26 @@ footer .hint {
   line-height: 1.5;
 }
 
+/* Plan approval is a REQUIRED decision, so it's pinned over the conversation
+ * with a dimming backdrop — never buried in the scrollable message list (where
+ * it rendered off-screen below the fold; §10.22). The .plan-card inside carries
+ * the visuals; these only position + focus it. */
+.plan-pin-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.18);
+  z-index: 999;
+}
+.plan-pin {
+  position: fixed;
+  left: 10px;
+  right: 10px;
+  bottom: 10px;
+  z-index: 1000;
+  max-height: 82vh;
+  overflow-y: auto;
+}
+
 /* ── Mode selector pill + dropdown (Ask-before-acting style) ─────────────── */
 .mode-anchor {
   position: relative;

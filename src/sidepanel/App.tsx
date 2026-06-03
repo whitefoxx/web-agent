@@ -1,3 +1,4 @@
+import { Component } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { Markdown } from './Markdown';
 import { AdaptersSection } from './Adapters';
@@ -630,8 +631,22 @@ export function App() {
             onDecide={onDecideWrite}
           />
         )}
-        {pendingPlan && <PlanApprovalCard req={pendingPlan} onDecide={onDecidePlan} />}
       </div>
+
+      {pendingPlan && (
+        <>
+          {/* Pinned over the conversation (NOT inside the scrollable message
+           * list, where it sat off-screen below the fold — §10.22). The backdrop
+           * dims the rest so the required approve/modify/cancel decision can't be
+           * scrolled away or ignored. */}
+          <div class="plan-pin-backdrop" />
+          <div class="plan-pin">
+            <RenderBoundary label="PlanApprovalCard">
+              <PlanApprovalCard req={pendingPlan} onDecide={onDecidePlan} />
+            </RenderBoundary>
+          </div>
+        </>
+      )}
 
       <footer>
         {running && runStats && (
@@ -1078,6 +1093,45 @@ function MemorySection(): preact.JSX.Element {
       )}
     </div>
   );
+}
+
+/** Catch a render throw in `children` and show the error inline instead of
+ * silently failing (a throw in PlanApprovalCard would otherwise leave the card
+ * invisible and freeze the whole tree). Kept around the approval card — a
+ * required interaction — so a future render bug surfaces visibly, not silently. */
+class RenderBoundary extends Component<
+  { label: string; children: preact.ComponentChildren },
+  { err: string | null }
+> {
+  state = { err: null as string | null };
+  static getDerivedStateFromError(err: unknown): { err: string } {
+    return { err: err instanceof Error ? (err.stack ?? err.message) : String(err) };
+  }
+  componentDidCatch(err: unknown): void {
+    console.error('[webchat:panel] render error in', this.props.label, err);
+  }
+  render(): preact.ComponentChildren {
+    if (this.state.err) {
+      return (
+        <div
+          style={{
+            border: '1px solid #c0392b',
+            background: '#fdecea',
+            color: '#900',
+            borderRadius: 8,
+            padding: 10,
+            margin: '4px 0',
+            fontSize: 12,
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+          }}
+        >
+          ⚠️ {this.props.label} 渲染出错：{this.state.err}
+        </div>
+      );
+    }
+    return this.props.children;
+  }
 }
 
 /** Plan-approval card (Phase 2 plan mode). Mirrors WriteConfirmCard. Shows the
