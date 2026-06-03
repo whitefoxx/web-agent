@@ -73,6 +73,18 @@ function ensureSandbox(): Promise<void> {
     try {
       window.addEventListener('message', onMessage);
       const el = document.createElement('iframe');
+      // §10.17: sandbox the iframe at the ELEMENT level, not only via the
+      // manifest `sandbox.pages` of the loaded page. A plain iframe element that
+      // loads a page which only BECOMES sandboxed (opaque origin) on commit makes
+      // Chromium log "Unsafe attempt to load URL …/sandbox.html from frame …/
+      // sandbox.html. Domains, protocols and ports must match." during that
+      // plain→sandboxed origin transition. Declaring the sandbox up front means
+      // there's no transition to flag. `allow-scripts` is all we need: the inline
+      // script runs, and `new Function` eval is gated by the page's sandbox-CSP
+      // `unsafe-eval` (a CSP directive, unaffected by sandbox flags), not by this
+      // attribute. We deliberately OMIT `allow-same-origin` so the frame stays
+      // opaque — matching sandbox.pages — and postMessage already targets '*'.
+      el.setAttribute('sandbox', 'allow-scripts');
       el.src = chrome.runtime.getURL(SANDBOX_URL);
       el.style.display = 'none';
       el.setAttribute('aria-hidden', 'true');

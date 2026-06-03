@@ -769,6 +769,8 @@ SidePanel              # 卸载受影响 adapter → 重装
 ### 10.17 sandbox.html cross-origin load 错误 ——【未解决,已知噪音】
 
 > **状态(2026-06 更新)**:**仍未修好**。下面记的「删 WAR 双声明」是一次**合理但无效**的尝试——删掉是对的(sandbox.html 确实不该进 WAR),但**报错照旧**。说明根因不是 WAR/sandbox.pages 双声明。**当前结论:大概率是 Chrome MV3 sandboxed-iframe 的良性内部噪音,extension 代码层面不一定改得掉。不影响功能(install/capture/vision 全正常),暂列已知问题,以后再查。** 别再误信下面那段「修法 → 报错消失」。
+>
+> **再更新(2026-06,尝试三)**:给 host iframe 加了元素级 `sandbox="allow-scripts"` 属性(见文末「尝试三」)。加完用户**暂时没再复现**这条报错——但**用户自己也不确定是否真解决**,需要后续多测才知道。按本节教训,**不宣布修好**,标记「待确认」。
 
 **症状**:
 
@@ -798,6 +800,13 @@ SidePanel 用 `iframe.src = chrome.runtime.getURL('sandbox.html')` 嵌它时,Chr
 - 待验证:换成 `chrome.runtime.getURL` 之外的加载方式、或给 iframe 显式 `sandbox` 属性、或干脆不用 sandbox iframe(install 期的 eval 改走别的 venue)是否能消掉。
 
 **教训(关于诊断本身)**:**「改完没立刻在真机复测就宣布修好」是这次的错**。我基于「WAR/sandbox.pages 双声明」的合理推断改了 + 写进 docs「报错消失」+ commit + push,但用户后来的日志显示报错还在。**配置类 / 平台行为类的「修复」尤其要在真浏览器里亲眼确认报错消失再下结论**,推断再合理也不算数。
+
+**尝试三(2026-06,元素级 sandbox 属性,待确认)**:`sandbox-host.ts` 给 host iframe 在建立时加 `el.setAttribute('sandbox', 'allow-scripts')`(并保持先设属性、后设 `src`)。
+
+- **先排除了「我们的代码在加载 sandbox.html」**:`grep` 扫 `dist/sandbox.html`,无 `import.meta`/`document.baseURI`/`document.currentScript`/`new URL`/`new Worker`/`location.href`/`chrome.runtime`;只剩 `import(`×2(`stripModuleSyntax` 正则字符串)、`fetch(`×1(未调用的 util)、`.src=`×1(消息字段),全是既有误报。所以剩下能触发的只有 **frame 过渡本身**。
+- **推断**:plain `<iframe>` 元素去加载一个「commit 时才变 sandboxed(opaque origin)」的页面,Chromium 在这个 **plain→sandboxed 的 origin 过渡**上记这条 same-origin 警告;元素**一开始就声明 sandbox**,就没有过渡可记。
+- **为什么 `allow-scripts` 够、且不破坏 eval**:内联脚本要 `allow-scripts` ✓;`new Function` 的 eval 由**页面 sandbox-CSP 的 `unsafe-eval`** 管(CSP 指令,不受 iframe sandbox flag 影响)✓;故意**不给 `allow-same-origin`** 以保持 opaque、与 `sandbox.pages` 一致;parent↔sandbox 的 postMessage 本就 target `'*'`、parent 侧也不校验 `event.source`,跨 opaque origin 照常。
+- **结果**:用户加完**暂未复现**报错,但**未证实**(平台噪音本就时有时无),install/eval 仍正常。**不宣布修好**,留作「待后续多测确认」。若以后确认无效,这条属性当作无害硬化保留或回退皆可。
 
 ### 10.18 全量审计:注入 scope 用 stub → 一批 func 静默错 / 错误映射失效
 
