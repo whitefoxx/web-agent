@@ -1300,3 +1300,83 @@ marketplace 改为手动维护(§10 / commit `e9c211c`)后,bundle 后的 adapter
 - jsdom 不做 layout,要把 opencli 的 `offsetParent` polyfill / `getComputedStyle` stub 一起搬(可见性判定靠它们)。programmatic `new JSDOM()` 在现有 `environment:'node'` 下直接能用,不用改 vitest 配置。
 - **补回 5 个 DOM 测试,全绿,0 adapter bug**:把 5 个 builder 跟 opencli 原版逐行 diff,生成脚本**一字不差**——再次证明 esbuild bundle 忠实。全量套件 1150 → **1155 / 138 files**。
 - 剩下没补的只有「纯 helper 被 inline 成 file-local 且 bundle 没 `__test__` 导出」那几个(linkedin/posts、xiaohongshu/note),要补得改 marketplace 源码加导出 + 轮 sha256,收益不抵改动,**留着**(行为已通过 func 间接覆盖)。
+
+### 10.23 `youtube__transcript` 报 `Caption URL returned empty response`——timedtext 的 pot-token 时代
+
+**症状**:`youtube__transcript {url}` 失败,`CommandExecutionError: Caption URL returned empty response`。
+
+**根因**:这条报错来自 adapter 的**最后一层兜底**(strategy 3,`transcript.js` 里 fetch
+`ytInitialPlayerResponse.captions...captionTracks[].baseUrl` 那段)。能走到这层,说明前面两层都没拿到字幕:
+
+1. **player 抓取**(读 `movie_player`、hook fetch/XHR、`setOption('captions',…)`+`playVideo()`,轮 15s 等播放器自己发的带 `pot=` 的 json3 timedtext 请求)——这层**依赖视频真的开始播放**;标签页非前台 / autoplay 被拦 / 播放器没发 caption 请求时就 miss。
+2. **network capture** 回放——同理没抓到。
+
+到了 strategy 3,它 fetch 的是服务端渲染进 HTML 的**裸 `baseUrl`**。YouTube 近一年改了:`/api/timedtext` URL **缺少 `pot`(proof-of-origin token)时返回空 body(HTTP 200 但 0 字节)**。裸 baseUrl 天生没有 pot(pot 是客户端 BotGuard 现生成的),所以必然空 → 报这条错。注意 strategy 1 的 URL 过滤里本就强制 `url.includes('pot=')`,正是同一个原因。
+
+**修法**:加一层**不依赖 pot 的兜底**——InnerTube `get_transcript`(就是 YouTube UI「显示转写」面板用的接口),插在 network-capture 之后、裸-baseUrl 之前:
+
+- 从 `ytcfg.data_` 取 `INNERTUBE_API_KEY` + `INNERTUBE_CLIENT_VERSION`,先 POST `/youtubei/v1/next` 拿
+  `getTranscriptEndpoint.params`(深搜,容忍路径变动);拿不到就**兜底构造** `base64(pb{1:base64(pb{1:videoId})})`。
+- 再 POST `/youtubei/v1/get_transcript {params}`,**深搜** `transcriptSegmentRenderer`(`startMs/endMs/snippet.runs[].text`)凑 segments。返回直接给字幕文本,**完全绕开 timedtext URL + pot**。
+- 这层 best-effort:任何一步失败就**静默 fall through** 到原来的 watch-HTML 路径(保留「无字幕」的友好报错 + 语言列举)。源码改了 → 同 commit 轮了 `index.json` 的 sha256(`92d53e…`→`9b761b…`)。
+
+**教训**:① YouTube 字幕已进入「**必须有 pot**」时代,任何"直接 fetch baseUrl/timedtext"的路子都会拿到**空 200**(不是 4xx,容易被误判成"有字幕但空")。② 可靠的 pot-free 路子只有两条:让**播放器自己发请求再 hook**(strategy 1,但依赖播放),或走 **InnerTube `get_transcript`**(UI 同款,稳)。③ 兜底层要会**静默退让**,不能把自己的失败 throw 出去盖掉下游更准的报错(如"该视频无字幕")。
+
+**追加(lang 稳健性)**:实测发现**带 `lang:"en"` 反而失败、不带就成功**。根因是选轨逻辑不对称:`pickTrack` 在指定语言时只 `find(code===lang)`、**不区分 asr / 人工**,容易选中 asr 轨(其裸 baseUrl 受 pot 锁→空);不指定时则优先 `kind!=='asr'`(人工轨,能成)。修法:让指定语言也**优先人工轨**,且**请求的语言不存在时回退到 auto 顺序**(player 的 `pickTrack` + watch-HTML 兜底的选轨都改),这样「传 lang」最差也不劣于「不传」。教训:**带 lang 参数的精确化路径,行为不能比 auto 默认更差**——很多 adapter 的「指定 X」分支会忘了继承默认分支里的偏好/回退。
+
+### 10.24 安装的 marketplace adapter 过期检测 + 自动 reload(免手动卸载重装)
+
+**背景**:§10.23 修 `youtube__transcript` 时,用户**忘了重新 install adapter**,跑的还是旧源码,以为没修好。marketplace adapter 是**手维护**的(改源码必轮 `index.json` 的 sha256,见本文顶部规则),装着的那份是「当时的源码快照」存在 IDB(`installed_adapters.source` 逐字保存),**不会**因为 bundle 更新而自动跟进——只能手动卸载+重装。这对开发期(频繁改 adapter)很烦。
+
+**做法**:加一条「开 sidepanel 时自动对账 + 重装漂移的 adapter」链路:
+
+- **检测放 SW 侧**(`install-manager.ts#findStaleMarketplaceAdapters`):`InstalledAdapterSummary` 不带 source(消息体不想驮整段源码),但 SW 直接持有 IDB 全量记录 + 有 `crypto.subtle`。它 `listInstalled()` → 过滤 `origin.type==='marketplace'` → fetch 本地 `marketplace/index.json` → 对每条算 `sha256(installed.source)` 跟目录的 `sha256` 比;**不一致即漂移**。目录里已删掉的 adapter **不动**(绝不自动卸载)。任何 I/O 失败 → 返回空(不能因为目录读不到就卡住)。比的是 **sha256 不是 semver**(version 只是信息性的)。
+- **重装放 sidepanel 侧**(`adapters-client.ts#reconcileStaleAdapters`):SW 只能返回漂移 id——**它不能 eval**(eval/capture 在 sidepanel 的 sandbox iframe 里)。所以 sidepanel 收到漂移列表后,对每个走**既有幂等重装路**(`fetchAdapterSource`(校 sha256)→ `installAdapterFromSource`(sandbox eval → `INSTALL_ADAPTER` → `installFromCaptured` 先 unregister 再 register,保留 `installedAt`))。单个失败**吞掉**,下次开 sidepanel 再试。
+- **触发点**:`App.tsx` 挂载时 `void reconcileStaleAdapters()`,更新了就弹一条几秒自消失的 toast(`已自动更新 N 个市场 adapter:…`)。sandbox iframe 是**懒创建**的(`ensureSandbox`),从 App 挂载触发没问题。
+
+**消息**:新增 `LIST_STALE_ADAPTERS` / `LIST_STALE_ADAPTERS_RESP {stale:{id,title}[]}`,只驮 id+title(通常 0 条),不驮源码。
+
+**教训**:① 手维护 + sha256 闸的代价就是「装着的会过期」,**得有对账机制**否则开发期天天踩(忘重装)。② **检测**(要 source+crypto+目录)和**执行重装**(要 sandbox eval)天然分属 SW / sidepanel 两侧,别硬塞一边——SW 出诊断、sidepanel 落地,复用既有幂等装链。③ 自动 eval 第三方源码听着吓人,但这里**只重装用户已装过、且 sha256 现校于本地 bundle** 的那份,信任级别 = 当初手动装,安全。④ 加了 adapter 的新 evaluate 步骤会**打乱按序 mock 的 port 测试**(`transcript.test.ts` 的 `page.evaluate` 序列),改 adapter 必同步顺手把测试的 call 序号/桩补上(本次 +1 个 `get_transcript` 步)。
+
+### 10.25 `get_transcript` 兜底是「哑」的:用了假 context → /next 不给 transcript 面板 → 每次都白跑 25s 再死
+
+**症状**(§10.23/§10.24 上线后回归):本来 OK 的 `youtube__transcript {url}`(不带 lang)反而报 `Caption URL returned empty response`;另一些视频**60s 超时**——但用户自己在页面点「显示转写」**秒出**。
+
+**根因**:§10.23 加的 `get_transcript` 兜底**根本没生效**,两个错叠加:
+1. **context 是假的**:我手搓了个最小 `{ client: { clientName:'WEB', clientVersion:'2.2024…' } }`。YouTube 的 `/next` 在 context 不全(缺 `visitorData`/正确版本等)时**不返回 transcript 引擎面板**,于是 `findParams` 找不到 `getTranscriptEndpoint.params` → 构造的兜底 params 又不一定对 → `get_transcript` 拿不到 → 返回 null。
+2. **位置是最后**:这条兜底排在 player 抓取(轮 ~25s 等播放)+ network capture **之后**。于是每个走兜底的视频都先**白白耗 25s** player 轮询,再 get_transcript(还失败),再 watch-HTML 裸 baseUrl(pot 锁→空 200)→ 报 empty;链路再叠 trampoline 重入就 60s 超时。「不带 lang 原来 OK」只是当时 player 路径**碰巧**抓到了,换个视频/时机就崩——本质是兜底从来没真正接住过。
+
+**修法**(两条一起):
+- **context 用真的**:`window.ytcfg.data_.INNERTUBE_CONTEXT`(页面自己用的那份,含 client/版本/visitorData/hl-gl),没有才退到最小版。这样 `/next` 才会带 transcript 面板,`getTranscriptEndpoint.params` 拿得到。params 取序:**先 fresh `/next`(锁当前 videoId)→ 再 `window.ytInitialData`(watch 页已有面板)→ 最后构造 protobuf**。
+- **顺序提到最前**:`get_transcript` 变成**第 1 个策略**(navigate 之后立刻跑),命中就秒返回、**不碰 player 轮询**;只有它没接住才退到 player→capture→watch-HTML。等于跟 UI 的「显示转写」同款路径同款速度。
+
+**取舍**:`get_transcript` 拿的是面板**默认轨**,所以 `get_transcript`-first 命中时 **lang 偏好被忽略**(指定语言的精确选轨仍由后面的 player 路径负责,但只有 get_transcript 失败才轮到它)。绝大多数视频只有一条/默认即所需,可接受;真要指定非默认语言再说。
+
+**教训**:① 调 InnerTube 私有 API **必须用页面自己的 `INNERTUBE_CONTEXT`**,自己拼最小 context 会被服务端「降级」(少返回面板/continuation),还特别难查——表现是「没报错但就是空」。② 兜底**位置即性能**:慢且常失败的策略(player 轮 25s)排在快且可靠的(get_transcript)前面,等于给每次成功都加了 25s 税;**快的可靠的要排第一**。③ 「原来 OK」可能只是**侥幸**(player 抓到了),别把侥幸当契约——加确定性的主路径(get_transcript-first)才是修复。
+
+### 10.26 `get_transcript` 还是空 + 60s 超时:它跑在 **youtube 首页** 上,params 取错了源
+
+**症状**(§10.25 上线后仍失败):一次 `Caption URL returned empty response`,一次 **60s 超时**。看 SW 日志才看清真相:`senderUrl: 'https://www.youtube.com/'`——agent **复用了停在首页的 youtube tab**;第一个 evaluate(`scriptLen 3179`)就是 get_transcript,`valuePreview: 'null'`——它**在首页上跑、返回 null**;随后落进 player/`prepareYoutubeApiPage` 兜底,在首页 goto 上 **trampoline ping-pong(§10.21)→ 60s 超时**。
+
+**根因**:§10.25 让 get_transcript 从「当前页的 `ytInitialData` / 一个 `/next`」找 transcript 面板的 params。但当前页是**首页**:首页的 `ytInitialData` 是首页信息流、不含我们这条视频的转写面板;首页 context 的 `/next` 也不带。于是 `findParams` 找不到 → 构造的 params 不一定对 → get_transcript 空。本质:**params 的来源不能依赖「tab 当前停在哪」**——而 §10.21 的「首页就跳过导航」又保证了 tab 很可能就停在首页。
+
+**修法**:get_transcript 自己 **`fetch('/watch?v=<id>')` 把 watch 页 HTML 抓回来**,从里面抽 `ytInitialData`(复用 adapter 既有的 `extractJsonAssignmentFromHtml`)再 `findParams`。同源带 cookie 的 fetch 从**任何** youtube 页都能成,所以**不依赖导航、也不碰 trampoline**;watch 页的 `ytInitialData` 一定带转写面板(用户能点「显示转写」即证明)。取序变成:**watch-HTML 的 ytInitialData → `/next` → 构造**。get_transcript 命中即秒返回,player/兜底/超时都不会碰到。
+
+**教训**:① func adapter **不能假设 tab 停在「对的页」**——复用 tab 很常见,当前页可能是首页/上一个视频/搜索页。要数据就**自己 fetch 那条 URL**,别读「当前页恰好有没有」。② 一条错误日志里的 `senderUrl` + `valuePreview:'null'` + `scriptLen` 比四轮盲改都值钱——**先看真实运行日志再动手**。③ 这类「只能在真实登录浏览器里复现」的 adapter,改完务必让用户贴一次运行日志/控制台验证,别靠纯推理迭代(本类问题已第 4 次)。
+
+### 10.27 真·根因(第 6 轮才定位):func 从不导航到 watch 页 → player 路径瘫痪;get_transcript 又 400
+
+**怎么定位的**:控制台 snippet 被聊天框**转义/智能引号**搞坏(反复 `Invalid or unexpected token`),改用「**在 adapter 里塞临时诊断、靠 SW 日志的 `valuePreview` 回传**」的办法,两轮把真相挖出来:
+1. 第一轮诊断返回 `{psrc:'html', keys:'t:object'}` —— params **从 watch HTML 成功抽到**(我的解析没问题),但 `data` 是 `null`(`typeof null==='object'` 落进 else 分支),即 `get_transcript` 的 fetch **非 2xx**。
+2. 第二轮诊断返回 `{st:400, body:'…Precondition check fai…'}` —— `get_transcript` 回 **400 `FAILED_PRECONDITION`**。这是 InnerTube 出了名难搞的错(要精确的 client/visitor 前置条件),**追它是无底洞**。
+
+**真根因(两条)**:
+- **get_transcript 对这条视频(以及很可能很多视频)就是 400**,pot-free 的 API 路子此路不通。
+- 日志里 player evaluate(`scriptLen 9947`)**3ms 就返回 null** = 页面上**没有 `movie_player`** = tab 停在**首页**、视频根本没加载。而 **player 抓取才是真正能用的路子**(播放器自己发的 timedtext 请求带合法 pot,被我们 hook;6 轮前那次成功的完整字幕就是它产出的)。player 瘫痪,只因 func **从没导航到 watch 页**:`onHomepage` 守卫分不清「dispatcher 刚把 tab 开在首页」和「trampoline 弹回首页」,把**首次导航也跳过了**。
+
+**修法**:
+- 导航判据从 `onHomepage` 改成 **`onThisWatch`**(`/[?&]v=/` 且 url 含本 videoId):不在本视频 watch 页就 `goto(watchUrl)`;trampoline 重入时已在 watch 页 → 跳过 → **全程只一次导航、无 ping-pong**。
+- **删掉 `prepareYoutubeApiPage` 的 `goto(首页)`**——它正是和 watch goto 对打的另一只手(§10.21 的 ping-pong 源头);下面的 watch-HTML `fetch('/watch')` 同源,在哪都能跑,不需要先回首页。
+- get_transcript 保留为「快速首选」(命中即 pot-free 秒返回),但**去掉构造 params 的兜底**(从不对、只会 400),并明确:它失败就让 **player 路径接管**。
+
+**教训**:① 浏览器里跑的诊断**别走「让用户粘控制台」**——富文本会把引号/反斜杠转义掉;**把诊断塞进 adapter 的返回值、靠现有日志回传**才稳。② `valuePreview` 里 `t:object` 这种「`typeof null`」的坑要会读。③ 一个守卫(`onHomepage`)同时管「首次导航」和「重入去抖」必然分不清两种语义——**去抖要用「是否已到目标态(onThisWatch)」判据,而不是「是否在某个中转态」**。④ 别为一个 `FAILED_PRECONDITION` 死磕私有 API,**先回到已被证明能用的路径**(player 抓取)。

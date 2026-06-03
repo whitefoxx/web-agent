@@ -74,10 +74,6 @@ function extractJsonAssignmentFromHtml(html, keys) {
   }
   return null;
 }
-async function prepareYoutubeApiPage(page) {
-  await page.goto("https://www.youtube.com", { waitUntil: "none" });
-  await page.wait(2);
-}
 
 // ../browser-agent/opencli/clis/youtube/transcript-group.js
 var SENTENCE_END = /[.!?\u3002\uFF01\uFF1F\uFF0E]["'\u2019\u201D)]*\s*$/;
@@ -391,16 +387,22 @@ cli({
     const mode = kwargs.mode || "grouped";
     const watchUrl = "https://www.youtube.com/watch?v=" + encodeURIComponent(videoId);
     const canCapture = typeof page.startNetworkCapture === "function" && typeof page.readNetworkCapture === "function";
+    // Navigate to THIS video's watch page so the player-capture path can run —
+    // the player itself fetches the timedtext URL WITH a valid pot token, which
+    // we hook; that's the only reliable pot-free capture (the bare baseUrl is
+    // pot-locked → empty, and get_transcript 400s "Precondition check failed").
+    //
     // Trampoline idempotency: page.goto re-executes this func from the top after
-    // navigation. The no-segments path below falls back to goto(youtube.com
-    // homepage), so an unconditional goto(watchUrl) would ping-pong between the
-    // homepage and the watch page forever. Skip the leading watch navigation when
-    // the replay has already landed on the bare homepage; there the player
-    // evaluate returns null and flow degrades into the fetch fallback (which
-    // fetches /watch?v=... directly). See adapter-hot-plug.md §10.21.
+    // navigation. The check below skips the goto once we're already on this
+    // video's watch page (the replay), so there is exactly ONE navigation and no
+    // ping-pong. The old `onHomepage` guard couldn't tell "freshly opened on the
+    // homepage" (dispatcher opens youtube.com) from "trampolined back", so it
+    // skipped the INITIAL nav too → the func sat on the homepage with no player.
+    // The homepage-degrade path (prepareYoutubeApiPage's goto) is gone; the fetch
+    // fallbacks below work from any youtube.com origin. See §10.21 / §10.27.
     const curUrl = await page.getCurrentUrl().catch(() => "");
-    const onHomepage = /^https?:\/\/(?:www\.)?youtube\.com\/?(?:[?#]|$)/.test(curUrl);
-    if (!onHomepage) {
+    const onThisWatch = /[?&]v=/.test(curUrl) && curUrl.indexOf(videoId) >= 0;
+    if (!onThisWatch) {
       if (canCapture) {
         try {
           await page.startNetworkCapture("/api/timedtext");
@@ -410,7 +412,95 @@ cli({
       await page.goto(watchUrl, { waitUntil: "none" });
       await page.wait(3);
     }
-    const playerResult = await page.evaluate(`
+    // 1) Fast, pot-free path FIRST: InnerTube get_transcript — exactly what the
+    //    YouTube UI's "Show transcript" panel calls (no playback, no pot token,
+    //    ~2 requests, returns instantly). Only when this misses do we fall back
+    //    to the slower player-capture / network / watch-HTML paths below. The
+    //    earlier version ran this LAST with a hand-rolled minimal client context,
+    //    which made /next omit the transcript panel → it always missed → every
+    //    request paid the 25s player poll then died on the pot-locked baseUrl.
+    //    See adapter-hot-plug.md §10.25.
+    let segments = null;
+    try {
+      const direct = unwrapBrowserResult(
+        await page.evaluate(`
+          (async () => {
+            const videoId = ${JSON.stringify(videoId)};
+            const cfg = window.ytcfg?.data_ || {};
+            const apiKey = cfg.INNERTUBE_API_KEY;
+            if (!apiKey) return null;
+            // Use the page's REAL InnerTube context (client name/version,
+            // visitorData, hl/gl). A minimal hand-rolled context makes /next drop
+            // the transcript engagement panel — the root cause of the miss.
+            const context = cfg.INNERTUBE_CONTEXT
+              || { client: { clientName: 'WEB', clientVersion: cfg.INNERTUBE_CLIENT_VERSION || '2.20240101.00.00' } };
+            async function api(ep, body) {
+              const resp = await fetch('/youtubei/v1/' + ep + '?key=' + apiKey + '&prettyPrint=false', {
+                method: 'POST', credentials: 'include',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ context, ...body }),
+              });
+              if (!resp.ok) return null;
+              return resp.json();
+            }
+            function findParams(obj) {
+              if (!obj || typeof obj !== 'object') return null;
+              const ep = obj.getTranscriptEndpoint;
+              if (ep && typeof ep.params === 'string') return ep.params;
+              for (const k in obj) { const r = findParams(obj[k]); if (r) return r; }
+              return null;
+            }
+            function collectSegs(obj, out) {
+              if (!obj || typeof obj !== 'object') return;
+              const r = obj.transcriptSegmentRenderer;
+              if (r) {
+                const runs = Array.isArray(r.snippet?.runs) ? r.snippet.runs : [];
+                const text = runs.map(x => x?.text || '').join('').replace(/\\s+/g, ' ').trim();
+                const start = Number(r.startMs || 0) / 1000;
+                const end = Number(r.endMs || 0) / 1000;
+                if (text) out.push({ start, end, text });
+                return;
+              }
+              for (const k in obj) collectSegs(obj[k], out);
+            }
+            // Params: FETCH the watch HTML and read the transcript panel's params
+            // out of its ytInitialData. This is the only source that reliably has
+            // the panel regardless of what page the tab is currently on — the
+            // adapter often runs while the tab sits on the bare youtube.com
+            // homepage (reused tab), whose ytInitialData / homepage-context /next
+            // do NOT carry our video's transcript panel. Same-origin credentialed
+            // fetch works from any youtube page. See adapter-hot-plug.md §10.26.
+            const extractJsonAssignmentFromHtml = ${extractJsonAssignmentFromHtml.toString()};
+            let params = null;
+            try {
+              const wr = await fetch('/watch?v=' + encodeURIComponent(videoId), { credentials: 'include' });
+              if (wr.ok) {
+                const initial = extractJsonAssignmentFromHtml(await wr.text(), 'ytInitialData');
+                if (initial) params = findParams(initial);
+              }
+            } catch {}
+            if (!params) {
+              const next = await api('next', { videoId });
+              if (next) params = findParams(next);
+            }
+            if (!params) return null;
+            const data = await api('get_transcript', { params });
+            if (!data) return null; // 400 "Precondition check failed" on some videos → player path takes over
+            const out = [];
+            collectSegs(data, out);
+            return out.length ? out : null;
+          })()
+        `),
+      );
+      if (Array.isArray(direct) && direct.length > 0) segments = direct;
+    } catch {
+      // fall through to the player-capture / watch-HTML paths
+    }
+
+    // 2) Player-capture fallback (honors lang precisely; needs the video to play).
+    const playerResult = segments
+      ? null
+      : await page.evaluate(`
       (async () => {
         const langPref = ${JSON.stringify(lang)};
         // Scope all timedtext URL matching to the current video. YouTube is an
@@ -491,8 +581,18 @@ cli({
         function pickTrack(tracklist) {
           if (!Array.isArray(tracklist) || tracklist.length === 0) return null;
           if (langPref) {
-            return tracklist.find(t => t.languageCode === langPref)
-              || tracklist.find(t => t.languageCode?.startsWith(langPref));
+            // Prefer a MANUAL (non-asr) track in the requested language: the asr
+            // track's only directly-fetchable URL is the pot-locked baseUrl, which
+            // returns an empty body. If the requested language is absent entirely,
+            // fall through to the auto-select order so passing lang never does
+            // worse than omitting it. See adapter-hot-plug.md §10.23.
+            return tracklist.find(t => t.languageCode === langPref && t.kind !== 'asr')
+              || tracklist.find(t => t.languageCode?.startsWith(langPref) && t.kind !== 'asr')
+              || tracklist.find(t => t.languageCode === langPref)
+              || tracklist.find(t => t.languageCode?.startsWith(langPref))
+              || tracklist.find(t => t.languageCode === 'en' && t.kind !== 'asr')
+              || tracklist.find(t => t.kind !== 'asr')
+              || tracklist[0];
           }
           return tracklist.find(t => t.languageCode === 'en' && t.kind !== 'asr')
             || tracklist.find(t => t.languageCode === 'en')
@@ -634,7 +734,9 @@ cli({
         }
       })()
     `);
-    let segments = normalizeSegmentsPayload(playerResult, "player caption extraction", { allowNull: true });
+    if (!segments) {
+      segments = normalizeSegmentsPayload(playerResult, "player caption extraction", { allowNull: true });
+    }
     if (!segments && canCapture) {
       try {
         const captured = extractSegmentsFromNetworkCapture(await page.readNetworkCapture(), lang, videoId);
@@ -649,9 +751,9 @@ cli({
           throw err;
       }
     }
-    if (!segments) {
-      await prepareYoutubeApiPage(page);
-    }
+    // No prepareYoutubeApiPage(page) here: it used to goto(youtube.com homepage),
+    // which fought the watch goto above into a trampoline ping-pong (§10.21). The
+    // watch-HTML fetch below is same-origin from wherever we already are.
     const captionData = segments ? null : unwrapBrowserResult(await page.evaluate(`
       (async () => {
         const extractJsonAssignmentFromHtml = ${extractJsonAssignmentFromHtml.toString()};
@@ -676,7 +778,10 @@ cli({
         const langPref = ${JSON.stringify(lang)};
         let track = null;
         if (langPref) {
-          track = tracks.find(t => t.languageCode === langPref)
+          // Prefer a manual (non-asr) track in the requested language; see pickTrack.
+          track = tracks.find(t => t.languageCode === langPref && t.kind !== 'asr')
+            || tracks.find(t => t.languageCode.startsWith(langPref) && t.kind !== 'asr')
+            || tracks.find(t => t.languageCode === langPref)
             || tracks.find(t => t.languageCode.startsWith(langPref));
         }
         if (!track) {

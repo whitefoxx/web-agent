@@ -50,8 +50,10 @@ const transcriptSource = readFileSync(MARKETPLACE_TRANSCRIPT, 'utf8');
 function createPageMock(captionUrl: string): FakeTranscriptPage {
   const page = makeTranscriptPage();
   page.evaluate
-    .mockResolvedValueOnce(null)
+    .mockResolvedValueOnce(null) // #1 InnerTube get_transcript → no segments
+    .mockResolvedValueOnce(null) // #2 player extraction → no segments
     .mockResolvedValueOnce({
+      // #3 watch-HTML caption info
       captionUrl,
       language: 'en',
       kind: 'manual',
@@ -60,7 +62,7 @@ function createPageMock(captionUrl: string): FakeTranscriptPage {
       langMatched: false,
       langPrefixMatched: false,
     })
-    .mockResolvedValue([{ start: 1, end: 3, text: 'hello & world' }]);
+    .mockResolvedValue([{ start: 1, end: 3, text: 'hello & world' }]); // #4+ XML extraction
   return page;
 }
 
@@ -74,7 +76,9 @@ describe('youtube transcript source contract (marketplace)', () => {
     expect(transcriptSource).toContain("player.setOption('captions', 'track', track)");
     expect(transcriptSource).toContain("url.includes('pot=')");
     expect(transcriptSource).toContain("fetch('/watch?v='");
-    expect(transcriptSource).toContain("extractJsonAssignmentFromHtml(html, 'ytInitialPlayerResponse')");
+    expect(transcriptSource).toContain(
+      "extractJsonAssignmentFromHtml(html, 'ytInitialPlayerResponse')",
+    );
     expect(transcriptSource).toContain('playerCaptionsTracklistRenderer');
     expect(transcriptSource).not.toContain('/youtubei/v1/player');
     expect(transcriptSource).not.toContain("clientName: 'ANDROID'");
@@ -109,26 +113,28 @@ describe('youtube transcript caption fetch (marketplace)', () => {
 
     const rows = await command!.func!(page, { url: 'abc', mode: 'raw' });
 
-    expect(page.evaluate.mock.calls[2][0]).toContain(
+    expect(page.evaluate.mock.calls[3][0]).toContain(
       'const primaryUrl = "https://www.youtube.com/api/timedtext?v=abc&lang=en&fmt=srv3"',
     );
-    expect(page.evaluate.mock.calls[2][0]).toContain(
+    expect(page.evaluate.mock.calls[3][0]).toContain(
       'const originalUrl = "https://www.youtube.com/api/timedtext?v=abc&lang=en"',
     );
     expect(rows).toEqual([{ index: 1, start: '1.00s', end: '3.00s', text: 'hello & world' }]);
   });
 
-  it('uses Browser Bridge envelope-wrapped player caption segments without fallback', async () => {
+  it('uses Browser Bridge envelope-wrapped get_transcript segments without fallback', async () => {
+    // get_transcript runs first now; an enveloped { session, data:[...] } result
+    // is unwrapped and used directly — no player/watch fallback, a single evaluate.
     const page = makeTranscriptPage();
     page.evaluate.mockResolvedValueOnce({
       session: 'browser:default',
-      data: [{ start: 2, end: 4.5, text: 'from player captions' }],
+      data: [{ start: 2, end: 4.5, text: 'from transcript api' }],
     });
 
     const rows = await command!.func!(page, { url: 'abc', mode: 'raw' });
 
     expect(page.evaluate).toHaveBeenCalledTimes(1);
-    expect(rows).toEqual([{ index: 1, start: '2.00s', end: '4.50s', text: 'from player captions' }]);
+    expect(rows).toEqual([{ index: 1, start: '2.00s', end: '4.50s', text: 'from transcript api' }]);
   });
 
   it('uses captured timedtext json3 when player selection returns no segments', async () => {
@@ -140,19 +146,24 @@ describe('youtube transcript caption fetch (marketplace)', () => {
             url: 'https://www.youtube.com/api/timedtext?v=abc&lang=en&fmt=json3&pot=token',
             responsePreview: JSON.stringify({
               events: [
-                { tStartMs: 1000, dDurationMs: 1500, segs: [{ utf8: 'hello ' }, { utf8: 'capture' }] },
+                {
+                  tStartMs: 1000,
+                  dDurationMs: 1500,
+                  segs: [{ utf8: 'hello ' }, { utf8: 'capture' }],
+                },
               ],
             }),
           },
         ],
       },
     });
-    page.evaluate.mockResolvedValueOnce(null);
+    // get_transcript (#1) and player (#2) both miss → captured json3 is used.
+    page.evaluate.mockResolvedValueOnce(null).mockResolvedValueOnce(null);
 
     const rows = await command!.func!(page, { url: 'abc', mode: 'raw', lang: 'en' });
 
     expect(page.startNetworkCapture).toHaveBeenCalledWith('/api/timedtext');
-    expect(page.evaluate).toHaveBeenCalledTimes(1);
+    expect(page.evaluate).toHaveBeenCalledTimes(2);
     expect(rows).toEqual([{ index: 1, start: '1.00s', end: '2.50s', text: 'hello capture' }]);
   });
 
@@ -165,14 +176,18 @@ describe('youtube transcript caption fetch (marketplace)', () => {
             // Stale entry from a prior watch on the shared tab — must be ignored.
             url: 'https://www.youtube.com/api/timedtext?v=prev&lang=en&fmt=json3&pot=token',
             responsePreview: JSON.stringify({
-              events: [{ tStartMs: 0, dDurationMs: 1000, segs: [{ utf8: 'WRONG video captions' }] }],
+              events: [
+                { tStartMs: 0, dDurationMs: 1000, segs: [{ utf8: 'WRONG video captions' }] },
+              ],
             }),
           },
           {
             // Prefix collision: substring matching for "v=abc" would accept this.
             url: 'https://www.youtube.com/api/timedtext?v=abcd&lang=en&fmt=json3&pot=token',
             responsePreview: JSON.stringify({
-              events: [{ tStartMs: 1000, dDurationMs: 1000, segs: [{ utf8: 'WRONG prefix captions' }] }],
+              events: [
+                { tStartMs: 1000, dDurationMs: 1000, segs: [{ utf8: 'WRONG prefix captions' }] },
+              ],
             }),
           },
           {
@@ -185,7 +200,8 @@ describe('youtube transcript caption fetch (marketplace)', () => {
         ],
       },
     });
-    page.evaluate.mockResolvedValueOnce(null);
+    // get_transcript (#1) and player (#2) both miss → captured json3 is used.
+    page.evaluate.mockResolvedValueOnce(null).mockResolvedValueOnce(null);
 
     const rows = await command!.func!(page, { url: 'abc', mode: 'raw', lang: 'en' });
 
@@ -197,10 +213,10 @@ describe('youtube transcript caption fetch (marketplace)', () => {
 
     await command!.func!(page, { url: 'abc', mode: 'raw' });
 
-    expect(page.evaluate.mock.calls[2][0]).toContain(
+    expect(page.evaluate.mock.calls[3][0]).toContain(
       'const primaryUrl = "https://www.youtube.com/api/timedtext?v=abc&lang=en&fmt=vtt"',
     );
-    expect(page.evaluate.mock.calls[2][0]).toContain(
+    expect(page.evaluate.mock.calls[3][0]).toContain(
       'const originalUrl = "https://www.youtube.com/api/timedtext?v=abc&lang=en&fmt=vtt"',
     );
   });
@@ -210,7 +226,7 @@ describe('youtube transcript caption fetch (marketplace)', () => {
 
     await command!.func!(page, { url: 'abc', mode: 'raw' });
 
-    const script = page.evaluate.mock.calls[2][0] as string;
+    const script = page.evaluate.mock.calls[3][0] as string;
     expect(script).toContain('if (!result.xml.length && originalUrl !== primaryUrl)');
     expect(script).toContain('result = await fetchCaptionXml(originalUrl)');
     expect(script).toContain('if (result.error) {');
@@ -220,7 +236,8 @@ describe('youtube transcript caption fetch (marketplace)', () => {
     const page = createPageMock('https://www.youtube.com/api/timedtext?v=abc&lang=en');
     page.evaluate.mockReset();
     page.evaluate
-      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null) // InnerTube get_transcript → no segments
+      .mockResolvedValueOnce(null) // player extraction → no segments
       .mockResolvedValueOnce({
         captionUrl: 'https://www.youtube.com/api/timedtext?v=abc&lang=en',
         language: 'en',
@@ -242,7 +259,8 @@ describe('youtube transcript caption fetch (marketplace)', () => {
     const page = createPageMock('https://www.youtube.com/api/timedtext?v=abc&lang=en');
     page.evaluate.mockReset();
     page.evaluate
-      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null) // InnerTube get_transcript → no segments
+      .mockResolvedValueOnce(null) // player extraction → no segments
       .mockResolvedValueOnce({
         captionUrl: 'https://www.youtube.com/api/timedtext?v=abc&lang=en',
         language: 'en',
@@ -264,7 +282,8 @@ describe('youtube transcript caption fetch (marketplace)', () => {
     const page = createPageMock('https://www.youtube.com/api/timedtext?v=abc&lang=en');
     page.evaluate.mockReset();
     page.evaluate
-      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null) // InnerTube get_transcript → no segments
+      .mockResolvedValueOnce(null) // player extraction → no segments
       .mockResolvedValueOnce({ session: 'browser:default', data: { rows: [] } });
 
     await expect(command!.func!(page, { url: 'abc', mode: 'raw' })).rejects.toMatchObject({
@@ -277,7 +296,8 @@ describe('youtube transcript caption fetch (marketplace)', () => {
     const page = createPageMock('https://www.youtube.com/api/timedtext?v=abc&lang=en');
     page.evaluate.mockReset();
     page.evaluate
-      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null) // InnerTube get_transcript → no segments
+      .mockResolvedValueOnce(null) // player extraction → no segments
       .mockResolvedValueOnce({ error: 'No captions available for this video' });
 
     await expect(command!.func!(page, { url: 'abc', mode: 'raw' })).rejects.toBeInstanceOf(
@@ -289,7 +309,8 @@ describe('youtube transcript caption fetch (marketplace)', () => {
     const page = createPageMock('https://www.youtube.com/api/timedtext?v=abc&lang=en');
     page.evaluate.mockReset();
     page.evaluate
-      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null) // InnerTube get_transcript → no segments
+      .mockResolvedValueOnce(null) // player extraction → no segments
       .mockResolvedValueOnce({ error: 'ytInitialPlayerResponse not found in watch HTML' });
 
     await expect(command!.func!(page, { url: 'abc', mode: 'raw' })).rejects.toBeInstanceOf(
