@@ -29,6 +29,17 @@ describe('parsePlanSteps', () => {
     expect(parsePlanSteps(undefined)).toEqual([]);
     expect(parsePlanSteps('x')).toEqual([]);
   });
+  it('accepts skipped and failed statuses (reason carried in activeForm)', () => {
+    expect(
+      parsePlanSteps([
+        { title: '跳过的', status: 'skipped', activeForm: '前置条件不满足' },
+        { title: '失败的', status: 'failed', activeForm: '接口 400' },
+      ]),
+    ).toEqual([
+      { title: '跳过的', status: 'skipped', activeForm: '前置条件不满足' },
+      { title: '失败的', status: 'failed', activeForm: '接口 400' },
+    ]);
+  });
 });
 
 describe('seedPlan', () => {
@@ -58,10 +69,22 @@ describe('planProgress', () => {
       ],
       updatedAt: 0,
     };
-    expect(planProgress(p)).toEqual({ completed: 1, total: 3 });
+    expect(planProgress(p)).toEqual({ completed: 1, settled: 1, total: 3 });
+  });
+  it('counts skipped + failed as settled but not completed', () => {
+    const p: PlanState = {
+      steps: [
+        { title: 'a', status: 'completed' },
+        { title: 'b', status: 'skipped' },
+        { title: 'c', status: 'failed' },
+        { title: 'd', status: 'pending' },
+      ],
+      updatedAt: 0,
+    };
+    expect(planProgress(p)).toEqual({ completed: 1, settled: 3, total: 4 });
   });
   it('handles undefined', () => {
-    expect(planProgress(undefined)).toEqual({ completed: 0, total: 0 });
+    expect(planProgress(undefined)).toEqual({ completed: 0, settled: 0, total: 0 });
   });
 });
 
@@ -82,6 +105,18 @@ describe('renderPlanBlock', () => {
     expect(block).toContain('[x] a');
     expect(block).toContain('[~] b');
     expect(block).toContain('[ ] c');
+  });
+  it('renders distinct marks for skipped / failed', () => {
+    const p: PlanState = {
+      steps: [
+        { title: 's', status: 'skipped' },
+        { title: 'f', status: 'failed' },
+      ],
+      updatedAt: 0,
+    };
+    const block = renderPlanBlock(p);
+    expect(block).toContain('[-] s');
+    expect(block).toContain('[!] f');
   });
   it('is empty when there is no plan', () => {
     expect(renderPlanBlock(undefined)).toBe('');

@@ -10,13 +10,14 @@
  * docs/agent-harness.md §10.4.
  */
 
-export type PlanStepStatus = 'pending' | 'in_progress' | 'completed';
+export type PlanStepStatus = 'pending' | 'in_progress' | 'completed' | 'skipped' | 'failed';
 
 export interface PlanStep {
   title: string;
   status: PlanStepStatus;
-  /** Present-continuous label shown while the step is in_progress (TodoWrite's
-   * activeForm), e.g. "正在抓取首页". Optional. */
+  /** Free-text note: the present-continuous label while in_progress (TodoWrite's
+   * activeForm, e.g. "正在抓取首页"), or a one-line reason when the step ends up
+   * skipped / failed. Optional. */
   activeForm?: string;
 }
 
@@ -29,7 +30,7 @@ export interface PlanState {
   approved?: boolean;
 }
 
-const STATUSES: PlanStepStatus[] = ['pending', 'in_progress', 'completed'];
+const STATUSES: PlanStepStatus[] = ['pending', 'in_progress', 'completed', 'skipped', 'failed'];
 
 /** Coerce raw tool args (untrusted model output) into clean PlanSteps. Drops
  * entries without a title; defaults a bad/missing status to 'pending'. */
@@ -62,15 +63,25 @@ export function seedPlan(goal: string, titles: unknown[], now: number): PlanStat
   };
 }
 
+/** A step has reached a terminal/settled state — it won't change again and the
+ * loop shouldn't keep nagging about it. Truthful: completed ≠ skipped ≠ failed. */
+export function isTerminal(status: PlanStepStatus): boolean {
+  return status === 'completed' || status === 'skipped' || status === 'failed';
+}
+
 export interface PlanProgress {
+  /** Steps that genuinely succeeded. */
   completed: number;
+  /** Steps that reached any terminal state (completed + skipped + failed). */
+  settled: number;
   total: number;
 }
 
 export function planProgress(plan: PlanState | undefined): PlanProgress {
-  if (!plan) return { completed: 0, total: 0 };
+  if (!plan) return { completed: 0, settled: 0, total: 0 };
   return {
     completed: plan.steps.filter((s) => s.status === 'completed').length,
+    settled: plan.steps.filter((s) => isTerminal(s.status)).length,
     total: plan.steps.length,
   };
 }
@@ -79,6 +90,8 @@ const MARK: Record<PlanStepStatus, string> = {
   completed: '[x]',
   in_progress: '[~]',
   pending: '[ ]',
+  skipped: '[-]',
+  failed: '[!]',
 };
 
 /** Compact markdown block injected into the system prompt each turn so the plan
@@ -90,6 +103,6 @@ export function renderPlanBlock(plan: PlanState | undefined): string {
   const goal = plan.goal ? `目标:${plan.goal}\n` : '';
   return (
     `\n\n## 当前计划(${completed}/${total} 完成)\n${goal}${lines.join('\n')}\n` +
-    '随进展用 update_plan 更新这个清单:开始某步前标 in_progress,做完立刻标 completed,任何时候只保留一个 in_progress。'
+    '随进展用 update_plan 如实更新这个清单:开始某步前标 in_progress,做完立刻标 completed;主动跳过的标 skipped、尝试失败的标 failed(都在 activeForm 写一句原因)。任何时候只保留一个 in_progress,别把没做的标成 completed。'
   );
 }

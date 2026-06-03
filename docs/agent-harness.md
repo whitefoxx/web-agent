@@ -397,6 +397,39 @@ sleep / toolCallKey / ThrashTracker`),`tests/resilience.test.ts` 全覆盖;
 
 ---
 
+### 10.15 plan 清单结束停在 0/N —— 勾选全靠模型自觉、无兜底,且缺 skipped/failed 词汇(2026-06-03 修)
+
+**症状**:plan 模式跑完,活儿其实都做了,但清单显示 0/4、四步全是 `○`,一个都没打勾。
+
+**根因**:清单勾选 100% 由每个 step 的 `status` 驱动(UI `PlanChecklist` 纯按 status 渲染),而
+status 只在模型主动调用 `update_plan` 时才变(`api-engine` 把整张列表整体替换)。这一轮模型一次
+`update_plan` 都没调——submit_plan 把步骤种子化为全 `pending`,模型把这张"别人给的清单"当静态的、
+不维护,连 `in_progress` 都没标过。唯一的安全网是一次性反思(`reflectedOnce`),且只是软提醒:模型
+无视它直接给最终答复,循环就在 0/4 收场。**没有任何确定性兜底**把结束时的清单对账成真实状态,UI
+就忠实显示了那张全 pending 的种子清单。
+
+**修法**(用户的要求是"如实",不是"自动打钩=假装完成"):
+
+- **扩词汇**:`PlanStepStatus` 增加 `skipped`(主动跳过)、`failed`(尝试失败),贯穿
+  `parsePlanSteps` / `update_plan` 工具 enum / `MARK` / `renderPlanBlock` / UI;`activeForm` 复用为
+  skip/fail 的一句原因。`planProgress` 增加 `settled`(= completed + skipped + failed)。
+- **结束时强制对账(确定性,但不造假)**:模型想结束却还有未落终态(pending/in_progress)的步骤时,
+  `reflectedOnce` 这一次不再只发软提醒——而是 `forceReconcile`:下一轮 `tool_choice` 强制成
+  `update_plan`,要求模型把每个剩余步骤**如实**标成 completed / skipped / failed(后两者写原因)。
+  **不**自动 stamp completed(那是假装成功)。模型若仍不如实标,保留诚实的 pending,绝不伪造。
+- **UI 区分**:`✓` 完成 / `⊘` 跳过 / `✗` 失败(红) / `▸` 进行中 / `○` 未开始;标题显示
+  「N/total(X 跳过 · Y 失败)」。
+- **stall 计量改用 settled**:把一步标 skipped/failed 也是进展,不该触发 no-progress 熔断。
+- 测试:planProgress settled、parsePlanSteps/renderPlanBlock 接受 skipped/failed、引擎"未落定步骤→
+  强制 update_plan→如实落 completed+skipped→收尾"。1303→1307 全绿。
+
+**教训**:**真实状态不能依赖模型自觉回填,更不能为了清单好看而造假。** 给够词汇(skipped/failed
+而非只有 completed)让模型能如实表达;在"结束"这个确定性时点强制对账(forceReconcile + 强制
+tool_choice),但只让模型填真值、不替它伪造。诚实 > 好看:宁可显示失败/跳过,也不要假的 ✓。状态机的
+真值要么由真实执行结果写入(完成/失败),要么由显式决策写入(跳过),绝不由"反正结束了"推断。
+
+---
+
 ## 11. 完成状态(2026-06-02)
 
 Phase 0–4 + 三个选项(流式 / 指标-lite / 长期记忆)+ Round 2 补齐项(R1–R7)**全部落地**。

@@ -1154,7 +1154,12 @@ function PlanApprovalCard({
 /** Live plan/todo checklist (Phase 1). Re-renders in place on every PLAN_UPDATED
  * event. Inline-styled so it needs no CSS additions. */
 function PlanChecklist({ plan }: { plan: PlanState }): preact.JSX.Element {
-  const done = plan.steps.filter((s) => s.status === 'completed').length;
+  const completed = plan.steps.filter((s) => s.status === 'completed').length;
+  const skipped = plan.steps.filter((s) => s.status === 'skipped').length;
+  const failed = plan.steps.filter((s) => s.status === 'failed').length;
+  const extra = [skipped ? `${skipped} 跳过` : '', failed ? `${failed} 失败` : '']
+    .filter(Boolean)
+    .join(' · ');
   return (
     <div
       style={{
@@ -1167,29 +1172,48 @@ function PlanChecklist({ plan }: { plan: PlanState }): preact.JSX.Element {
       }}
     >
       <div style={{ fontWeight: 600, marginBottom: 4, opacity: 0.85 }}>
-        📋 计划 {done}/{plan.steps.length}
+        📋 计划 {completed}/{plan.steps.length}
+        {extra ? ` (${extra})` : ''}
         {plan.goal ? ` · ${plan.goal}` : ''}
       </div>
       <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
-        {plan.steps.map((s, i) => (
-          <li
-            key={i}
-            style={{
-              display: 'flex',
-              gap: 6,
-              alignItems: 'baseline',
-              opacity: s.status === 'completed' ? 0.55 : 1,
-              padding: '1px 0',
-            }}
-          >
-            <span style={{ width: 14, flexShrink: 0 }}>
-              {s.status === 'completed' ? '✓' : s.status === 'in_progress' ? '▸' : '○'}
-            </span>
-            <span style={{ textDecoration: s.status === 'completed' ? 'line-through' : 'none' }}>
-              {s.status === 'in_progress' && s.activeForm ? s.activeForm : s.title}
-            </span>
-          </li>
-        ))}
+        {plan.steps.map((s, i) => {
+          // Truthful per-step state: done / skipped / failed / in_progress /
+          // pending are each visually distinct. docs/agent-harness.md §10.15.
+          const dim = s.status === 'completed' || s.status === 'skipped';
+          const mark =
+            s.status === 'completed'
+              ? '✓'
+              : s.status === 'skipped'
+                ? '⊘'
+                : s.status === 'failed'
+                  ? '✗'
+                  : s.status === 'in_progress'
+                    ? '▸'
+                    : '○';
+          const label =
+            s.status === 'in_progress' && s.activeForm
+              ? s.activeForm
+              : (s.status === 'skipped' || s.status === 'failed') && s.activeForm
+                ? `${s.title} — ${s.activeForm}`
+                : s.title;
+          return (
+            <li
+              key={i}
+              style={{
+                display: 'flex',
+                gap: 6,
+                alignItems: 'baseline',
+                opacity: dim ? 0.55 : 1,
+                color: s.status === 'failed' ? '#c0392b' : undefined,
+                padding: '1px 0',
+              }}
+            >
+              <span style={{ width: 14, flexShrink: 0 }}>{mark}</span>
+              <span style={{ textDecoration: dim ? 'line-through' : 'none' }}>{label}</span>
+            </li>
+          );
+        })}
       </ul>
     </div>
   );

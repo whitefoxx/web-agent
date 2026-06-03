@@ -78,6 +78,7 @@ async function runScenario(opts: ScenarioOpts) {
   const completeCalls: {
     messages: { role: string; content: unknown }[];
     tools: { function: { name: string } }[];
+    toolChoice?: unknown;
     stream?: boolean;
   }[] = [];
   const session = makeSession('test');
@@ -97,8 +98,14 @@ async function runScenario(opts: ScenarioOpts) {
     const body = o.body as {
       messages: (typeof completeCalls)[number]['messages'];
       tools: (typeof completeCalls)[number]['tools'];
+      tool_choice?: unknown;
     };
-    completeCalls.push({ messages: body.messages, tools: body.tools, stream: o.stream });
+    completeCalls.push({
+      messages: body.messages,
+      tools: body.tools,
+      toolChoice: body.tool_choice,
+      stream: o.stream,
+    });
     return opts.responses[Math.min(i++, opts.responses.length - 1)]!;
   };
   await runApiSession(ctx, { complete, slots: SLOTS, budget: opts.budget });
@@ -265,13 +272,47 @@ describe('runApiSession — engine integration scenarios', () => {
       mode: 'plan',
       responses: [
         toolMsg('submit_plan', { goal: 'G', steps: ['a'] }),
-        textMsg('做完了'), // tries to finish with the step still pending → reflection fires
+        textMsg('做完了'), // tries to finish with a step still pending → reconcile fires
         textMsg('最终答复'),
       ],
       requestPlanDecision: async () => ({ decision: 'approve' as const }),
     });
-    expect(r.completeCalls).toHaveLength(3); // plan + finish-attempt + post-reflection
-    expect(r.notices.some((t) => /自检|收尾/.test(t))).toBe(true);
+    expect(r.completeCalls).toHaveLength(3); // plan + finish-attempt + forced reconcile
+    expect(r.notices.some((t) => /对账|自检|收尾/.test(t))).toBe(true);
+    expect(r.doneReason).toBe('no_more_commands');
+  });
+
+  it('plan reconcile: finishing with unsettled steps forces a truthful update_plan', async () => {
+    // Model tries to wrap up with steps still pending. The engine must force ONE
+    // update_plan so the checklist is settled HONESTLY (completed/skipped/failed),
+    // never auto-stamped all-done and never left at a misleading 0/N. §10.15
+    const r = await runScenario({
+      mode: 'plan',
+      responses: [
+        toolMsg('submit_plan', { goal: 'G', steps: ['一', '二'], simple: true }), // auto-approve, seeds pending
+        textMsg('差不多了'), // first finish attempt → triggers [对账]
+        toolMsg('update_plan', {
+          steps: [
+            { title: '一', status: 'completed' },
+            { title: '二', status: 'skipped', activeForm: '前置条件不满足,跳过' },
+          ],
+        }), // the forced reconcile turn settles each step truthfully
+        textMsg('最终答复'),
+      ],
+    });
+    expect(r.notices.some((t) => /对账/.test(t))).toBe(true);
+    // the turn right after the finish-attempt was FORCED to call update_plan
+    const forced = r.completeCalls.find(
+      (c) =>
+        !!c.toolChoice &&
+        typeof c.toolChoice === 'object' &&
+        (c.toolChoice as { function?: { name?: string } }).function?.name === 'update_plan',
+    );
+    expect(forced).toBeTruthy();
+    // truthful end state preserved — 一 done, 二 skipped — NOT faked as all-complete
+    const byTitle = Object.fromEntries(r.session.plan!.steps.map((s) => [s.title, s.status]));
+    expect(byTitle['一']).toBe('completed');
+    expect(byTitle['二']).toBe('skipped');
     expect(r.doneReason).toBe('no_more_commands');
   });
 

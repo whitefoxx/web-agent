@@ -50,7 +50,7 @@ import {
   type BudgetConfig,
 } from './budget';
 import { applyCompaction, buildCompactionMessages, findCompactionBoundary } from './compaction';
-import { parsePlanSteps, planProgress, renderPlanBlock, seedPlan } from './plan';
+import { isTerminal, parsePlanSteps, planProgress, renderPlanBlock, seedPlan } from './plan';
 import { selectTools } from './tool-select';
 import { createStreamAccumulator, parseSSEChunk } from './stream';
 import { newRunMetrics, renderRunSummary } from './metrics';
@@ -119,7 +119,7 @@ const UPDATE_PLAN_TOOL = {
   function: {
     name: 'update_plan',
     description:
-      '维护当前任务的待办清单(todo)。任务有 3 步以上时强烈建议使用:先列出步骤,再随进展更新。规则:每次调用传入【完整】的步骤列表(不是增量);开始做某步前标 in_progress,做完立刻标 completed;任何时刻最多只有一个 in_progress。这能帮你在长任务里不跑偏。',
+      '维护当前任务的待办清单(todo)。任务有 3 步以上时强烈建议使用:先列出步骤,再随进展更新。规则:每次调用传入【完整】的步骤列表(不是增量);开始做某步前标 in_progress,做完立刻标 completed;主动跳过的标 skipped、尝试过但失败的标 failed(后两者在 activeForm 写一句原因)。任何时刻最多一个 in_progress,且必须如实——没做的别标 completed。这能帮你在长任务里不跑偏。',
     parameters: {
       type: 'object',
       properties: {
@@ -132,12 +132,13 @@ const UPDATE_PLAN_TOOL = {
               title: { type: 'string', description: '步骤简述' },
               status: {
                 type: 'string',
-                enum: ['pending', 'in_progress', 'completed'],
-                description: '该步骤状态',
+                enum: ['pending', 'in_progress', 'completed', 'skipped', 'failed'],
+                description:
+                  '该步骤状态:pending 未开始 / in_progress 进行中 / completed 已完成 / skipped 主动跳过 / failed 尝试失败',
               },
               activeForm: {
                 type: 'string',
-                description: '可选:进行时描述,如「正在抓取首页」',
+                description: '可选:进行时描述(如「正在抓取首页」),或 skipped/failed 时的简短原因',
               },
             },
             required: ['title', 'status'],
@@ -743,6 +744,7 @@ export async function runApiSession(ctx: EngineContext, deps: ApiEngineDeps = {}
   const noProgress = new NoProgressTracker();
   let lastPromptTokens = 0;
   let reflectedOnce = false; // plan-mode finishing reflection fires at most once
+  let forceReconcile = false; // one-shot: force the next turn to settle the plan truthfully
 
   // Structured-LLM compaction: when prompt tokens cross the soft limit,
   // summarize the older half of the message array into one progress-ledger
@@ -1154,6 +1156,10 @@ export async function runApiSession(ctx: EngineContext, deps: ApiEngineDeps = {}
 
       let lastStreamLen = 0;
       let resp: ChatCompletionResponse;
+      // One-shot: a finish-time reconcile (§10.15) forces THIS turn to call
+      // update_plan so the plan is settled truthfully before we finish.
+      const reconcileNow = forceReconcile;
+      forceReconcile = false;
       try {
         resp = await complete({
           apiKey: cfg.apiKey,
@@ -1184,7 +1190,9 @@ export async function runApiSession(ctx: EngineContext, deps: ApiEngineDeps = {}
               ...messages,
             ],
             tools,
-            tool_choice: 'auto',
+            tool_choice: reconcileNow
+              ? ({ type: 'function', function: { name: 'update_plan' } } as const)
+              : 'auto',
             max_tokens: 4096,
           },
         });
@@ -1248,25 +1256,45 @@ export async function runApiSession(ctx: EngineContext, deps: ApiEngineDeps = {}
         // Once per run so it can't loop forever.
         if (!reflectedOnce && session.plan?.approved) {
           reflectedOnce = true;
-          const prog = planProgress(session.plan);
-          const pending = session.plan.steps
-            .filter((s) => s.status !== 'completed')
-            .map((s) => `- ${s.title}`)
-            .join('\n');
           const goalLine = session.plan.goal ? `目标:${session.plan.goal}\n` : '';
-          const incomplete = prog.completed < prog.total;
-          const body = incomplete
-            ? `${goalLine}你似乎要结束了,但计划还有未完成步骤:\n${pending}\n请完成它们;若确已完成请先用 update_plan 标记 completed;若某步确实无需执行,也标记并说明原因。`
-            : `${goalLine}你已把所有计划步骤标记完成。最后自检一遍:结果是否真的达成了上面的目标?有没有遗漏、质量不足或值得补强的地方?如需补做,用 update_plan 加步骤后继续;若确认无误,直接给用户最终答复。`;
-          messages.push({ role: 'user', content: `[自检] ${body}` });
-          appendTurn(session, { role: 'user', text: '[自检] 对照计划复盘', ts: Date.now() });
-          ctx.emit({
-            type: 'notice',
-            level: 'info',
-            text: incomplete
-              ? '计划仍有未完成步骤,提醒模型收尾…'
-              : '计划已完成,让模型最后自检一遍…',
-          });
+          const unsettled = session.plan.steps.filter((s) => !isTerminal(s.status));
+          if (unsettled.length) {
+            // Finish-time reconcile (§10.15): the model is wrapping up but left
+            // steps unsettled. Force ONE truthful update_plan so the checklist
+            // never lies — each step ends as completed / skipped / failed (with a
+            // reason), not silently left pending. We do NOT auto-stamp them
+            // completed: that would fake success. Truthful > clean.
+            const pending = unsettled.map((s) => `- ${s.title}`).join('\n');
+            messages.push({
+              role: 'user',
+              content:
+                `[对账] ${goalLine}你正要结束,但这些计划步骤还没有结果标记:\n${pending}\n` +
+                '用 update_plan 传回【完整】步骤列表,把每个步骤如实更新到终态:真正做完→completed;主动跳过(不需要/前置条件不满足)→skipped;尝试过但没成→failed。skipped/failed 在 activeForm 写一句原因。不要把没做的标成 completed,也不要漏标。',
+            });
+            appendTurn(session, {
+              role: 'user',
+              text: '[对账] 如实标记每个计划步骤的结果',
+              ts: Date.now(),
+            });
+            ctx.emit({
+              type: 'notice',
+              level: 'info',
+              text: '让模型如实对账计划各步结果(完成/跳过/失败)…',
+            });
+            forceReconcile = true; // guarantee the next turn actually settles it
+          } else {
+            // Every step is already in a terminal state → one goal self-check.
+            messages.push({
+              role: 'user',
+              content: `[自检] ${goalLine}计划每一步都有结果了。最后自检一遍:是否真的达成了上面的目标?有没有遗漏、质量不足或值得补强的地方?如需补做,用 update_plan 加步骤后继续;若确认无误,直接给用户最终答复。`,
+            });
+            appendTurn(session, { role: 'user', text: '[自检] 对照计划复盘', ts: Date.now() });
+            ctx.emit({
+              type: 'notice',
+              level: 'info',
+              text: '计划各步已落定,让模型对照目标自检一遍…',
+            });
+          }
           session.apiMessages = messages;
           await saveSession(session);
           continue;
@@ -1530,7 +1558,7 @@ export async function runApiSession(ctx: EngineContext, deps: ApiEngineDeps = {}
       // No-progress breaker (plan mode only): genuinely stuck (no plan
       // progress AND no successful tool call for N turns) → checkpoint.
       if (session.plan?.approved) {
-        const stall = noProgress.record(planProgress(session.plan).completed, anyToolSuccess);
+        const stall = noProgress.record(planProgress(session.plan).settled, anyToolSuccess);
         if (stall) {
           warn('api', `no-progress breaker: ${stall}`);
           ctx.emit({
