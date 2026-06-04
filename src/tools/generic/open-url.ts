@@ -1,5 +1,6 @@
 import { cli } from '../../runtime/registry.js';
 import { assertHttpUrl } from './_helpers';
+import { getActiveExploreSession } from '../../explore/session';
 
 cli({
   site: 'generic',
@@ -22,6 +23,14 @@ cli({
   func: async (_page: unknown, kwargs: Record<string, unknown>) => {
     const url = assertHttpUrl(kwargs.url);
     const active = !!kwargs.active;
+    // During an explore session, navigate the dedicated explore tab instead of
+    // spawning a new one, so the session-wide network capture stays on it and
+    // the synthesized adapter targets a single, stable tab.
+    const session = getActiveExploreSession();
+    if (session) {
+      await chrome.tabs.update(session.tabId, { url, ...(active ? { active: true } : {}) });
+      return { tabId: session.tabId, url, active, explore: true };
+    }
     const tab = await chrome.tabs.create({ url, active });
     return {
       tabId: typeof tab.id === 'number' ? tab.id : null,

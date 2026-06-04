@@ -47,8 +47,10 @@ export interface UserMessageReq {
   sessionId: string;
   text: string;
   /** 'plan' makes the agent research read-only, propose a plan for approval,
-   * then execute. 'chat' (default) executes directly. */
-  mode?: 'chat' | 'plan';
+   * then execute. 'explore' drives the site once while recording a trace, then
+   * synthesizes a deterministic adapter (docs/llm-explore.md). 'chat' (default)
+   * executes directly. */
+  mode?: 'chat' | 'plan' | 'explore';
 }
 
 export interface AbortSessionReq {
@@ -247,6 +249,28 @@ export interface PlanUpdatedEvt {
   plan: PlanState;
 }
 
+/** SW → SidePanel: an explore run finished. Carries the trace summary and (if
+ * synthesis succeeded) the proposed adapter source so the panel can offer a
+ * one-click install through the normal sandbox-eval path. */
+export interface ExploreResultEvt {
+  type: 'EXPLORE_RESULT';
+  sessionId: string;
+  traceId: string;
+  /** Whether synthesis produced an installable adapter. */
+  ok: boolean;
+  site?: string;
+  name?: string;
+  /** Synthesized adapter source (opencli `cli({...})` format), ready to install. */
+  source?: string;
+  /** One-line strategy / rationale from the synthesizer. */
+  summary?: string;
+  /** Best-effort verify outcome (parse + optional run against the trace). */
+  verify?: { ok: boolean; rows?: number; note?: string };
+  /** Trace stream counts for the summary line. */
+  counts?: { network: number; action: number; state: number };
+  error?: string;
+}
+
 export interface LogsResponse {
   type: 'LOGS_RESPONSE';
   entries: LogEntry[];
@@ -394,6 +418,7 @@ export type Message =
   | SessionNoticeEvt
   | PlanUpdatedEvt
   | IterationProgressEvt
+  | ExploreResultEvt
   | LogsResponse
   | LogEntryEvt
   | InstallAdapterReq

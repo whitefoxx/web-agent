@@ -1,7 +1,8 @@
 # LLM Explore → Synthesize → Replay
 
-Status: **in progress** (branch `feat/llm-explore`). P1 + P2a (explore engine)
-landed; P2b (UI/agent wiring) + P3+ pending.
+Status: **in progress** (branch `feat/llm-explore`). P1–P3 landed — explore →
+synthesize → install works end-to-end (mode "探索并生成工具" in the side panel).
+P4 run-against-trace auto-verify + repair, and P6 opencli interop, are follow-ups.
 
 ## Goal
 
@@ -141,13 +142,25 @@ runtime eval and no "Allow user scripts" toggle.
   active-session registry), dispatcher action hook, `list_network` + `get_html`
   primitives, and the `page.ts` debugger-ownership fix (tolerant attach +
   owner-only detach) + unit tests.
-- **P2b — UI / agent wiring** (next): SW `EXPLORE_START/STOP` + `TRACE_UPDATE`
-  messages, api-engine explore mode (start recording, expose explore primitives,
-  navigation→state snapshots, trigger synthesis at end), side-panel Explore mode
-  toggle + trace viewer + trace export.
-- **P3 — synthesis (fetch class)**: PUBLIC/COOKIE/INTERCEPT → pipeline.
-- **P4 — verify + bounded repair + install**: end-to-end.
-- **P5 — func/DOM-scrape synthesis** (Phase B).
+- **P2b — UI / agent wiring** ✅: `mode:'explore'` end-to-end. SW opens a
+  dedicated explore tab + starts the session before the run and finalizes +
+  synthesizes after (`startExploreSession`/`finishExploreSession` in
+  service-worker.ts); api-engine surfaces the explore-only primitives + an
+  explore system note in explore mode; `open_url` reuses the explore tab; the
+  side panel has an "探索并生成工具" mode + an `ExploreResultCard` with one-click
+  install (reusing `installAdapterFromSource`).
+- **P3 — synthesis** ✅: `synthesize.ts` builds a token-bounded trace digest
+  (deduped endpoints + body samples + actions + DOM snapshot) and does one
+  `chatCompletion` (exported from api-engine) with a prompt that internalizes the
+  opencli adapter-author strategy selection; emits an opencli `cli({...})` source.
+- **P4 — verify + bounded repair**: install runs the synthesized source through
+  the existing sandbox-eval path (so it must parse + register), and the user runs
+  the new tool to confirm. Run-against-the-trace auto-verify + a bounded LLM
+  repair loop are the remaining refinement (follow-up).
+- **P5 — func/DOM-scrape synthesis**: the synthesis prompt already chooses
+  pipeline/func/DOM by the evidence; func adapters install via the existing
+  Phase B userScripts path (needs the "Allow user scripts" toggle, same as
+  marketplace func adapters).
 - **P6 — refresh/re-explore + opencli trace/adapter interop** (aligns with goal 2).
 
 ## P1 notes

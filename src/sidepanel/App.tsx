@@ -57,6 +57,7 @@ import {
   type SessionDoneEvt,
   type SessionNoticeEvt,
   type PlanUpdatedEvt,
+  type ExploreResultEvt,
   type SessionSummary,
   type ToolTrace,
   type ToolTraceEvt,
@@ -70,6 +71,7 @@ import {
   type DeleteMemoryReq,
 } from '../messages';
 import type { SessionState, Turn } from '../agent/session';
+import { installAdapterFromSource } from './adapters-client';
 import type { PlanState } from '../agent/plan';
 import type { MemoryFact } from '../agent/memory-store';
 import type { LogEntry, LogConfig } from '../runtime/log';
@@ -162,9 +164,10 @@ export function App() {
   const [, setProgress] = useState<ProgressState | null>(null);
   const [pendingConfirms, setPendingConfirms] = useState<WriteConfirmReq[]>([]);
   const [plan, setPlan] = useState<PlanState | null>(null);
-  const [mode, setMode] = useState<'chat' | 'plan'>('chat');
+  const [mode, setMode] = useState<'chat' | 'plan' | 'explore'>('chat');
   const [modeMenuOpen, setModeMenuOpen] = useState(false);
   const [pendingPlan, setPendingPlan] = useState<PlanDecisionReq | null>(null);
+  const [exploreResult, setExploreResult] = useState<ExploreResultEvt | null>(null);
   const [streaming, setStreaming] = useState<string | null>(null);
   const [runStats, setRunStats] = useState<{
     step: number;
@@ -297,6 +300,7 @@ export function App() {
       case 'WRITE_CONFIRM_REQ':
       case 'PLAN_UPDATED':
       case 'PLAN_DECISION_REQ':
+      case 'EXPLORE_RESULT':
         if (!eventBelongsToCurrentSession(sid)) return;
         break;
       default:
@@ -335,6 +339,9 @@ export function App() {
         break;
       case 'PLAN_UPDATED':
         setPlan((m as PlanUpdatedEvt).plan);
+        break;
+      case 'EXPLORE_RESULT':
+        setExploreResult(m as ExploreResultEvt);
         break;
       case 'PLAN_DECISION_REQ': {
         const req = m as PlanDecisionReq;
@@ -499,6 +506,7 @@ export function App() {
     setRunning(true);
     setInput('');
     setProgress({ iteration: 0, phase: 'injecting' });
+    setExploreResult(null); // clear any prior explore card when a new turn starts
     setTurns((cur) => [...cur, { role: 'user', text, ts: Date.now() }]);
     const req: UserMessageReq = { type: 'USER_MESSAGE', sessionId: sid, text, mode };
     // Fire-and-forget: SW early-acks. All further progress arrives via
@@ -541,6 +549,7 @@ export function App() {
     setProgress(null);
     setPlan(null);
     setPendingPlan(null);
+    setExploreResult(null);
     setStreaming(null);
     setRunStats(null);
   }
@@ -561,7 +570,7 @@ export function App() {
   const activeText =
     inProgressStep?.activeForm ||
     inProgressStep?.title ||
-    (mode === 'plan' ? '规划中…' : '执行中…');
+    (mode === 'plan' ? '规划中…' : mode === 'explore' ? '探索中…' : '执行中…');
 
   return (
     <>
@@ -631,6 +640,11 @@ export function App() {
             onDecide={onDecideWrite}
           />
         )}
+        {exploreResult && (
+          <RenderBoundary label="ExploreResultCard">
+            <ExploreResultCard res={exploreResult} onDismiss={() => setExploreResult(null)} />
+          </RenderBoundary>
+        )}
       </div>
 
       {pendingPlan && (
@@ -681,8 +695,20 @@ export function App() {
                 onClick={() => setModeMenuOpen((o) => !o)}
                 title="选择执行模式"
               >
-                {mode === 'plan' ? <IconHand size={14} /> : <IconFastForward size={14} />}
-                <span>{mode === 'plan' ? '先计划再执行' : '直接执行'}</span>
+                {mode === 'plan' ? (
+                  <IconHand size={14} />
+                ) : mode === 'explore' ? (
+                  <IconSearch size={14} />
+                ) : (
+                  <IconFastForward size={14} />
+                )}
+                <span>
+                  {mode === 'plan'
+                    ? '先计划再执行'
+                    : mode === 'explore'
+                      ? '探索并生成工具'
+                      : '直接执行'}
+                </span>
                 <IconChevronDown size={13} class="mode-chev" />
               </button>
               {modeMenuOpen && (
@@ -718,6 +744,22 @@ export function App() {
                         <span class="mode-opt-desc">不暂停审批直接做（写操作仍会二次确认）。</span>
                       </span>
                       {mode === 'chat' && <IconCheck size={16} class="mode-check" />}
+                    </button>
+                    <button
+                      class="mode-opt"
+                      onClick={() => {
+                        setMode('explore');
+                        setModeMenuOpen(false);
+                      }}
+                    >
+                      <IconSearch size={18} class="mode-opt-icon" />
+                      <span class="mode-opt-text">
+                        <span class="mode-opt-title">探索并生成工具</span>
+                        <span class="mode-opt-desc">
+                          在真实页面把任务做一遍并全程录制，自动合成一个可复用的站点工具（适配器）。
+                        </span>
+                      </span>
+                      {mode === 'explore' && <IconCheck size={16} class="mode-check" />}
                     </button>
                   </div>
                 </>
@@ -978,6 +1020,92 @@ function ActiveHeader({ text }: { text: string }): preact.JSX.Element {
     <div class="tl-active-head">
       <IconSparkle size={18} class="tl-sparkle" />
       <span>{text}</span>
+    </div>
+  );
+}
+
+/** Explore outcome card: shows the trace summary and, when synthesis produced
+ * an adapter, a one-click install (reusing the normal sandbox-eval path). */
+function ExploreResultCard({
+  res,
+  onDismiss,
+}: {
+  res: ExploreResultEvt;
+  onDismiss: () => void;
+}): preact.JSX.Element {
+  const [installing, setInstalling] = useState(false);
+  const [installed, setInstalled] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [showSource, setShowSource] = useState(false);
+
+  async function onInstall(): Promise<void> {
+    if (!res.source) return;
+    setInstalling(true);
+    setError(null);
+    const r = await installAdapterFromSource(res.source, { type: 'manual' });
+    setInstalling(false);
+    if (r.ok) setInstalled(r.title ?? `${res.site}/${res.name}`);
+    else setError(r.error ?? '安装失败');
+  }
+
+  const c = res.counts;
+  const countLine = c ? `（接口 ${c.network} · 动作 ${c.action} · 快照 ${c.state}）` : '';
+  return (
+    <div class="msg assistant explore-card">
+      <div style="font-weight:600;margin-bottom:4px;">🔍 探索完成{countLine}</div>
+      {res.ok ? (
+        <>
+          <div style="margin-bottom:6px;">
+            已合成工具{' '}
+            <code>
+              {res.site}__{res.name}
+            </code>
+            {res.summary ? <div style="opacity:.8;margin-top:2px;">{res.summary}</div> : null}
+          </div>
+          {installed ? (
+            <div style="color:#3a8a5a;">✓ 已安装：{installed}（之后直接调用，无需再探索/LLM）</div>
+          ) : (
+            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+              <button
+                class="send-btn"
+                disabled={installing}
+                onClick={onInstall}
+                style="width:auto;padding:4px 12px;border-radius:8px;"
+              >
+                {installing ? '安装中…' : '安装这个工具'}
+              </button>
+              <button
+                onClick={() => setShowSource((s) => !s)}
+                style="background:none;border:none;cursor:pointer;text-decoration:underline;opacity:.8;"
+              >
+                {showSource ? '隐藏源码' : '查看源码'}
+              </button>
+              <button
+                onClick={onDismiss}
+                style="background:none;border:none;cursor:pointer;opacity:.6;"
+              >
+                关闭
+              </button>
+            </div>
+          )}
+          {error ? <div style="color:#d05050;margin-top:4px;">{error}</div> : null}
+          {showSource && res.source ? (
+            <pre style="max-height:240px;overflow:auto;background:rgba(0,0,0,.05);padding:8px;border-radius:8px;margin-top:6px;font-size:11px;white-space:pre-wrap;">
+              {res.source}
+            </pre>
+          ) : null}
+        </>
+      ) : (
+        <div>
+          没能自动合成适配器{res.error ? `：${res.error}` : ''}。
+          <button
+            onClick={onDismiss}
+            style="background:none;border:none;cursor:pointer;opacity:.6;margin-left:6px;"
+          >
+            关闭
+          </button>
+        </div>
+      )}
     </div>
   );
 }

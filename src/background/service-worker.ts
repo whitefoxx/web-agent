@@ -34,6 +34,10 @@ import { apiEngine } from '../agent/api-engine';
 import type { EngineContext, OrchEvent, ToolExecResult } from '../agent/engine';
 import type { PlanState } from '../agent/plan';
 import { listMemories, deleteMemory } from '../agent/memory-store';
+import { ExploreSession } from '../explore/session';
+import { getTrace } from '../explore/trace-store';
+import { synthesizeAdapter } from '../explore/synthesize';
+import { resolveSlots } from '../config/llm-config';
 import type {
   AbortSessionReq,
   SteerMessageReq,
@@ -53,6 +57,7 @@ import type {
   SessionDoneEvt,
   SessionNoticeEvt,
   PlanUpdatedEvt,
+  ExploreResultEvt,
   SessionSummary,
   ToolTraceEvt,
   UserMessageReq,
@@ -695,10 +700,82 @@ async function disabledFuncAdapterNote(): Promise<string | null> {
   return `你安装的 ${funcRows.length} 个 adapter(${names}${funcRows.length > 6 ? '…' : ''})需要 Chrome 的「允许用户脚本」开关才能运行,当前未启用,这些站点的工具不可用。`;
 }
 
+/** Open a dedicated background tab and begin an explore trace session on it.
+ * The agent's explore-aware open_url reuses this tab for all navigation. */
+async function startExploreSession(task: string): Promise<ExploreSession> {
+  const tab = await chrome.tabs.create({ url: 'about:blank', active: false });
+  if (typeof tab.id !== 'number') throw new Error('failed to open explore tab');
+  const traceId = `explore_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  return ExploreSession.start({ traceId, tabId: tab.id, task });
+}
+
+/** Stop capture, then synthesize an adapter from the trace and surface the
+ * result (or the reason it couldn't). Best-effort; never throws to the caller. */
+async function finishExploreSession(
+  sessionId: string,
+  explore: ExploreSession,
+  signal: AbortSignal,
+): Promise<void> {
+  const aborted = signal.aborted;
+  await explore.stop(aborted ? 'aborted' : 'done');
+  const trace = await getTrace(explore.traceId);
+  const counts = {
+    network: trace?.counts.network ?? 0,
+    action: trace?.counts.action ?? 0,
+    state: trace?.counts.state ?? 0,
+  };
+  if (aborted) {
+    sendToSidepanel({
+      type: 'SESSION_NOTICE',
+      sessionId,
+      level: 'info',
+      text: '探索已中断,未进行合成。',
+    } satisfies SessionNoticeEvt);
+    return;
+  }
+  const base: ExploreResultEvt = {
+    type: 'EXPLORE_RESULT',
+    sessionId,
+    traceId: explore.traceId,
+    ok: false,
+    counts,
+  };
+  if (!trace) {
+    sendToSidepanel({
+      ...base,
+      error: 'trace 未找到(可能没捕获到任何数据)',
+    } satisfies ExploreResultEvt);
+    return;
+  }
+  const primary = (await resolveSlots().catch(() => null))?.primary;
+  if (!primary?.apiKey || !primary.baseUrl) {
+    sendToSidepanel({ ...base, error: '未配置主模型,无法合成适配器' } satisfies ExploreResultEvt);
+    return;
+  }
+  const res = await synthesizeAdapter(
+    trace,
+    { apiKey: primary.apiKey, baseUrl: primary.baseUrl, model: primary.model },
+    { signal },
+  );
+  sendToSidepanel({
+    ...base,
+    ok: res.ok,
+    site: res.site,
+    name: res.name,
+    source: res.source,
+    summary: res.summary,
+    error: res.error,
+  } satisfies ExploreResultEvt);
+  log(
+    SCOPE,
+    `explore finished trace=${explore.traceId} synth=${res.ok ? `${res.site}/${res.name}` : 'fail'}`,
+  );
+}
+
 async function driveApiSession(
   session: SessionState,
   userText: string,
-  mode?: 'chat' | 'plan',
+  mode?: 'chat' | 'plan' | 'explore',
 ): Promise<void> {
   const abortCtl = new AbortController();
   activeSessions.set(session.id, { session, abort: abortCtl });
@@ -713,11 +790,38 @@ async function driveApiSession(
       text: `${envNote} 在 chrome://extensions 打开本扩展的该开关并重载扩展即可启用。`,
     } satisfies SessionNoticeEvt);
   }
+
+  // Explore mode: open a dedicated tab + begin trace capture BEFORE the run, so
+  // the agent's open_url reuses it and the session-wide network capture is live
+  // for the whole task. Synthesis runs after the loop (finishExploreSession).
+  let explore: ExploreSession | null = null;
+  let runMode: 'chat' | 'plan' | 'explore' = mode ?? 'chat';
+  if (runMode === 'explore') {
+    try {
+      explore = await startExploreSession(userText);
+      sendToSidepanel({
+        type: 'SESSION_NOTICE',
+        sessionId: session.id,
+        level: 'info',
+        text: `🔍 探索已开始(trace ${explore.traceId})。我会在真实页面上把任务做一遍并全程录制,完成后自动尝试合成一个可复用的适配器。`,
+      } satisfies SessionNoticeEvt);
+    } catch (e) {
+      logError(SCOPE, 'explore start failed', e);
+      sendToSidepanel({
+        type: 'SESSION_NOTICE',
+        sessionId: session.id,
+        level: 'warning',
+        text: `无法启动探索:${msgOf(e)} —— 改为普通执行。`,
+      } satisfies SessionNoticeEvt);
+      runMode = 'chat';
+    }
+  }
+
   const ctx: EngineContext = {
     session,
     userText,
     signal: abortCtl.signal,
-    mode,
+    mode: runMode,
     environmentNote: envNote ?? undefined,
     emit: (evt) => forwardOrchEvent(session.id, evt),
     executeTool: makeExecuteTool(session.id),
@@ -740,6 +844,16 @@ async function driveApiSession(
       error: msgOf(e),
     } satisfies SessionDoneEvt);
   } finally {
+    // Finalize the explore trace + synthesize BEFORE we drop the session from
+    // activeSessions (which would let the keepalive ping stop) — synthesis is
+    // another LLM round-trip and needs the SW alive.
+    if (explore) {
+      try {
+        await finishExploreSession(session.id, explore, abortCtl.signal);
+      } catch (e) {
+        logError(SCOPE, 'explore finish failed', e);
+      }
+    }
     activeSessions.delete(session.id);
     // Backstop (§10.14): a steer can still be in the queue here — it landed
     // after the engine's last drain, via a finish path that doesn't re-drain

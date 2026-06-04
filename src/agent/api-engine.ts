@@ -24,6 +24,7 @@ import {
   PROMPT_VERSION,
 } from './api-system-prompt';
 import { resolveSlots, type LlmProfile } from '../config/llm-config';
+import { getActiveExploreSession } from '../explore/session';
 import { visionDescribe, generateImage } from './specialist';
 import { appendTurn, saveSession } from './session';
 import type { AgentEngine, EngineContext, SessionDoneReason } from './engine';
@@ -243,6 +244,10 @@ function specialistSystemNote(caps: { vision: boolean; image: boolean }): string
     '截图类工具(generic__screenshot)的结果会自动作为图像呈现,无需 view_image。'
   );
 }
+
+/** Perception primitives surfaced to the model ONLY in explore mode (they read
+ * the active explore session's capture). Tool names are `${site}__${name}`. */
+const EXPLORE_ONLY_TOOLS = new Set(['generic__list_network', 'generic__get_html']);
 
 export interface ChatCompletionResponse {
   choices: Array<{
@@ -483,7 +488,7 @@ function redactBodyForLog(body: Record<string, unknown>): unknown {
   );
 }
 
-async function chatCompletion(opts: {
+export async function chatCompletion(opts: {
   apiKey: string;
   baseUrl: string;
   body: Record<string, unknown>;
@@ -735,6 +740,17 @@ export async function runApiSession(ctx: EngineContext, deps: ApiEngineDeps = {}
   const envNote = ctx.environmentNote
     ? `\n\n## 运行环境提示\n${ctx.environmentNote}\n如果任务需要这些当前不可用的站点工具,请如实告知用户去启用,不要用 generic 工具硬凑、假装能完成。`
     : '';
+
+  // Explore mode: drive the site once on the dedicated explore tab while the
+  // system records a trace; synthesis happens after the run (SW side).
+  const exploreNote =
+    ctx.mode === 'explore'
+      ? (() => {
+          const tabId = getActiveExploreSession()?.tabId;
+          const tab = tabId === undefined ? '探索标签页' : `标签页 tabId=${tabId}`;
+          return `\n\n## 探索模式(Explore)\n你正在"探索"一个站点:把用户要的这次任务在真实页面上**亲手做一遍**,系统会全程录制(动作 + 网络 + DOM),之后据此自动合成一个可重复运行的适配器(你不用写代码)。要点:\n- 只在${tab}上操作:用 open_url 导航(会复用该标签页),click / type_into / get_interactives 等都把 tab_id 设为该标签页。\n- 核心目标是"找到数据真正来自哪里":多用 list_network 查看抓到的 XHR/Fetch 接口,优先确认有没有直接返回业务数据的接口;必要时用 get_html 看 DOM 结构。\n- 把任务完整做一遍(真的搜索 / 翻页 / 打开详情),让关键接口都被触发、数据都出现在网络或 DOM 里。\n- 做完后用文字总结你发现的数据路径(哪个接口或哪些选择器)。`;
+        })()
+      : '';
 
   // Re-pull tools each iteration so a market install mid-conversation shows
   // up on the very next LLM call (no need to start a new session). Cheap —
@@ -1173,8 +1189,15 @@ export async function runApiSession(ctx: EngineContext, deps: ApiEngineDeps = {}
       ctx.emit({ type: 'iteration_progress', iteration: iter, iterationId, phase: 'awaiting' });
 
       // Offer specialist tools only for configured capability slots.
+      // Explore-only perception primitives (list_network / get_html) are hidden
+      // outside explore mode so they don't clutter the normal tool list.
+      const selected = selectTools(openAiToolsFromRegistry(), ctx.userText).tools;
+      const baseTools =
+        ctx.mode === 'explore'
+          ? selected
+          : selected.filter((t) => !EXPLORE_ONLY_TOOLS.has(t.function.name));
       const tools = [
-        ...selectTools(openAiToolsFromRegistry(), ctx.userText).tools,
+        ...baseTools,
         UPDATE_PLAN_TOOL,
         SUBAGENT_TOOL,
         REMEMBER_TOOL,
@@ -1216,7 +1239,8 @@ export async function runApiSession(ctx: EngineContext, deps: ApiEngineDeps = {}
                     ? renderPlanBlock(session.plan)
                     : '\n\n多步任务(≥3 步)建议先用 update_plan 列出待办清单再开始。') +
                   memoryBlock +
-                  envNote,
+                  envNote +
+                  exploreNote,
               },
               ...messages,
             ],

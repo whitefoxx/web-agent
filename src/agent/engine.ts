@@ -90,8 +90,9 @@ export interface EngineContext {
   /** Follow-up turn inside an existing session. */
   continuation?: boolean;
   /** Plan mode for this run; 'plan' = research read-only → propose → approve →
-   * execute. Defaults to 'chat' (execute directly). */
-  mode?: 'chat' | 'plan';
+   * execute. 'explore' = drive the site once recording a trace, then synthesize
+   * a deterministic adapter (docs/llm-explore.md). Defaults to 'chat'. */
+  mode?: 'chat' | 'plan' | 'explore';
   /** One-line note about the runtime environment (e.g. installed func adapters
    * disabled because "Allow user scripts" is off) injected into the system
    * prompt so the model knows what's unavailable instead of silently faking it
