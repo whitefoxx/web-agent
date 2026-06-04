@@ -25,6 +25,8 @@ export interface SynthResult {
   site?: string;
   name?: string;
   summary?: string;
+  /** Example args to verify the adapter with (from the trace). */
+  testArgs?: Record<string, unknown>;
   error?: string;
 }
 
@@ -37,7 +39,8 @@ const SYSTEM_PROMPT = `你是 opencli 适配器合成器。给你一次"探索"�
 
 输出格式(严格):
 1. 先用一行中文说明你选的策略和理由。
-2. 然后**只**给一个 \`\`\`js 代码块,内容是完整可安装的 opencli 适配器源码,不要有其它解释。
+2. 然后给一个 \`\`\`js 代码块,内容是完整可安装的 opencli 适配器源码。
+3. 最后再给一个 \`\`\`json 代码块,是用来**验证**该适配器的一组真实示例参数(从录制里取真实值,比如真实的 url / 关键词),键名要和 args 完全一致,例如 {"url":"https://...","limit":10}。没有参数就给 {}。
 
 适配器源码规范(与 marketplace 适配器一致):
 \`\`\`js
@@ -136,14 +139,29 @@ export function buildTraceDigest(trace: Trace): string {
   return parts.join('\n\n');
 }
 
-/** Pull the first fenced code block; fall back to the whole string. */
+/** Pull the adapter source: prefer an explicitly js/ts-tagged fence (so a
+ * trailing ```json verify block isn't mistaken for the source); fall back to
+ * the first fence of any kind, then the whole string. */
 function extractSource(content: string): { source: string; summary: string } {
-  const fence = /```(?:js|javascript|ts|typescript)?\s*([\s\S]*?)```/.exec(content);
+  const typed = /```(?:js|javascript|ts|typescript)\s+([\s\S]*?)```/.exec(content);
+  const fence = typed ?? /```\s*([\s\S]*?)```/.exec(content);
   if (fence) {
     const summary = content.slice(0, fence.index).trim().split('\n').filter(Boolean).pop() ?? '';
     return { source: fence[1].trim(), summary };
   }
   return { source: content.trim(), summary: '' };
+}
+
+/** Pull a ```json fenced block as the verify args; {} on absence/parse error. */
+function extractTestArgs(content: string): Record<string, unknown> {
+  const m = /```json\s*([\s\S]*?)```/.exec(content);
+  if (!m) return {};
+  try {
+    const v = JSON.parse(m[1].trim());
+    return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
 }
 
 function parseField(source: string, field: string): string | undefined {
@@ -154,10 +172,16 @@ function parseField(source: string, field: string): string | undefined {
 export async function synthesizeAdapter(
   trace: Trace,
   model: SynthModel,
-  opts: { signal?: AbortSignal } = {},
+  opts: { signal?: AbortSignal; repair?: { prevSource: string; error: string } } = {},
 ): Promise<SynthResult> {
   const digest = buildTraceDigest(trace);
-  log('explore', `synthesize: trace=${trace.traceId} digest=${digest.length} chars`);
+  const userContent = opts.repair
+    ? `${digest}\n\n## 上一版适配器(运行失败,请修复)\n\`\`\`js\n${clip(opts.repair.prevSource, 6000)}\n\`\`\`\n\n## 运行报错\n${clip(opts.repair.error, 1500)}\n\n请针对报错修正后,按相同的输出格式重新给出修正版源码 + 验证参数。`
+    : digest;
+  log(
+    'explore',
+    `synthesize${opts.repair ? '(repair)' : ''}: trace=${trace.traceId} input=${userContent.length} chars`,
+  );
   let resp;
   try {
     resp = await chatCompletion({
@@ -168,7 +192,7 @@ export async function synthesizeAdapter(
         model: model.model,
         messages: [
           { role: 'system', content: SYSTEM_PROMPT },
-          { role: 'user', content: digest },
+          { role: 'user', content: userContent },
         ],
         max_tokens: 4096,
       },
@@ -181,6 +205,7 @@ export async function synthesizeAdapter(
   if (!content.trim()) return { ok: false, error: 'synthesis returned empty content' };
 
   const { source, summary } = extractSource(content);
+  const testArgs = extractTestArgs(content);
   const site = parseField(source, 'site');
   const name = parseField(source, 'name');
   if (!site || !name || !/cli\s*\(/.test(source)) {
@@ -191,5 +216,5 @@ export async function synthesizeAdapter(
     };
   }
   log('explore', `synthesize ok → ${site}/${name} (${source.length} chars)`);
-  return { ok: true, source, site, name, summary };
+  return { ok: true, source, site, name, summary, testArgs };
 }

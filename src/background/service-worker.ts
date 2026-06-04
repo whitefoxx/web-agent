@@ -73,6 +73,10 @@ import type {
   InstalledAdapterSummary,
   AdaptersChangedEvt,
   DeleteMemoryReq,
+  RunToolReq,
+  RunToolResp,
+  ExploreRepairReq,
+  GetTraceReq,
 } from '../messages';
 
 // Side-effect import: registers site-independent web-operation adapters
@@ -356,6 +360,25 @@ chrome.runtime.onMessage.addListener((msg: unknown, _sender, sendResponse): bool
       void listMemories().then(
         (memories) => sendResponse({ type: 'LIST_MEMORIES_RESP', memories }),
         () => sendResponse({ type: 'LIST_MEMORIES_RESP', memories: [] }),
+      );
+      return true;
+    }
+    case 'RUN_TOOL': {
+      void handleRunTool(m as RunToolReq).then(
+        (resp) => sendResponse(resp),
+        (e) => sendResponse({ type: 'RUN_TOOL_RESP', ok: false, error: msgOf(e) }),
+      );
+      return true;
+    }
+    case 'EXPLORE_REPAIR': {
+      sendResponse({ ok: true });
+      void handleExploreRepair(m as ExploreRepairReq);
+      return false;
+    }
+    case 'GET_TRACE': {
+      void getTrace((m as GetTraceReq).traceId).then(
+        (trace) => sendResponse({ type: 'GET_TRACE_RESP', trace }),
+        () => sendResponse({ type: 'GET_TRACE_RESP', trace: null }),
       );
       return true;
     }
@@ -718,12 +741,6 @@ async function finishExploreSession(
 ): Promise<void> {
   const aborted = signal.aborted;
   await explore.stop(aborted ? 'aborted' : 'done');
-  const trace = await getTrace(explore.traceId);
-  const counts = {
-    network: trace?.counts.network ?? 0,
-    action: trace?.counts.action ?? 0,
-    state: trace?.counts.state ?? 0,
-  };
   if (aborted) {
     sendToSidepanel({
       type: 'SESSION_NOTICE',
@@ -733,43 +750,100 @@ async function finishExploreSession(
     } satisfies SessionNoticeEvt);
     return;
   }
-  const base: ExploreResultEvt = {
-    type: 'EXPLORE_RESULT',
-    sessionId,
-    traceId: explore.traceId,
-    ok: false,
-    counts,
-  };
-  if (!trace) {
+  await emitSynthForTrace(sessionId, explore.traceId);
+}
+
+/** Synthesize an adapter for a trace (optionally a repair pass that feeds back
+ * the failing source + error) and push the result card to the panel. Keeps the
+ * SW alive across the LLM round-trip. Shared by the post-run finish + the
+ * panel's "根据报错重修" (P4 bounded repair). */
+async function emitSynthForTrace(
+  sessionId: string,
+  traceId: string,
+  repair?: { prevSource: string; error: string },
+): Promise<void> {
+  startKeepalivePing();
+  try {
+    const trace = await getTrace(traceId);
+    const counts = {
+      network: trace?.counts.network ?? 0,
+      action: trace?.counts.action ?? 0,
+      state: trace?.counts.state ?? 0,
+    };
+    const base: ExploreResultEvt = {
+      type: 'EXPLORE_RESULT',
+      sessionId,
+      traceId,
+      ok: false,
+      counts,
+    };
+    if (!trace) {
+      sendToSidepanel({
+        ...base,
+        error: 'trace 未找到(可能没捕获到任何数据)',
+      } satisfies ExploreResultEvt);
+      return;
+    }
+    const primary = (await resolveSlots().catch(() => null))?.primary;
+    if (!primary?.apiKey || !primary.baseUrl) {
+      sendToSidepanel({ ...base, error: '未配置主模型,无法合成适配器' } satisfies ExploreResultEvt);
+      return;
+    }
+    const res = await synthesizeAdapter(
+      trace,
+      { apiKey: primary.apiKey, baseUrl: primary.baseUrl, model: primary.model },
+      { repair },
+    );
     sendToSidepanel({
       ...base,
-      error: 'trace 未找到(可能没捕获到任何数据)',
+      ok: res.ok,
+      site: res.site,
+      name: res.name,
+      source: res.source,
+      summary: res.summary,
+      testArgs: res.testArgs,
+      error: res.error,
     } satisfies ExploreResultEvt);
-    return;
+    log(
+      SCOPE,
+      `explore synth trace=${traceId}${repair ? '(repair)' : ''} → ${res.ok ? `${res.site}/${res.name}` : 'fail'}`,
+    );
+  } finally {
+    stopKeepalivePingIfIdle();
   }
-  const primary = (await resolveSlots().catch(() => null))?.primary;
-  if (!primary?.apiKey || !primary.baseUrl) {
-    sendToSidepanel({ ...base, error: '未配置主模型,无法合成适配器' } satisfies ExploreResultEvt);
-    return;
+}
+
+/** Panel-initiated bounded repair: re-synthesize feeding back the run error. */
+async function handleExploreRepair(m: ExploreRepairReq): Promise<void> {
+  await emitSynthForTrace(m.sessionId, m.traceId, { prevSource: m.prevSource, error: m.error });
+}
+
+/** Panel-initiated verify "试跑": run one read tool through the dispatcher and
+ * return a compact result. Write adapters are refused (must go through the
+ * normal in-conversation write-confirm). */
+async function handleRunTool(m: RunToolReq): Promise<RunToolResp> {
+  const adapter = lookupAdapter(m.tool);
+  if (!adapter) return { type: 'RUN_TOOL_RESP', ok: false, error: `tool not found: ${m.tool}` };
+  if (adapter.access === 'write') {
+    return { type: 'RUN_TOOL_RESP', ok: false, error: '写操作不自动试跑,请在对话里手动执行确认。' };
   }
-  const res = await synthesizeAdapter(
-    trace,
-    { apiKey: primary.apiKey, baseUrl: primary.baseUrl, model: primary.model },
-    { signal },
-  );
-  sendToSidepanel({
-    ...base,
-    ok: res.ok,
-    site: res.site,
-    name: res.name,
-    source: res.source,
-    summary: res.summary,
-    error: res.error,
-  } satisfies ExploreResultEvt);
-  log(
-    SCOPE,
-    `explore finished trace=${explore.traceId} synth=${res.ok ? `${res.site}/${res.name}` : 'fail'}`,
-  );
+  startKeepalivePing();
+  try {
+    const r = (await executeAdapter({ tool: m.tool, args: m.args ?? {} })) as ToolExecResult;
+    if (!r.ok) return { type: 'RUN_TOOL_RESP', ok: false, error: r.error };
+    const rows = Array.isArray(r.result) ? r.result.length : undefined;
+    let preview: string;
+    try {
+      preview = JSON.stringify(r.result).slice(0, 800);
+    } catch {
+      preview = '[unserializable]';
+    }
+    return { type: 'RUN_TOOL_RESP', ok: true, rows, preview };
+  } catch (e) {
+    return { type: 'RUN_TOOL_RESP', ok: false, error: msgOf(e) };
+  } finally {
+    stopKeepalivePingIfIdle();
+  }
 }
 
 async function driveApiSession(

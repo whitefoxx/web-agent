@@ -1,8 +1,10 @@
 # LLM Explore → Synthesize → Replay
 
-Status: **in progress** (branch `feat/llm-explore`). P1–P3 landed — explore →
-synthesize → install works end-to-end (mode "探索并生成工具" in the side panel).
-P4 run-against-trace auto-verify + repair, and P6 opencli interop, are follow-ups.
+Status: **feature-complete** on branch `feat/llm-explore` (pending user testing).
+Mode "探索并生成工具" → drive once → record → synthesize → **安装并试跑** (verify)
+→ **根据报错重修** (bounded repair) → replay with zero LLM. Trace export shipped.
+Remaining: real synthesis-quality tuning (needs testing) + full opencli trace
+_import_ (export + opencli-format output already done).
 
 ## Goal
 
@@ -153,15 +155,20 @@ runtime eval and no "Allow user scripts" toggle.
   (deduped endpoints + body samples + actions + DOM snapshot) and does one
   `chatCompletion` (exported from api-engine) with a prompt that internalizes the
   opencli adapter-author strategy selection; emits an opencli `cli({...})` source.
-- **P4 — verify + bounded repair**: install runs the synthesized source through
-  the existing sandbox-eval path (so it must parse + register), and the user runs
-  the new tool to confirm. Run-against-the-trace auto-verify + a bounded LLM
-  repair loop are the remaining refinement (follow-up).
-- **P5 — func/DOM-scrape synthesis**: the synthesis prompt already chooses
+- **P4 — verify + bounded repair** ✅: synthesis also emits example `testArgs`
+  (a ```json fence). The card's **安装并试跑** installs via the sandbox-eval path
+then runs the tool once (SW `RUN_TOOL`, read-only) and shows rows/preview or
+the error. On failure, **根据报错重修** sends `EXPLORE_REPAIR` → the SW
+re-synthesizes with the failing source + error fed back (`synthesizeAdapter`repair pass) and a fresh result card replaces the old one. Bounded by the user
+clicking (no auto-loop).`RUN_TOOL` refuses write adapters.
+- **P5 — func/DOM-scrape synthesis** ✅ (covered): the synthesis prompt chooses
   pipeline/func/DOM by the evidence; func adapters install via the existing
   Phase B userScripts path (needs the "Allow user scripts" toggle, same as
   marketplace func adapters).
-- **P6 — refresh/re-explore + opencli trace/adapter interop** (aligns with goal 2).
+- **P6 — opencli interop** ◑: trace **export** done (card → 下载 trace → SW
+  `GET_TRACE` → `<traceId>.json`); the synthesized adapter is already
+  opencli-`cli({...})`-format (installable in opencli too). Full trace _import_
+  (opencli trace → our store → synth) is the remaining piece.
 
 ## P1 notes
 

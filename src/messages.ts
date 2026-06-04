@@ -264,11 +264,52 @@ export interface ExploreResultEvt {
   source?: string;
   /** One-line strategy / rationale from the synthesizer. */
   summary?: string;
-  /** Best-effort verify outcome (parse + optional run against the trace). */
-  verify?: { ok: boolean; rows?: number; note?: string };
+  /** Example args (from the trace) to verify the adapter with after install. */
+  testArgs?: Record<string, unknown>;
   /** Trace stream counts for the summary line. */
   counts?: { network: number; action: number; state: number };
   error?: string;
+}
+
+/** SidePanel → SW: run a single read tool once (explore verify "试跑"). The SW
+ * runs it through the dispatcher and returns the raw result. Refused for write
+ * adapters. */
+export interface RunToolReq {
+  type: 'RUN_TOOL';
+  tool: string;
+  args: Record<string, unknown>;
+}
+
+export interface RunToolResp {
+  type: 'RUN_TOOL_RESP';
+  ok: boolean;
+  /** Row count when the result is an array. */
+  rows?: number;
+  /** Truncated JSON preview of the result. */
+  preview?: string;
+  error?: string;
+}
+
+/** SidePanel → SW: re-synthesize the adapter for a trace, feeding back the
+ * previous source + the run error so the model can fix it (bounded repair). */
+export interface ExploreRepairReq {
+  type: 'EXPLORE_REPAIR';
+  sessionId: string;
+  traceId: string;
+  prevSource: string;
+  error: string;
+}
+
+/** SidePanel → SW: fetch a full trace (metadata + events) for export/download. */
+export interface GetTraceReq {
+  type: 'GET_TRACE';
+  traceId: string;
+}
+
+export interface GetTraceResp {
+  type: 'GET_TRACE_RESP';
+  /** The full trace object (TraceMeta & { events }) or null if unknown. */
+  trace: unknown;
 }
 
 export interface LogsResponse {
@@ -419,6 +460,11 @@ export type Message =
   | PlanUpdatedEvt
   | IterationProgressEvt
   | ExploreResultEvt
+  | RunToolReq
+  | RunToolResp
+  | ExploreRepairReq
+  | GetTraceReq
+  | GetTraceResp
   | LogsResponse
   | LogEntryEvt
   | InstallAdapterReq

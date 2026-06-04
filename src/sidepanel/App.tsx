@@ -69,6 +69,11 @@ import {
   type ListMemoriesReq,
   type ListMemoriesResp,
   type DeleteMemoryReq,
+  type RunToolReq,
+  type RunToolResp,
+  type ExploreRepairReq,
+  type GetTraceReq,
+  type GetTraceResp,
 } from '../messages';
 import type { SessionState, Turn } from '../agent/session';
 import { installAdapterFromSource } from './adapters-client';
@@ -1033,19 +1038,88 @@ function ExploreResultCard({
   res: ExploreResultEvt;
   onDismiss: () => void;
 }): preact.JSX.Element {
-  const [installing, setInstalling] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [installed, setInstalled] = useState<string | null>(null);
+  const [verify, setVerify] = useState<{
+    ok: boolean;
+    rows?: number;
+    preview?: string;
+    error?: string;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showSource, setShowSource] = useState(false);
+  const [repaired, setRepaired] = useState(false);
 
-  async function onInstall(): Promise<void> {
+  const tool = `${res.site}__${res.name}`;
+  const linkBtn =
+    'background:none;border:none;cursor:pointer;opacity:.75;text-decoration:underline;';
+
+  // Install through the normal sandbox-eval path, then "试跑" once with the
+  // synthesizer's example args to confirm it actually returns data (P4 verify).
+  async function onInstallAndVerify(): Promise<void> {
     if (!res.source) return;
-    setInstalling(true);
+    setBusy(true);
     setError(null);
+    setVerify(null);
     const r = await installAdapterFromSource(res.source, { type: 'manual' });
-    setInstalling(false);
-    if (r.ok) setInstalled(r.title ?? `${res.site}/${res.name}`);
-    else setError(r.error ?? '安装失败');
+    if (!r.ok) {
+      setBusy(false);
+      setError(r.error ?? '安装失败');
+      return;
+    }
+    setInstalled(r.title ?? `${res.site}/${res.name}`);
+    try {
+      const resp = (await chrome.runtime.sendMessage({
+        type: 'RUN_TOOL',
+        tool,
+        args: res.testArgs ?? {},
+      } satisfies RunToolReq)) as RunToolResp | undefined;
+      setVerify(
+        resp
+          ? { ok: resp.ok, rows: resp.rows, preview: resp.preview, error: resp.error }
+          : { ok: false, error: '无响应' },
+      );
+    } catch (e) {
+      setVerify({ ok: false, error: e instanceof Error ? e.message : String(e) });
+    }
+    setBusy(false);
+  }
+
+  // P4 bounded repair: hand the failing source + error back to the SW to
+  // re-synthesize; a fresh EXPLORE_RESULT replaces this card.
+  function onRepair(): void {
+    if (!res.source) return;
+    const errText = verify?.error ?? error ?? '运行结果为空或不正确';
+    void chrome.runtime
+      .sendMessage({
+        type: 'EXPLORE_REPAIR',
+        sessionId: res.sessionId,
+        traceId: res.traceId,
+        prevSource: res.source,
+        error: errText,
+      } satisfies ExploreRepairReq)
+      .catch(() => {});
+    setRepaired(true);
+  }
+
+  async function onDownloadTrace(): Promise<void> {
+    try {
+      const resp = (await chrome.runtime.sendMessage({
+        type: 'GET_TRACE',
+        traceId: res.traceId,
+      } satisfies GetTraceReq)) as GetTraceResp | undefined;
+      const blob = new Blob([JSON.stringify(resp?.trace ?? null, null, 2)], {
+        type: 'application/json',
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${res.traceId}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      /* ignore */
+    }
   }
 
   const c = res.counts;
@@ -1056,39 +1130,62 @@ function ExploreResultCard({
       {res.ok ? (
         <>
           <div style="margin-bottom:6px;">
-            已合成工具{' '}
-            <code>
-              {res.site}__{res.name}
-            </code>
+            已合成工具 <code>{tool}</code>
             {res.summary ? <div style="opacity:.8;margin-top:2px;">{res.summary}</div> : null}
           </div>
-          {installed ? (
-            <div style="color:#3a8a5a;">✓ 已安装：{installed}（之后直接调用，无需再探索/LLM）</div>
-          ) : (
-            <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+
+          {verify ? (
+            verify.ok ? (
+              <div style="color:#3a8a5a;margin-bottom:6px;">
+                ✓ 试跑成功{typeof verify.rows === 'number' ? `，返回 ${verify.rows} 行` : ''}
+                。已安装：
+                {installed}（之后直接调用，零 LLM）
+              </div>
+            ) : (
+              <div style="color:#d05050;margin-bottom:6px;">
+                ✗ 试跑失败：{verify.error ?? '未知错误'}
+                {installed ? `（已安装为 ${installed}，可重修后覆盖）` : ''}
+              </div>
+            )
+          ) : null}
+
+          <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+            {!verify?.ok && (
               <button
                 class="send-btn"
-                disabled={installing}
-                onClick={onInstall}
+                disabled={busy}
+                onClick={onInstallAndVerify}
                 style="width:auto;padding:4px 12px;border-radius:8px;"
               >
-                {installing ? '安装中…' : '安装这个工具'}
+                {busy ? '安装并试跑中…' : installed ? '重新试跑' : '安装并试跑'}
               </button>
-              <button
-                onClick={() => setShowSource((s) => !s)}
-                style="background:none;border:none;cursor:pointer;text-decoration:underline;opacity:.8;"
-              >
-                {showSource ? '隐藏源码' : '查看源码'}
+            )}
+            {verify && !verify.ok && !repaired && (
+              <button onClick={onRepair} style={linkBtn}>
+                根据报错重修
               </button>
-              <button
-                onClick={onDismiss}
-                style="background:none;border:none;cursor:pointer;opacity:.6;"
-              >
-                关闭
-              </button>
-            </div>
-          )}
+            )}
+            {repaired && <span style="opacity:.7;">已请求重修，稍候出新结果…</span>}
+            <button onClick={() => setShowSource((s) => !s)} style={linkBtn}>
+              {showSource ? '隐藏源码' : '查看源码'}
+            </button>
+            <button onClick={onDownloadTrace} style={linkBtn}>
+              下载 trace
+            </button>
+            <button
+              onClick={onDismiss}
+              style="background:none;border:none;cursor:pointer;opacity:.6;"
+            >
+              关闭
+            </button>
+          </div>
+
           {error ? <div style="color:#d05050;margin-top:4px;">{error}</div> : null}
+          {verify?.ok && verify.preview ? (
+            <pre style="max-height:160px;overflow:auto;background:rgba(0,0,0,.05);padding:8px;border-radius:8px;margin-top:6px;font-size:11px;white-space:pre-wrap;">
+              {verify.preview}
+            </pre>
+          ) : null}
           {showSource && res.source ? (
             <pre style="max-height:240px;overflow:auto;background:rgba(0,0,0,.05);padding:8px;border-radius:8px;margin-top:6px;font-size:11px;white-space:pre-wrap;">
               {res.source}
@@ -1098,6 +1195,9 @@ function ExploreResultCard({
       ) : (
         <div>
           没能自动合成适配器{res.error ? `：${res.error}` : ''}。
+          <button onClick={onDownloadTrace} style={linkBtn + 'margin-left:6px;'}>
+            下载 trace
+          </button>
           <button
             onClick={onDismiss}
             style="background:none;border:none;cursor:pointer;opacity:.6;margin-left:6px;"
