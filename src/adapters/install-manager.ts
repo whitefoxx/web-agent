@@ -22,6 +22,7 @@ import {
   listInstalled,
   deleteInstalled,
   setInstalledEnabled,
+  setInstalledVerify,
   type InstalledAdapter,
   type CapturedDef,
 } from './installed-store';
@@ -41,7 +42,7 @@ const liveDefs = new Map<string, CapturedDef[]>();
 export interface InstallRequest {
   source: string;
   defs: CapturedDef[];
-  origin: { type: 'marketplace' | 'manual'; url?: string };
+  origin: { type: 'marketplace' | 'manual' | 'explore'; url?: string };
 }
 
 export interface InstallResult {
@@ -171,6 +172,8 @@ export async function installFromCaptured(
     installedAt: prior?.installedAt ?? now,
     updatedAt: now,
     origin,
+    // Explore-synthesized adapters start "untested"; verify ("试跑") flips it.
+    ...(origin.type === 'explore' ? { verifyStatus: 'untested' as const } : {}),
   };
   await putInstalled(row);
 
@@ -225,6 +228,15 @@ export async function setEnabled(id: string, enabled: boolean): Promise<{ ok: bo
   await setInstalledEnabled(id, enabled);
   log('install', `${enabled ? 'enabled' : 'disabled'} ${id}`);
   return { ok: true };
+}
+
+/** Record an explore adapter's verify ("试跑") result (passed/failed + note). */
+export async function markVerified(
+  id: string,
+  status: 'untested' | 'passed' | 'failed',
+  note?: string,
+): Promise<void> {
+  await setInstalledVerify(id, status, note);
 }
 
 export async function listInstalledAdapters(): Promise<InstalledAdapter[]> {

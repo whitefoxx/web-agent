@@ -300,6 +300,15 @@ export interface ExploreRepairReq {
   error: string;
 }
 
+/** SidePanel → SW: record an explore adapter's verify ("试跑") outcome so the
+ * Adapters list can show untested / passed / failed. */
+export interface SetAdapterVerifyReq {
+  type: 'SET_ADAPTER_VERIFY';
+  id: string;
+  status: 'untested' | 'passed' | 'failed';
+  note?: string;
+}
+
 /** SidePanel → SW: fetch a full trace (metadata + events) for export/download. */
 export interface GetTraceReq {
   type: 'GET_TRACE';
@@ -352,7 +361,7 @@ export interface InstallAdapterReq {
   type: 'INSTALL_ADAPTER';
   source: string;
   defs: InstalledAdapterDef[];
-  origin: { type: 'marketplace' | 'manual'; url?: string };
+  origin: { type: 'marketplace' | 'manual' | 'explore'; url?: string };
 }
 
 export interface InstallAdapterResp {
@@ -388,7 +397,10 @@ export interface InstalledAdapterSummary {
   enabled: boolean;
   commandCount: number;
   installedAt: number;
-  origin: { type: 'marketplace' | 'manual'; url?: string };
+  origin: { type: 'marketplace' | 'manual' | 'explore'; url?: string };
+  /** Explore-synthesized adapters only: verify ("试跑") outcome. */
+  verifyStatus?: 'untested' | 'passed' | 'failed';
+  verifyNote?: string;
 }
 
 export interface ListInstalledResp {
@@ -463,6 +475,7 @@ export type Message =
   | RunToolReq
   | RunToolResp
   | ExploreRepairReq
+  | SetAdapterVerifyReq
   | GetTraceReq
   | GetTraceResp
   | LogsResponse

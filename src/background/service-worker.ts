@@ -76,6 +76,7 @@ import type {
   RunToolReq,
   RunToolResp,
   ExploreRepairReq,
+  SetAdapterVerifyReq,
   GetTraceReq,
 } from '../messages';
 
@@ -95,6 +96,7 @@ import {
   setEnabled as setAdapterEnabled,
   listInstalledAdapters,
   findStaleMarketplaceAdapters,
+  markVerified,
 } from '../adapters/install-manager';
 import {
   configureWebchatWorld,
@@ -382,6 +384,17 @@ chrome.runtime.onMessage.addListener((msg: unknown, _sender, sendResponse): bool
       );
       return true;
     }
+    case 'SET_ADAPTER_VERIFY': {
+      const r = m as SetAdapterVerifyReq;
+      void markVerified(r.id, r.status, r.note).then(
+        () => {
+          broadcastAdaptersChanged();
+          sendResponse({ ok: true });
+        },
+        () => sendResponse({ ok: false }),
+      );
+      return true;
+    }
     case 'DELETE_MEMORY': {
       void deleteMemory((m as DeleteMemoryReq).id).then(
         () => sendResponse({ ok: true }),
@@ -525,6 +538,8 @@ async function handleListInstalled(): Promise<ListInstalledResp> {
     commandCount: r.defs.length,
     installedAt: r.installedAt,
     origin: r.origin,
+    verifyStatus: r.verifyStatus,
+    verifyNote: r.verifyNote,
   }));
   return { type: 'LIST_INSTALLED_RESP', adapters };
 }
@@ -834,7 +849,9 @@ async function handleRunTool(m: RunToolReq): Promise<RunToolResp> {
     const rows = Array.isArray(r.result) ? r.result.length : undefined;
     let preview: string;
     try {
-      preview = JSON.stringify(r.result).slice(0, 800);
+      // Return the full result (capped) so the panel can show it completely +
+      // offer copy; large payloads are bounded to keep the message sane.
+      preview = JSON.stringify(r.result, null, 2).slice(0, 200_000);
     } catch {
       preview = '[unserializable]';
     }

@@ -34,7 +34,13 @@ export interface InstalledAdapter {
   enabled: boolean;
   installedAt: number;
   updatedAt: number;
-  origin: { type: 'marketplace' | 'manual'; url?: string };
+  origin: { type: 'marketplace' | 'manual' | 'explore'; url?: string };
+  /** For explore-synthesized adapters: the verify ("试跑") outcome so the UI can
+   * distinguish untested / passed / failed. Undefined for non-explore installs. */
+  verifyStatus?: 'untested' | 'passed' | 'failed';
+  /** Short note from the last verify (rows returned, or the error). */
+  verifyNote?: string;
+  verifiedAt?: number;
 }
 
 /** Serializable adapter definition shape (matches sandbox CapturedAdapter,
@@ -199,6 +205,22 @@ export async function setInstalledEnabled(id: string, enabled: boolean): Promise
   const row = await getInstalled(id);
   if (!row) return;
   row.enabled = enabled;
+  row.updatedAt = Date.now();
+  await putInstalled(row);
+}
+
+/** Record an explore adapter's verify ("试跑") outcome. */
+export async function setInstalledVerify(
+  id: string,
+  status: 'untested' | 'passed' | 'failed',
+  note?: string,
+): Promise<void> {
+  if (!hasIndexedDb()) return;
+  const row = await getInstalled(id);
+  if (!row) return;
+  row.verifyStatus = status;
+  row.verifyNote = note;
+  row.verifiedAt = Date.now();
   row.updatedAt = Date.now();
   await putInstalled(row);
 }

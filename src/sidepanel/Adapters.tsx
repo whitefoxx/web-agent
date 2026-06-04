@@ -1,9 +1,11 @@
 /**
  * Adapters management section for the settings drawer.
  *
- * Two tabs:
- *  - 已安装 — list with enable/disable/uninstall + a paste-to-install panel.
- *  - 市场   — browse the bundled catalog (count comes from marketplace/index.json
+ * Three tabs:
+ *  - 已安装   — list with enable/disable/uninstall + a paste-to-install panel.
+ *  - 探索生成 — adapters synthesized by the explore flow (origin 'explore'), with
+ *               an 未测试 / 试跑成功 / 试跑失败 status badge.
+ *  - 市场     — browse the bundled catalog (count comes from marketplace/index.json
  *             at fetch time), with a featured row up top and a searchable full
  *             list below; every row is a one-click install.
  *
@@ -31,7 +33,7 @@ import {
 } from './marketplace';
 import type { InstalledAdapterSummary } from '../messages';
 
-type Tab = 'installed' | 'market';
+type Tab = 'installed' | 'mine' | 'market';
 type TypeFilter = 'all' | 'pipeline' | 'func';
 
 type InstallState =
@@ -89,6 +91,8 @@ export function AdaptersSection() {
   }, [tab, market, marketErr]);
 
   const installedIds = useMemo(() => new Set(list.map((a) => a.id)), [list]);
+  // Adapters this extension synthesized via explore (origin 'explore').
+  const mineList = useMemo(() => list.filter((a) => a.origin.type === 'explore'), [list]);
 
   const featured = useMemo<MarketAdapter[]>(() => {
     if (!market) return [];
@@ -223,6 +227,9 @@ export function AdaptersSection() {
         >
           已安装 <span class="count">{list.length}</span>
         </button>
+        <button class={`pill ${tab === 'mine' ? 'selected' : ''}`} onClick={() => setTab('mine')}>
+          探索生成 <span class="count">{mineList.length}</span>
+        </button>
         <button
           class={`pill ${tab === 'market' ? 'selected' : ''}`}
           onClick={() => setTab('market')}
@@ -260,6 +267,23 @@ export function AdaptersSection() {
         />
       )}
 
+      {tab === 'mine' && (
+        <InstalledPanel
+          list={mineList}
+          loading={loading}
+          hidePaste
+          emptyHint="还没有探索生成的工具 — 在对话里切到「探索并生成工具」模式跑一次"
+          showPaste={false}
+          source={source}
+          installing={state.kind === 'installing'}
+          onTogglePaste={() => {}}
+          onSourceChange={setSource}
+          onInstallPaste={onInstallPaste}
+          onToggle={onToggle}
+          onUninstall={onUninstall}
+        />
+      )}
+
       {tab === 'market' && (
         <MarketPanel
           market={market}
@@ -288,6 +312,10 @@ interface InstalledPanelProps {
   showPaste: boolean;
   source: string;
   installing: boolean;
+  /** Hide the "+ 贴码安装" bar (used by the 探索生成 tab). */
+  hidePaste?: boolean;
+  /** Empty-state message override. */
+  emptyHint?: string;
   onTogglePaste: () => void;
   onSourceChange: (s: string) => void;
   onInstallPaste: () => Promise<void>;
@@ -298,14 +326,16 @@ interface InstalledPanelProps {
 function InstalledPanel(p: InstalledPanelProps): preact.JSX.Element {
   return (
     <div>
-      <div class="adapters-paste-bar">
-        <span class="adapters-paste-warning">
-          ⚠️ 安装会执行第三方脚本(已隔离在沙箱内),请只装信任来源的代码。
-        </span>
-        <button class="btn sm outline" onClick={p.onTogglePaste}>
-          {p.showPaste ? '取消' : '+ 贴码安装'}
-        </button>
-      </div>
+      {!p.hidePaste && (
+        <div class="adapters-paste-bar">
+          <span class="adapters-paste-warning">
+            ⚠️ 安装会执行第三方脚本(已隔离在沙箱内),请只装信任来源的代码。
+          </span>
+          <button class="btn sm outline" onClick={p.onTogglePaste}>
+            {p.showPaste ? '取消' : '+ 贴码安装'}
+          </button>
+        </div>
+      )}
 
       {p.showPaste && (
         <div class="adapters-paste-form">
@@ -328,7 +358,9 @@ function InstalledPanel(p: InstalledPanelProps): preact.JSX.Element {
       {p.loading ? (
         <div class="hist-empty">加载中…</div>
       ) : p.list.length === 0 ? (
-        <div class="hist-empty">还没有安装任何 adapter — 去「市场」tab 一键装几个</div>
+        <div class="hist-empty">
+          {p.emptyHint ?? '还没有安装任何 adapter — 去「市场」tab 一键装几个'}
+        </div>
       ) : (
         <ul class="adapters-list">
           {p.list.map((a) => (
@@ -337,6 +369,26 @@ function InstalledPanel(p: InstalledPanelProps): preact.JSX.Element {
                 <code class="adapter-card-title">{a.title}</code>
                 {a.kind === 'func' && <span class="ad-chip kind-func">func</span>}
                 {a.kind === 'mixed' && <span class="ad-chip kind-mixed">mixed</span>}
+                {a.origin.type === 'explore' && (
+                  <span class="ad-chip" style="background:#e8f0fe;color:#3b5bdb;">
+                    探索生成
+                  </span>
+                )}
+                {a.verifyStatus === 'passed' && (
+                  <span class="ad-chip" style="background:#e6f4ea;color:#1e7e34;">
+                    试跑成功
+                  </span>
+                )}
+                {a.verifyStatus === 'failed' && (
+                  <span
+                    class="ad-chip"
+                    style="background:#fde8e8;color:#c0392b;"
+                    title={a.verifyNote}
+                  >
+                    试跑失败
+                  </span>
+                )}
+                {a.verifyStatus === 'untested' && <span class="ad-chip muted">未测试</span>}
                 {!a.enabled && <span class="ad-chip muted">已禁用</span>}
                 <span class="adapter-card-cmd-count">{a.commandCount} 命令</span>
               </div>

@@ -72,6 +72,7 @@ import {
   type RunToolReq,
   type RunToolResp,
   type ExploreRepairReq,
+  type SetAdapterVerifyReq,
   type GetTraceReq,
   type GetTraceResp,
 } from '../messages';
@@ -1029,6 +1030,54 @@ function ActiveHeader({ text }: { text: string }): preact.JSX.Element {
   );
 }
 
+/** Small copy-to-clipboard button (icon + state). Reused for code/result. */
+function CopyButton({ text, label }: { text: string; label?: string }): preact.JSX.Element {
+  const [done, setDone] = useState(false);
+  return (
+    <button
+      title="复制"
+      onClick={() => {
+        void navigator.clipboard
+          ?.writeText(text)
+          .then(() => {
+            setDone(true);
+            setTimeout(() => setDone(false), 1200);
+          })
+          .catch(() => {});
+      }}
+      style="display:inline-flex;align-items:center;gap:4px;background:none;border:none;cursor:pointer;opacity:.7;font-size:12px;padding:2px 4px;color:inherit;"
+    >
+      <IconCopy size={13} />
+      <span>{done ? '已复制' : (label ?? '复制')}</span>
+    </button>
+  );
+}
+
+/** A scrollable code/result box with a copy button in its header. */
+function CopyableBlock({
+  text,
+  title,
+  maxHeight = 320,
+}: {
+  text: string;
+  title: string;
+  maxHeight?: number;
+}): preact.JSX.Element {
+  return (
+    <div style="margin-top:6px;border:1px solid rgba(0,0,0,.08);border-radius:8px;overflow:hidden;">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:2px 6px;background:rgba(0,0,0,.04);font-size:11px;opacity:.8;">
+        <span>{title}</span>
+        <CopyButton text={text} />
+      </div>
+      <pre
+        style={`max-height:${maxHeight}px;overflow:auto;background:rgba(0,0,0,.03);padding:8px;margin:0;font-size:11px;white-space:pre-wrap;`}
+      >
+        {text}
+      </pre>
+    </div>
+  );
+}
+
 /** Explore outcome card: shows the trace summary and, when synthesis produced
  * an adapter, a one-click install (reusing the normal sandbox-eval path). */
 function ExploreResultCard({
@@ -1061,27 +1110,38 @@ function ExploreResultCard({
     setBusy(true);
     setError(null);
     setVerify(null);
-    const r = await installAdapterFromSource(res.source, { type: 'manual' });
+    const r = await installAdapterFromSource(res.source, { type: 'explore' });
     if (!r.ok) {
       setBusy(false);
       setError(r.error ?? '安装失败');
       return;
     }
-    setInstalled(r.title ?? `${res.site}/${res.name}`);
+    const id = r.id ?? `${res.site}/${res.name}`;
+    setInstalled(r.title ?? id);
+    let v: { ok: boolean; rows?: number; preview?: string; error?: string };
     try {
       const resp = (await chrome.runtime.sendMessage({
         type: 'RUN_TOOL',
         tool,
         args: res.testArgs ?? {},
       } satisfies RunToolReq)) as RunToolResp | undefined;
-      setVerify(
-        resp
-          ? { ok: resp.ok, rows: resp.rows, preview: resp.preview, error: resp.error }
-          : { ok: false, error: '无响应' },
-      );
+      v = resp
+        ? { ok: resp.ok, rows: resp.rows, preview: resp.preview, error: resp.error }
+        : { ok: false, error: '无响应' };
     } catch (e) {
-      setVerify({ ok: false, error: e instanceof Error ? e.message : String(e) });
+      v = { ok: false, error: e instanceof Error ? e.message : String(e) };
     }
+    setVerify(v);
+    // Record the verify outcome on the installed adapter so the Adapters list
+    // shows 试跑成功 / 试跑失败.
+    void chrome.runtime
+      .sendMessage({
+        type: 'SET_ADAPTER_VERIFY',
+        id,
+        status: v.ok ? 'passed' : 'failed',
+        note: v.ok ? (typeof v.rows === 'number' ? `${v.rows} 行` : '成功') : (v.error ?? '失败'),
+      } satisfies SetAdapterVerifyReq)
+      .catch(() => {});
     setBusy(false);
   }
 
@@ -1181,15 +1241,11 @@ function ExploreResultCard({
           </div>
 
           {error ? <div style="color:#d05050;margin-top:4px;">{error}</div> : null}
-          {verify?.ok && verify.preview ? (
-            <pre style="max-height:160px;overflow:auto;background:rgba(0,0,0,.05);padding:8px;border-radius:8px;margin-top:6px;font-size:11px;white-space:pre-wrap;">
-              {verify.preview}
-            </pre>
+          {verify?.preview ? (
+            <CopyableBlock title="试跑结果" text={verify.preview} maxHeight={300} />
           ) : null}
           {showSource && res.source ? (
-            <pre style="max-height:240px;overflow:auto;background:rgba(0,0,0,.05);padding:8px;border-radius:8px;margin-top:6px;font-size:11px;white-space:pre-wrap;">
-              {res.source}
-            </pre>
+            <CopyableBlock title="适配器源码" text={res.source} maxHeight={360} />
           ) : null}
         </>
       ) : (
@@ -1578,6 +1634,11 @@ function TurnView({
           </details>
         )}
         <Markdown text={turn.text || '（无内容）'} />
+        {turn.text ? (
+          <div style="margin-top:2px;">
+            <CopyButton text={turn.text} label="复制结果" />
+          </div>
+        ) : null}
         {turn.commands.length > 0 && (
           <details class="parsed-commands" open>
             <summary>
@@ -2326,6 +2387,11 @@ function DetailTurn({ turn }: { turn: Turn }) {
     return (
       <div class="hist-turn assistant">
         <Markdown text={turn.cleanedText || '（无内容）'} />
+        {turn.cleanedText ? (
+          <div style="margin-top:2px;">
+            <CopyButton text={turn.cleanedText} label="复制结果" />
+          </div>
+        ) : null}
         {turn.commands.length > 0 && (
           <div class="hist-cmd-list">
             {turn.commands.map((c, i) => (

@@ -40,7 +40,7 @@ export interface InstallOutcome {
  */
 export async function installAdapterFromSource(
   source: string,
-  origin: { type: 'marketplace' | 'manual'; url?: string },
+  origin: { type: 'marketplace' | 'manual' | 'explore'; url?: string },
 ): Promise<InstallOutcome> {
   const evaled = await evalAdapterInSandbox(source);
   if (!evaled.ok) {
