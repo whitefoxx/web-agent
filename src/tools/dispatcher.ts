@@ -13,6 +13,7 @@ import { createPageShim } from '../runtime/page';
 import { log, warn, error as logError } from '../runtime/log';
 import { RateLimitedError, AuthRequiredError, EmptyResultError } from '../runtime/errors.js';
 import { runInstalledFuncAdapter } from '../userscript/sw-runner';
+import { getActiveExploreSession } from '../explore/session';
 
 export interface ToolExecResult {
   ok: boolean;
@@ -68,6 +69,44 @@ export async function executeAdapter(opts: {
   tool: string;
   args: Record<string, unknown>;
 }): Promise<ToolExecResult> {
+  const result = await executeAdapterInner(opts);
+  // Explore recording (best-effort): every tool call becomes an action event on
+  // the active trace. No-op when not exploring.
+  const session = getActiveExploreSession();
+  if (session) {
+    try {
+      session.recordAction({
+        stream: 'action',
+        tool: opts.tool,
+        args: opts.args,
+        status: result.ok ? 'ok' : 'fail',
+        durationMs: result.durationMs,
+        resultDigest: result.ok ? digestResult(result.result) : undefined,
+        errorMessage: result.ok ? undefined : result.error,
+      });
+    } catch (e) {
+      warn('dispatcher', 'explore recordAction failed (ignored)', e);
+    }
+  }
+  return result;
+}
+
+function digestResult(result: unknown): string {
+  try {
+    if (Array.isArray(result)) {
+      const sample = result.length ? ` first=${JSON.stringify(result[0]).slice(0, 200)}` : '';
+      return `array(${result.length})${sample}`;
+    }
+    return JSON.stringify(result).slice(0, 400);
+  } catch {
+    return '[unserializable]';
+  }
+}
+
+async function executeAdapterInner(opts: {
+  tool: string;
+  args: Record<string, unknown>;
+}): Promise<ToolExecResult> {
   const t0 = Date.now();
   const adapter = lookupAdapter(opts.tool);
   if (!adapter) {
@@ -99,11 +138,9 @@ export async function executeAdapter(opts: {
     } catch (e) {
       return failed(t0, `failed to open ${adapter.site} tab: ${msgOf(e)}`, 'tab');
     }
-    log(
-      'dispatcher',
-      `executing ${opts.tool} on tab=${tabId} (installed func via userScripts)`,
-      { args: opts.args },
-    );
+    log('dispatcher', `executing ${opts.tool} on tab=${tabId} (installed func via userScripts)`, {
+      args: opts.args,
+    });
     const page = await createPageShim(tabId);
     try {
       const r = await runInstalledFuncAdapter({

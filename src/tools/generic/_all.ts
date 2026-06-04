@@ -20,3 +20,8 @@ import './get-interactives';
 import './click';
 import './click-by-text';
 import './type-into';
+// Explore perception primitives: see captured XHR/Fetch endpoints (list_network)
+// and raw DOM (get_html) so the LLM can decide a synthesis strategy. They
+// self-guard when no explore session is active.
+import './list-network';
+import './get-html';

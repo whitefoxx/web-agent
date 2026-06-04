@@ -1,6 +1,7 @@
 # LLM Explore → Synthesize → Replay
 
-Status: **in progress** (branch `feat/llm-explore`). P1 landed; P2+ pending.
+Status: **in progress** (branch `feat/llm-explore`). P1 + P2a (explore engine)
+landed; P2b (UI/agent wiring) + P3+ pending.
 
 ## Goal
 
@@ -134,10 +135,16 @@ runtime eval and no "Allow user scripts" toggle.
 
 ## Phases
 
-- **P1 — recorder substrate** ✅ (this change): `types.ts`, `trace-store.ts`,
-  `recorder.ts`, `network-recorder.ts` + unit tests. No agent wiring yet.
-- **P2 — explore session + wiring**: session lifecycle, dispatcher action hook,
-  explore primitives, SW messages, side-panel trace viewer, agent-run integration.
+- **P1 — recorder substrate** ✅: `types.ts`, `trace-store.ts`, `recorder.ts`,
+  `network-recorder.ts` + unit tests.
+- **P2a — explore engine** ✅: `session.ts` (ExploreSession orchestrator +
+  active-session registry), dispatcher action hook, `list_network` + `get_html`
+  primitives, and the `page.ts` debugger-ownership fix (tolerant attach +
+  owner-only detach) + unit tests.
+- **P2b — UI / agent wiring** (next): SW `EXPLORE_START/STOP` + `TRACE_UPDATE`
+  messages, api-engine explore mode (start recording, expose explore primitives,
+  navigation→state snapshots, trigger synthesis at end), side-panel Explore mode
+  toggle + trace viewer + trace export.
 - **P3 — synthesis (fetch class)**: PUBLIC/COOKIE/INTERCEPT → pipeline.
 - **P4 — verify + bounded repair + install**: end-to-end.
 - **P5 — func/DOM-scrape synthesis** (Phase B).
@@ -147,5 +154,20 @@ runtime eval and no "Allow user scripts" toggle.
 
 The recorder is deliberately decoupled from persistence (injected `sinks`) and
 from CDP (network capture is a separate module). This keeps the buffering /
-truncation / sequencing logic unit-testable in node, and lets P2 wire the real
-IDB store + CDP capture without touching tested logic.
+truncation / sequencing logic unit-testable in node, and lets the wiring use the
+real IDB store + CDP capture without touching tested logic.
+
+## P2a notes
+
+- **Debugger ownership.** The session's network recorder performs the
+  `chrome.debugger.attach` first, so it OWNS the attachment. `page.ts` now
+  tolerates a failed attach ("already attached") and only detaches if it was the
+  owner — so per-tool PageShims created on the explore tab during a run reuse the
+  session attachment and their `detach()` is a no-op, never killing the capture.
+- **Action hook** is a thin wrap around `executeAdapter` (→ `executeAdapterInner`)
+  so every tool path is captured with one insertion point; no-op when no session.
+- `list_network` reads the live deduped endpoint summary (method+path, query
+  stripped); `get_html` reads outerHTML via `chrome.scripting` (ISOLATED world,
+  independent of the CDP attachment) and snapshots a `state` event into the trace.
+- Still headless: nothing STARTS a session yet — that's P2b (SW message +
+  api-engine explore mode).

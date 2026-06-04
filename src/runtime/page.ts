@@ -195,6 +195,11 @@ export async function createPageShim(
 ): Promise<PageShim> {
   const target: DebugTarget = { tabId };
   let attached = false;
+  // Whether THIS shim performed the chrome.debugger.attach (vs. reusing an
+  // attachment another client already holds on this tab — e.g. an explore
+  // session's network recorder). Only the owner detaches, so a per-tool shim
+  // running on the explore tab can't tear down the session's capture.
+  let ownsAttachment = false;
   const attachments = opts.attachments ?? [];
 
   // State for the opencli network-capture trio (startNetworkCapture /
@@ -205,7 +210,19 @@ export async function createPageShim(
   async function ensureAttached() {
     if (attached) return;
     log('page', `debugger.attach tabId=${tabId}`);
-    await chrome.debugger.attach(target, '1.3');
+    try {
+      await chrome.debugger.attach(target, '1.3');
+      ownsAttachment = true;
+    } catch (e) {
+      // Tolerate "already attached": another client (typically an explore
+      // session's network recorder) owns the debugger on this tab. Reuse the
+      // existing session and remember we are NOT the owner, so detach() leaves
+      // it intact instead of killing the session-wide capture.
+      const msg = e instanceof Error ? e.message : String(e);
+      if (!/already attached|Another debugger/i.test(msg)) throw e;
+      ownsAttachment = false;
+      log('page', `debugger already attached tabId=${tabId}; reusing (not owner)`);
+    }
     attached = true;
   }
 
@@ -637,12 +654,24 @@ export async function createPageShim(
       };
       const s = SPECIAL[key];
       const down: Record<string, unknown> = s
-        ? { type: 'keyDown', key, code: s.code, windowsVirtualKeyCode: s.vk, nativeVirtualKeyCode: s.vk }
+        ? {
+            type: 'keyDown',
+            key,
+            code: s.code,
+            windowsVirtualKeyCode: s.vk,
+            nativeVirtualKeyCode: s.vk,
+          }
         : { type: 'keyDown', key };
       if (s?.text) down.text = s.text;
       await chrome.debugger.sendCommand(target, 'Input.dispatchKeyEvent', down);
       const up: Record<string, unknown> = s
-        ? { type: 'keyUp', key, code: s.code, windowsVirtualKeyCode: s.vk, nativeVirtualKeyCode: s.vk }
+        ? {
+            type: 'keyUp',
+            key,
+            code: s.code,
+            windowsVirtualKeyCode: s.vk,
+            nativeVirtualKeyCode: s.vk,
+          }
         : { type: 'keyUp', key };
       await chrome.debugger.sendCommand(target, 'Input.dispatchKeyEvent', up);
     },
@@ -688,11 +717,26 @@ export async function createPageShim(
     async nativeKeyPress(key: string, modifiers: string[] = []) {
       await ensureAttached();
       // CDP modifier bitmask: Alt=1, Ctrl=2, Meta/Cmd=4, Shift=8.
-      const BITS: Record<string, number> = { Alt: 1, Control: 2, Ctrl: 2, Meta: 4, Cmd: 4, Shift: 8 };
+      const BITS: Record<string, number> = {
+        Alt: 1,
+        Control: 2,
+        Ctrl: 2,
+        Meta: 4,
+        Cmd: 4,
+        Shift: 8,
+      };
       const mod = modifiers.reduce((acc, m) => acc | (BITS[m] ?? 0), 0);
       log('page', `nativeKeyPress ${key} mods=${modifiers.join('+') || 'none'}`);
-      await chrome.debugger.sendCommand(target, 'Input.dispatchKeyEvent', { type: 'keyDown', key, modifiers: mod });
-      await chrome.debugger.sendCommand(target, 'Input.dispatchKeyEvent', { type: 'keyUp', key, modifiers: mod });
+      await chrome.debugger.sendCommand(target, 'Input.dispatchKeyEvent', {
+        type: 'keyDown',
+        key,
+        modifiers: mod,
+      });
+      await chrome.debugger.sendCommand(target, 'Input.dispatchKeyEvent', {
+        type: 'keyUp',
+        key,
+        modifiers: mod,
+      });
     },
 
     async setFileInput(files: string[], selector?: string) {
@@ -763,13 +807,18 @@ export async function createPageShim(
 
     async detach() {
       if (!attached) return;
+      attached = false;
+      if (!ownsAttachment) {
+        // We reused an attachment owned by an explore session — leave it up.
+        log('page', 'debugger.detach skipped (not attachment owner)');
+        return;
+      }
       log('page', 'debugger.detach');
       try {
         await chrome.debugger.detach(target);
       } catch (e) {
         warn('page', 'detach error (already detached?)', e);
       }
-      attached = false;
     },
   };
 
