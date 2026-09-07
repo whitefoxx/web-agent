@@ -8,6 +8,7 @@
     "dev": "vite",
     "build": "vite build",
     "build:all": "npm run build",
+    "pack": "node scripts/pack-store.mjs full",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",

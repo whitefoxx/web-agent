@@ -1,0 +1,380 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Web Agent — Chrome Web Store promo assets</title>
+<style>
+  :root{color-scheme:dark}
+  body{margin:0;background:#07090f;color:#e8ecf7;font:15px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;padding:32px}
+  header{max-width:1100px;margin:0 auto 24px}
+  h1{font-size:26px;margin:0 0 6px}
+  header p{color:#8b93ad;margin:0}
+  main{max-width:1100px;margin:0 auto;display:flex;flex-direction:column;gap:34px}
+  .card{background:#0e1220;border:1px solid #1e2436;border-radius:14px;padding:16px}
+  .meta{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+  .meta h2{font-size:16px;margin:0}
+  .dim{color:#727c9c;font:13px ui-monospace,Menlo,monospace}
+  .meta button{margin-left:auto;background:linear-gradient(90deg,#4F6BFF,#A44DFF);color:#fff;border:0;border-radius:8px;padding:8px 16px;font-size:14px;font-weight:600;cursor:pointer}
+  .frame{width:100%;border-radius:10px;overflow:hidden;border:1px solid #1e2436}
+  .frame svg{width:100%;height:auto;display:block}
+  .bar{position:sticky;top:0;z-index:5;max-width:1100px;margin:0 auto 20px;display:flex;gap:10px}
+  .bar button{background:#182036;color:#cdd6f4;border:1px solid #2a3350;border-radius:8px;padding:9px 16px;font-size:14px;cursor:pointer}
+</style></head><body>
+<header><h1>Web Agent — Chrome Web Store promo assets</h1>
+<p>Rendered client-side from inline SVG. Click <b>Download JPG</b> for a store-ready file (JPEG, no alpha) at the exact required size.</p></header>
+<div class="bar"><button onclick="cards.forEach(c=>dl(c.id,c.w,c.h))">Download all</button></div>
+<main><section class="card" id="card-screenshot-1-hero">
+      <div class="meta"><h2>Screenshot 1 · Hero</h2><span class="dim">screenshot-1-hero.jpg · 1280×800</span>
+      <button onclick="dl('screenshot-1-hero',1280,800)">Download JPG</button></div>
+      <div class="frame"><svg xmlns="http://www.w3.org/2000/svg" width="1280" height="800" viewBox="0 0 1280 800">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0B1020"/><stop offset="1" stop-color="#1A1236"/>
+    </linearGradient>
+    <linearGradient id="brand" gradientUnits="userSpaceOnUse" x1="10" y1="10" x2="118" y2="118">
+      <stop offset="0" stop-color="#4F6BFF"/><stop offset="1" stop-color="#A44DFF"/>
+    </linearGradient>
+    <!-- Same ramp in objectBoundingBox units, for UI drawn anywhere on the
+         canvas. The gradient above is pinned to the logo 128 box, so reusing
+         it on a 1280-wide card clamps to the end colour. -->
+    <linearGradient id="brandUI" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4F6BFF"/><stop offset="1" stop-color="#A44DFF"/>
+    </linearGradient>
+    <radialGradient id="glowB" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#4F6BFF" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#4F6BFF" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowP" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#A44DFF" stop-opacity="0.4"/>
+      <stop offset="1" stop-color="#A44DFF" stop-opacity="0"/>
+    </radialGradient>
+  </defs><rect width="1280" height="800" fill="url(#bg)"/><circle cx="300" cy="200" r="620" fill="url(#glowB)"/><circle cx="1000" cy="640" r="620" fill="url(#glowP)"/><g transform="translate(576 96) scale(1)">
+    <rect width="128" height="128" rx="28" fill="url(#brand)"/>
+    <path d="M0 -1 C0.12 -0.34 0.34 -0.12 1 0 C0.34 0.12 0.12 0.34 0 1 C-0.12 0.34 -0.34 0.12 -1 0 C-0.34 -0.12 -0.12 -0.34 0 -1 Z"
+          transform="translate(58 56) scale(40)" fill="#fff"/>
+    <path d="M0 0 L0 16 L3.7 12.4 L6.2 18.5 L8.6 17.5 L6.1 11.5 L11 11.5 Z"
+          transform="translate(80 74) rotate(-20) scale(2.7)" fill="#F5A623"/>
+  </g><text x="640" y="320" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="78" font-weight="700" fill="#F5F7FF" text-anchor="middle" letter-spacing="0" opacity="1">Web Agent</text><text x="640" y="392" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="27" font-weight="400" fill="#AEB7D4" text-anchor="middle" letter-spacing="0" opacity="1">An AI agent in your side panel that uses your browser —</text><text x="640" y="436" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="27" font-weight="400" fill="#AEB7D4" text-anchor="middle" letter-spacing="0" opacity="1">it reads, clicks and fills in the pages you are already signed into.</text><g transform="translate(213.5 0)"><g>
+    <rect x="0" y="500" width="254" height="46" rx="23" fill="rgba(88,166,255,0.12)" stroke="rgba(88,166,255,0.32)"/>
+    <text x="127" y="530.48" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="22" font-weight="400" fill="#C7D0FF" text-anchor="middle" letter-spacing="0" opacity="1">50+ browser tools</text>
+  </g><g>
+    <rect x="266" y="500" width="307" height="46" rx="23" fill="rgba(88,166,255,0.12)" stroke="rgba(88,166,255,0.32)"/>
+    <text x="419.5" y="530.48" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="22" font-weight="400" fill="#C7D0FF" text-anchor="middle" letter-spacing="0" opacity="1">your logged-in Chrome</text>
+  </g><g>
+    <rect x="585" y="500" width="268" height="46" rx="23" fill="rgba(88,166,255,0.12)" stroke="rgba(88,166,255,0.32)"/>
+    <text x="719" y="530.48" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="22" font-weight="400" fill="#C7D0FF" text-anchor="middle" letter-spacing="0" opacity="1">bring your own key</text>
+  </g></g><text x="640" y="648" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="24" font-weight="400" fill="#727C9C" text-anchor="middle" letter-spacing="0" opacity="1">You bring the model: any OpenAI-compatible endpoint, your own key.</text><text x="640" y="692" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="22" font-weight="400" fill="#727C9C" text-anchor="middle" letter-spacing="0" opacity="1">Nothing is sent to a server of ours. There is no server of ours.</text></svg></div>
+    </section>
+<section class="card" id="card-screenshot-2-how">
+      <div class="meta"><h2>Screenshot 2 · How it works</h2><span class="dim">screenshot-2-how.jpg · 1280×800</span>
+      <button onclick="dl('screenshot-2-how',1280,800)">Download JPG</button></div>
+      <div class="frame"><svg xmlns="http://www.w3.org/2000/svg" width="1280" height="800" viewBox="0 0 1280 800">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0B1020"/><stop offset="1" stop-color="#1A1236"/>
+    </linearGradient>
+    <linearGradient id="brand" gradientUnits="userSpaceOnUse" x1="10" y1="10" x2="118" y2="118">
+      <stop offset="0" stop-color="#4F6BFF"/><stop offset="1" stop-color="#A44DFF"/>
+    </linearGradient>
+    <!-- Same ramp in objectBoundingBox units, for UI drawn anywhere on the
+         canvas. The gradient above is pinned to the logo 128 box, so reusing
+         it on a 1280-wide card clamps to the end colour. -->
+    <linearGradient id="brandUI" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4F6BFF"/><stop offset="1" stop-color="#A44DFF"/>
+    </linearGradient>
+    <radialGradient id="glowB" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#4F6BFF" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#4F6BFF" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowP" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#A44DFF" stop-opacity="0.4"/>
+      <stop offset="1" stop-color="#A44DFF" stop-opacity="0"/>
+    </radialGradient>
+  </defs><rect width="1280" height="800" fill="url(#bg)"/><circle cx="640" cy="720" r="700" fill="url(#glowP)"/><g transform="translate(72 58) scale(0.359375)">
+    <rect width="128" height="128" rx="28" fill="url(#brand)"/>
+    <path d="M0 -1 C0.12 -0.34 0.34 -0.12 1 0 C0.34 0.12 0.12 0.34 0 1 C-0.12 0.34 -0.34 0.12 -1 0 C-0.34 -0.12 -0.12 -0.34 0 -1 Z"
+          transform="translate(58 56) scale(40)" fill="#fff"/>
+    <path d="M0 0 L0 16 L3.7 12.4 L6.2 18.5 L8.6 17.5 L6.1 11.5 L11 11.5 Z"
+          transform="translate(80 74) rotate(-20) scale(2.7)" fill="#F5A623"/>
+  </g><text x="132" y="91" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="30" font-weight="700" fill="#F5F7FF" text-anchor="start" letter-spacing="0.5" opacity="1">Web Agent</text><text x="72" y="196" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="48" font-weight="700" fill="#F5F7FF" text-anchor="start" letter-spacing="0" opacity="1">You ask. It works the page.</text><text x="72" y="244" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="26" font-weight="400" fill="#AEB7D4" text-anchor="start" letter-spacing="0" opacity="1">In the browser you already use, with the accounts you are already in.</text><rect x="72" y="268" width="1136" height="92" rx="16" fill="rgba(255,255,255,0.045)" stroke="rgba(255,255,255,0.09)"/><circle cx="126" cy="314" r="26" fill="url(#brandUI)"/><text x="126" y="324" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="26" font-weight="700" fill="#F5F7FF" text-anchor="middle" letter-spacing="0" opacity="1">1</text><text x="178" y="308" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="28" font-weight="700" fill="#F5F7FF" text-anchor="start" letter-spacing="0" opacity="1">You ask</text><text x="178" y="342" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="22" font-weight="400" fill="#AEB7D4" text-anchor="start" letter-spacing="0" opacity="1">In plain language, in the side panel.</text><rect x="72" y="380" width="1136" height="92" rx="16" fill="rgba(255,255,255,0.045)" stroke="rgba(255,255,255,0.09)"/><circle cx="126" cy="426" r="26" fill="url(#brandUI)"/><text x="126" y="436" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="26" font-weight="700" fill="#F5F7FF" text-anchor="middle" letter-spacing="0" opacity="1">2</text><text x="178" y="420" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="28" font-weight="700" fill="#F5F7FF" text-anchor="start" letter-spacing="0" opacity="1">It plans</text><text x="178" y="454" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="22" font-weight="400" fill="#AEB7D4" text-anchor="start" letter-spacing="0" opacity="1">Your model picks the tools. You bring the model.</text><rect x="72" y="492" width="1136" height="92" rx="16" fill="rgba(255,255,255,0.045)" stroke="rgba(255,255,255,0.09)"/><circle cx="126" cy="538" r="26" fill="url(#brandUI)"/><text x="126" y="548" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="26" font-weight="700" fill="#F5F7FF" text-anchor="middle" letter-spacing="0" opacity="1">3</text><text x="178" y="532" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="28" font-weight="700" fill="#F5F7FF" text-anchor="start" letter-spacing="0" opacity="1">It acts</text><text x="178" y="566" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="22" font-weight="400" fill="#AEB7D4" text-anchor="start" letter-spacing="0" opacity="1">Opens tabs, reads, clicks, types — in your Chrome.</text><rect x="72" y="604" width="1136" height="92" rx="16" fill="rgba(255,255,255,0.045)" stroke="rgba(255,255,255,0.09)"/><circle cx="126" cy="650" r="26" fill="url(#brandUI)"/><text x="126" y="660" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="26" font-weight="700" fill="#F5F7FF" text-anchor="middle" letter-spacing="0" opacity="1">4</text><text x="178" y="644" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="28" font-weight="700" fill="#F5F7FF" text-anchor="start" letter-spacing="0" opacity="1">You confirm</text><text x="178" y="678" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="22" font-weight="400" fill="#AEB7D4" text-anchor="start" letter-spacing="0" opacity="1">Anything that writes stops and shows you what it will do.</text><text x="72" y="742" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="23" font-weight="400" fill="#727C9C" text-anchor="start" letter-spacing="0" opacity="1">No credentials are stored — it reuses the session you already have.</text></svg></div>
+    </section>
+<section class="card" id="card-screenshot-3-tools">
+      <div class="meta"><h2>Screenshot 3 · The toolbelt</h2><span class="dim">screenshot-3-tools.jpg · 1280×800</span>
+      <button onclick="dl('screenshot-3-tools',1280,800)">Download JPG</button></div>
+      <div class="frame"><svg xmlns="http://www.w3.org/2000/svg" width="1280" height="800" viewBox="0 0 1280 800">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0B1020"/><stop offset="1" stop-color="#1A1236"/>
+    </linearGradient>
+    <linearGradient id="brand" gradientUnits="userSpaceOnUse" x1="10" y1="10" x2="118" y2="118">
+      <stop offset="0" stop-color="#4F6BFF"/><stop offset="1" stop-color="#A44DFF"/>
+    </linearGradient>
+    <!-- Same ramp in objectBoundingBox units, for UI drawn anywhere on the
+         canvas. The gradient above is pinned to the logo 128 box, so reusing
+         it on a 1280-wide card clamps to the end colour. -->
+    <linearGradient id="brandUI" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4F6BFF"/><stop offset="1" stop-color="#A44DFF"/>
+    </linearGradient>
+    <radialGradient id="glowB" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#4F6BFF" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#4F6BFF" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowP" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#A44DFF" stop-opacity="0.4"/>
+      <stop offset="1" stop-color="#A44DFF" stop-opacity="0"/>
+    </radialGradient>
+  </defs><rect width="1280" height="800" fill="url(#bg)"/><circle cx="1050" cy="180" r="620" fill="url(#glowB)"/><g transform="translate(72 58) scale(0.359375)">
+    <rect width="128" height="128" rx="28" fill="url(#brand)"/>
+    <path d="M0 -1 C0.12 -0.34 0.34 -0.12 1 0 C0.34 0.12 0.12 0.34 0 1 C-0.12 0.34 -0.34 0.12 -1 0 C-0.34 -0.12 -0.12 -0.34 0 -1 Z"
+          transform="translate(58 56) scale(40)" fill="#fff"/>
+    <path d="M0 0 L0 16 L3.7 12.4 L6.2 18.5 L8.6 17.5 L6.1 11.5 L11 11.5 Z"
+          transform="translate(80 74) rotate(-20) scale(2.7)" fill="#F5A623"/>
+  </g><text x="132" y="91" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="30" font-weight="700" fill="#F5F7FF" text-anchor="start" letter-spacing="0.5" opacity="1">Web Agent</text><text x="72" y="196" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="48" font-weight="700" fill="#F5F7FF" text-anchor="start" letter-spacing="0" opacity="1">50+ browser tools</text><text x="72" y="244" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="26" font-weight="400" fill="#AEB7D4" text-anchor="start" letter-spacing="0" opacity="1">The primitives an agent actually needs — not a wrapper around one API.</text><g>
+    <rect x="72" y="300" width="126" height="42" rx="21" fill="rgba(79,107,255,0.13)" stroke="rgba(124,146,255,0.28)"/>
+    <text x="135" y="327.8" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="20" font-weight="400" fill="#C7D0FF" text-anchor="middle" letter-spacing="0" opacity="1">open_url</text>
+  </g><g>
+    <rect x="210" y="300" width="186" height="42" rx="21" fill="rgba(79,107,255,0.13)" stroke="rgba(124,146,255,0.28)"/>
+    <text x="303" y="327.8" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="20" font-weight="400" fill="#C7D0FF" text-anchor="middle" letter-spacing="0" opacity="1">get_page_text</text>
+  </g><g>
+    <rect x="408" y="300" width="138" height="42" rx="21" fill="rgba(79,107,255,0.13)" stroke="rgba(124,146,255,0.28)"/>
+    <text x="477" y="327.8" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="20" font-weight="400" fill="#C7D0FF" text-anchor="middle" letter-spacing="0" opacity="1">fetch_url</text>
+  </g><g>
+    <rect x="558" y="300" width="126" height="42" rx="21" fill="rgba(79,107,255,0.13)" stroke="rgba(124,146,255,0.28)"/>
+    <text x="621" y="327.8" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="20" font-weight="400" fill="#C7D0FF" text-anchor="middle" letter-spacing="0" opacity="1">get_html</text>
+  </g><g>
+    <rect x="696" y="300" width="150" height="42" rx="21" fill="rgba(79,107,255,0.13)" stroke="rgba(124,146,255,0.28)"/>
+    <text x="771" y="327.8" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="20" font-weight="400" fill="#C7D0FF" text-anchor="middle" letter-spacing="0" opacity="1">screenshot</text>
+  </g><g>
+    <rect x="858" y="300" width="162" height="42" rx="21" fill="rgba(79,107,255,0.13)" stroke="rgba(124,146,255,0.28)"/>
+    <text x="939" y="327.8" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="20" font-weight="400" fill="#C7D0FF" text-anchor="middle" letter-spacing="0" opacity="1">scroll_page</text>
+  </g><g>
+    <rect x="1032" y="300" width="150" height="42" rx="21" fill="rgba(79,107,255,0.13)" stroke="rgba(124,146,255,0.28)"/>
+    <text x="1107" y="327.8" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="20" font-weight="400" fill="#C7D0FF" text-anchor="middle" letter-spacing="0" opacity="1">web_search</text>
+  </g><g>
+    <rect x="72" y="356" width="150" height="42" rx="21" fill="rgba(79,107,255,0.13)" stroke="rgba(124,146,255,0.28)"/>
+    <text x="147" y="383.8" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="20" font-weight="400" fill="#C7D0FF" text-anchor="middle" letter-spacing="0" opacity="1">list_links</text>
+  </g><g>
+    <rect x="234" y="356" width="90" height="42" rx="21" fill="rgba(79,107,255,0.13)" stroke="rgba(124,146,255,0.28)"/>
+    <text x="279" y="383.8" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="20" font-weight="400" fill="#C7D0FF" text-anchor="middle" letter-spacing="0" opacity="1">click</text>
+  </g><g>
+    <rect x="336" y="356" width="138" height="42" rx="21" fill="rgba(79,107,255,0.13)" stroke="rgba(124,146,255,0.28)"/>
+    <text x="405" y="383.8" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="20" font-weight="400" fill="#C7D0FF" text-anchor="middle" letter-spacing="0" opacity="1">type_into</text>
+  </g><g>
+    <rect x="486" y="356" width="138" height="42" rx="21" fill="rgba(79,107,255,0.13)" stroke="rgba(124,146,255,0.28)"/>
+    <text x="555" y="383.8" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="20" font-weight="400" fill="#C7D0FF" text-anchor="middle" letter-spacing="0" opacity="1">fill_form</text>
+  </g><g>
+    <rect x="636" y="356" width="138" height="42" rx="21" fill="rgba(79,107,255,0.13)" stroke="rgba(124,146,255,0.28)"/>
+    <text x="705" y="383.8" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="20" font-weight="400" fill="#C7D0FF" text-anchor="middle" letter-spacing="0" opacity="1">press_key</text>
+  </g><g>
+    <rect x="786" y="356" width="186" height="42" rx="21" fill="rgba(79,107,255,0.13)" stroke="rgba(124,146,255,0.28)"/>
+    <text x="879" y="383.8" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="20" font-weight="400" fill="#C7D0FF" text-anchor="middle" letter-spacing="0" opacity="1">select_option</text>
+  </g><g>
+    <rect x="984" y="356" width="90" height="42" rx="21" fill="rgba(79,107,255,0.13)" stroke="rgba(124,146,255,0.28)"/>
+    <text x="1029" y="383.8" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="20" font-weight="400" fill="#C7D0FF" text-anchor="middle" letter-spacing="0" opacity="1">hover</text>
+  </g><g>
+    <rect x="72" y="412" width="186" height="42" rx="21" fill="rgba(79,107,255,0.13)" stroke="rgba(124,146,255,0.28)"/>
+    <text x="165" y="439.8" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="20" font-weight="400" fill="#C7D0FF" text-anchor="middle" letter-spacing="0" opacity="1">drag_and_drop</text>
+  </g><g>
+    <rect x="270" y="412" width="162" height="42" rx="21" fill="rgba(79,107,255,0.13)" stroke="rgba(124,146,255,0.28)"/>
+    <text x="351" y="439.8" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="20" font-weight="400" fill="#C7D0FF" text-anchor="middle" letter-spacing="0" opacity="1">file_upload</text>
+  </g><g>
+    <rect x="444" y="412" width="186" height="42" rx="21" fill="rgba(79,107,255,0.13)" stroke="rgba(124,146,255,0.28)"/>
+    <text x="537" y="439.8" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="20" font-weight="400" fill="#C7D0FF" text-anchor="middle" letter-spacing="0" opacity="1">handle_dialog</text>
+  </g><g>
+    <rect x="642" y="412" width="222" height="42" rx="21" fill="rgba(79,107,255,0.13)" stroke="rgba(124,146,255,0.28)"/>
+    <text x="753" y="439.8" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="20" font-weight="400" fill="#C7D0FF" text-anchor="middle" letter-spacing="0" opacity="1">get_interactives</text>
+  </g><g>
+    <rect x="876" y="412" width="210" height="42" rx="21" fill="rgba(79,107,255,0.13)" stroke="rgba(124,146,255,0.28)"/>
+    <text x="981" y="439.8" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="20" font-weight="400" fill="#C7D0FF" text-anchor="middle" letter-spacing="0" opacity="1">get_dom_outline</text>
+  </g><g>
+    <rect x="72" y="468" width="138" height="42" rx="21" fill="rgba(79,107,255,0.13)" stroke="rgba(124,146,255,0.28)"/>
+    <text x="141" y="495.8" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="20" font-weight="400" fill="#C7D0FF" text-anchor="middle" letter-spacing="0" opacity="1">query_dom</text>
+  </g><g>
+    <rect x="222" y="468" width="174" height="42" rx="21" fill="rgba(79,107,255,0.13)" stroke="rgba(124,146,255,0.28)"/>
+    <text x="309" y="495.8" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="20" font-weight="400" fill="#C7D0FF" text-anchor="middle" letter-spacing="0" opacity="1">find_in_page</text>
+  </g><g>
+    <rect x="408" y="468" width="162" height="42" rx="21" fill="rgba(79,107,255,0.13)" stroke="rgba(124,146,255,0.28)"/>
+    <text x="489" y="495.8" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="20" font-weight="400" fill="#C7D0FF" text-anchor="middle" letter-spacing="0" opacity="1">find_in_dom</text>
+  </g><g>
+    <rect x="582" y="468" width="234" height="42" rx="21" fill="rgba(79,107,255,0.13)" stroke="rgba(124,146,255,0.28)"/>
+    <text x="699" y="495.8" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="20" font-weight="400" fill="#C7D0FF" text-anchor="middle" letter-spacing="0" opacity="1">wait_for_selector</text>
+  </g><g>
+    <rect x="828" y="468" width="270" height="42" rx="21" fill="rgba(79,107,255,0.13)" stroke="rgba(124,146,255,0.28)"/>
+    <text x="963" y="495.8" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="20" font-weight="400" fill="#C7D0FF" text-anchor="middle" letter-spacing="0" opacity="1">find_structured_data</text>
+  </g><g>
+    <rect x="72" y="524" width="186" height="42" rx="21" fill="rgba(79,107,255,0.13)" stroke="rgba(124,146,255,0.28)"/>
+    <text x="165" y="551.8" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="20" font-weight="400" fill="#C7D0FF" text-anchor="middle" letter-spacing="0" opacity="1">get_a11y_tree</text>
+  </g><g>
+    <rect x="270" y="524" width="210" height="42" rx="21" fill="rgba(79,107,255,0.13)" stroke="rgba(124,146,255,0.28)"/>
+    <text x="375" y="551.8" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="20" font-weight="400" fill="#C7D0FF" text-anchor="middle" letter-spacing="0" opacity="1">capture_network</text>
+  </g><g>
+    <rect x="492" y="524" width="114" height="42" rx="21" fill="rgba(79,107,255,0.13)" stroke="rgba(124,146,255,0.28)"/>
+    <text x="549" y="551.8" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="20" font-weight="400" fill="#C7D0FF" text-anchor="middle" letter-spacing="0" opacity="1">eval_js</text>
+  </g><g>
+    <rect x="618" y="524" width="246" height="42" rx="21" fill="rgba(79,107,255,0.13)" stroke="rgba(124,146,255,0.28)"/>
+    <text x="741" y="551.8" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="20" font-weight="400" fill="#C7D0FF" text-anchor="middle" letter-spacing="0" opacity="1">create_site_script</text>
+  </g><g>
+    <rect x="876" y="524" width="234" height="42" rx="21" fill="rgba(79,107,255,0.13)" stroke="rgba(124,146,255,0.28)"/>
+    <text x="993" y="551.8" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="20" font-weight="400" fill="#C7D0FF" text-anchor="middle" letter-spacing="0" opacity="1">list_site_scripts</text>
+  </g><g>
+    <rect x="72" y="580" width="210" height="42" rx="21" fill="rgba(79,107,255,0.13)" stroke="rgba(124,146,255,0.28)"/>
+    <text x="177" y="607.8" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="20" font-weight="400" fill="#C7D0FF" text-anchor="middle" letter-spacing="0" opacity="1">get_site_script</text>
+  </g><g>
+    <rect x="294" y="580" width="138" height="42" rx="21" fill="rgba(79,107,255,0.13)" stroke="rgba(124,146,255,0.28)"/>
+    <text x="363" y="607.8" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="20" font-weight="400" fill="#C7D0FF" text-anchor="middle" letter-spacing="0" opacity="1">list_tabs</text>
+  </g><g>
+    <rect x="444" y="580" width="198" height="42" rx="21" fill="rgba(79,107,255,0.13)" stroke="rgba(124,146,255,0.28)"/>
+    <text x="543" y="607.8" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="20" font-weight="400" fill="#C7D0FF" text-anchor="middle" letter-spacing="0" opacity="1">get_active_tab</text>
+  </g><g>
+    <rect x="654" y="580" width="162" height="42" rx="21" fill="rgba(79,107,255,0.13)" stroke="rgba(124,146,255,0.28)"/>
+    <text x="735" y="607.8" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="20" font-weight="400" fill="#C7D0FF" text-anchor="middle" letter-spacing="0" opacity="1">manage_tabs</text>
+  </g><g>
+    <rect x="828" y="580" width="138" height="42" rx="21" fill="rgba(79,107,255,0.13)" stroke="rgba(124,146,255,0.28)"/>
+    <text x="897" y="607.8" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="20" font-weight="400" fill="#C7D0FF" text-anchor="middle" letter-spacing="0" opacity="1">close_tab</text>
+  </g><text x="72" y="690" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="24" font-weight="400" fill="#AEB7D4" text-anchor="start" letter-spacing="0" opacity="1">Reading is free. Posting, sending and deleting are not:</text><text x="72" y="728" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="24" font-weight="700" fill="#F5A623" text-anchor="start" letter-spacing="0" opacity="1">a write always stops for your confirmation first.</text></svg></div>
+    </section>
+<section class="card" id="card-screenshot-4-learn">
+      <div class="meta"><h2>Screenshot 4 · Learning a site</h2><span class="dim">screenshot-4-learn.jpg · 1280×800</span>
+      <button onclick="dl('screenshot-4-learn',1280,800)">Download JPG</button></div>
+      <div class="frame"><svg xmlns="http://www.w3.org/2000/svg" width="1280" height="800" viewBox="0 0 1280 800">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0B1020"/><stop offset="1" stop-color="#1A1236"/>
+    </linearGradient>
+    <linearGradient id="brand" gradientUnits="userSpaceOnUse" x1="10" y1="10" x2="118" y2="118">
+      <stop offset="0" stop-color="#4F6BFF"/><stop offset="1" stop-color="#A44DFF"/>
+    </linearGradient>
+    <!-- Same ramp in objectBoundingBox units, for UI drawn anywhere on the
+         canvas. The gradient above is pinned to the logo 128 box, so reusing
+         it on a 1280-wide card clamps to the end colour. -->
+    <linearGradient id="brandUI" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4F6BFF"/><stop offset="1" stop-color="#A44DFF"/>
+    </linearGradient>
+    <radialGradient id="glowB" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#4F6BFF" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#4F6BFF" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowP" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#A44DFF" stop-opacity="0.4"/>
+      <stop offset="1" stop-color="#A44DFF" stop-opacity="0"/>
+    </radialGradient>
+  </defs><rect width="1280" height="800" fill="url(#bg)"/><circle cx="260" cy="640" r="640" fill="url(#glowP)"/><circle cx="1040" cy="200" r="560" fill="url(#glowB)"/><g transform="translate(72 58) scale(0.359375)">
+    <rect width="128" height="128" rx="28" fill="url(#brand)"/>
+    <path d="M0 -1 C0.12 -0.34 0.34 -0.12 1 0 C0.34 0.12 0.12 0.34 0 1 C-0.12 0.34 -0.34 0.12 -1 0 C-0.34 -0.12 -0.12 -0.34 0 -1 Z"
+          transform="translate(58 56) scale(40)" fill="#fff"/>
+    <path d="M0 0 L0 16 L3.7 12.4 L6.2 18.5 L8.6 17.5 L6.1 11.5 L11 11.5 Z"
+          transform="translate(80 74) rotate(-20) scale(2.7)" fill="#F5A623"/>
+  </g><text x="132" y="91" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="30" font-weight="700" fill="#F5F7FF" text-anchor="start" letter-spacing="0.5" opacity="1">Web Agent</text><text x="72" y="196" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="44" font-weight="700" fill="#F5F7FF" text-anchor="start" letter-spacing="0" opacity="1">It can learn a site nobody wrote support for</text><text x="72" y="244" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="26" font-weight="400" fill="#AEB7D4" text-anchor="start" letter-spacing="0" opacity="1">Instead of you writing a scraper and maintaining it forever.</text><rect x="72" y="300" width="362.6666666666667" height="250" rx="18" fill="rgba(255,255,255,0.045)" stroke="rgba(255,255,255,0.09)"/><text x="102" y="352" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="30" font-weight="700" fill="#F5A623" text-anchor="start" letter-spacing="0" opacity="1">Look</text><text x="102" y="400" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="20" font-weight="400" fill="#AEB7D4" text-anchor="start" letter-spacing="0" opacity="1">Structured data, the accessibility</text><text x="102" y="432" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="20" font-weight="400" fill="#AEB7D4" text-anchor="start" letter-spacing="0" opacity="1">tree, and the requests the page</text><text x="102" y="464" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="20" font-weight="400" fill="#AEB7D4" text-anchor="start" letter-spacing="0" opacity="1">makes — where did this value</text><text x="102" y="496" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="20" font-weight="400" fill="#AEB7D4" text-anchor="start" letter-spacing="0" opacity="1">really come from?</text><rect x="458.6666666666667" y="300" width="362.6666666666667" height="250" rx="18" fill="rgba(255,255,255,0.045)" stroke="rgba(255,255,255,0.09)"/><text x="488.6666666666667" y="352" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="30" font-weight="700" fill="#F5A623" text-anchor="start" letter-spacing="0" opacity="1">Try</text><text x="488.6666666666667" y="400" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="20" font-weight="400" fill="#AEB7D4" text-anchor="start" letter-spacing="0" opacity="1">Run JavaScript in the page’s own</text><text x="488.6666666666667" y="432" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="20" font-weight="400" fill="#AEB7D4" text-anchor="start" letter-spacing="0" opacity="1">origin until the answer comes</text><text x="488.6666666666667" y="464" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="20" font-weight="400" fill="#AEB7D4" text-anchor="start" letter-spacing="0" opacity="1">back the same way twice.</text><rect x="845.3333333333334" y="300" width="362.6666666666667" height="250" rx="18" fill="rgba(255,255,255,0.045)" stroke="rgba(255,255,255,0.09)"/><text x="875.3333333333334" y="352" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="30" font-weight="700" fill="#F5A623" text-anchor="start" letter-spacing="0" opacity="1">Keep</text><text x="875.3333333333334" y="400" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="20" font-weight="400" fill="#AEB7D4" text-anchor="start" letter-spacing="0" opacity="1">Save what worked as a reusable</text><text x="875.3333333333334" y="432" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="20" font-weight="400" fill="#AEB7D4" text-anchor="start" letter-spacing="0" opacity="1">tool, so the second time is</text><text x="875.3333333333334" y="464" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="20" font-weight="400" fill="#AEB7D4" text-anchor="start" letter-spacing="0" opacity="1">instant and deterministic.</text><text x="72" y="626" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="28" font-weight="700" fill="#F5F7FF" text-anchor="start" letter-spacing="0" opacity="1">And what it works out, you keep.</text><text x="72" y="668" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="22" font-weight="400" fill="#AEB7D4" text-anchor="start" letter-spacing="0" opacity="1">The route it found becomes a tool you can call again — instant and deterministic the second time,</text><text x="72" y="704" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="22" font-weight="400" fill="#AEB7D4" text-anchor="start" letter-spacing="0" opacity="1">and yours, rather than an entry on a list of supported sites that somebody has to keep from rotting.</text></svg></div>
+    </section>
+<section class="card" id="card-screenshot-5-start">
+      <div class="meta"><h2>Screenshot 5 · Get started</h2><span class="dim">screenshot-5-start.jpg · 1280×800</span>
+      <button onclick="dl('screenshot-5-start',1280,800)">Download JPG</button></div>
+      <div class="frame"><svg xmlns="http://www.w3.org/2000/svg" width="1280" height="800" viewBox="0 0 1280 800">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0B1020"/><stop offset="1" stop-color="#1A1236"/>
+    </linearGradient>
+    <linearGradient id="brand" gradientUnits="userSpaceOnUse" x1="10" y1="10" x2="118" y2="118">
+      <stop offset="0" stop-color="#4F6BFF"/><stop offset="1" stop-color="#A44DFF"/>
+    </linearGradient>
+    <!-- Same ramp in objectBoundingBox units, for UI drawn anywhere on the
+         canvas. The gradient above is pinned to the logo 128 box, so reusing
+         it on a 1280-wide card clamps to the end colour. -->
+    <linearGradient id="brandUI" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4F6BFF"/><stop offset="1" stop-color="#A44DFF"/>
+    </linearGradient>
+    <radialGradient id="glowB" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#4F6BFF" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#4F6BFF" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowP" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#A44DFF" stop-opacity="0.4"/>
+      <stop offset="1" stop-color="#A44DFF" stop-opacity="0"/>
+    </radialGradient>
+  </defs><rect width="1280" height="800" fill="url(#bg)"/><circle cx="640" cy="260" r="700" fill="url(#glowB)"/><g transform="translate(72 58) scale(0.359375)">
+    <rect width="128" height="128" rx="28" fill="url(#brand)"/>
+    <path d="M0 -1 C0.12 -0.34 0.34 -0.12 1 0 C0.34 0.12 0.12 0.34 0 1 C-0.12 0.34 -0.34 0.12 -1 0 C-0.34 -0.12 -0.12 -0.34 0 -1 Z"
+          transform="translate(58 56) scale(40)" fill="#fff"/>
+    <path d="M0 0 L0 16 L3.7 12.4 L6.2 18.5 L8.6 17.5 L6.1 11.5 L11 11.5 Z"
+          transform="translate(80 74) rotate(-20) scale(2.7)" fill="#F5A623"/>
+  </g><text x="132" y="91" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="30" font-weight="700" fill="#F5F7FF" text-anchor="start" letter-spacing="0.5" opacity="1">Web Agent</text><text x="72" y="196" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="48" font-weight="700" fill="#F5F7FF" text-anchor="start" letter-spacing="0" opacity="1">Three steps</text><text x="72" y="244" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="26" font-weight="400" fill="#AEB7D4" text-anchor="start" letter-spacing="0" opacity="1">You need your own API key — the extension is the hands, you bring the brain.</text><rect x="72" y="284" width="1136" height="106" rx="16" fill="rgba(255,255,255,0.045)" stroke="rgba(255,255,255,0.09)"/><circle cx="130" cy="336" r="28" fill="url(#brandUI)"/><text x="130" y="347" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="28" font-weight="700" fill="#F5F7FF" text-anchor="middle" letter-spacing="0" opacity="1">1</text><text x="186" y="332" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="28" font-weight="700" fill="#F5F7FF" text-anchor="start" letter-spacing="0" opacity="1">Install and open the side panel</text><text x="186" y="368" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="22" font-weight="400" fill="#AEB7D4" text-anchor="start" letter-spacing="0" opacity="1">From the toolbar. That is the whole interface.</text><rect x="72" y="414" width="1136" height="106" rx="16" fill="rgba(255,255,255,0.045)" stroke="rgba(255,255,255,0.09)"/><circle cx="130" cy="466" r="28" fill="url(#brandUI)"/><text x="130" y="477" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="28" font-weight="700" fill="#F5F7FF" text-anchor="middle" letter-spacing="0" opacity="1">2</text><text x="186" y="462" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="28" font-weight="700" fill="#F5F7FF" text-anchor="start" letter-spacing="0" opacity="1">Menu → LLM backend</text><text x="186" y="498" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="22" font-weight="400" fill="#AEB7D4" text-anchor="start" letter-spacing="0" opacity="1">Pick a provider, paste your key, choose a model. It stays on this machine.</text><rect x="72" y="544" width="1136" height="106" rx="16" fill="rgba(255,255,255,0.045)" stroke="rgba(255,255,255,0.09)"/><circle cx="130" cy="596" r="28" fill="url(#brandUI)"/><text x="130" y="607" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="28" font-weight="700" fill="#F5F7FF" text-anchor="middle" letter-spacing="0" opacity="1">3</text><text x="186" y="592" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="28" font-weight="700" fill="#F5F7FF" text-anchor="start" letter-spacing="0" opacity="1">Ask for something</text><text x="186" y="628" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="22" font-weight="400" fill="#AEB7D4" text-anchor="start" letter-spacing="0" opacity="1">Turn on “Allow user scripts” in the extension details page for the rest.</text><text x="72" y="742" font-family="ui-monospace,'SF Mono',Menlo,Consolas,monospace" font-size="22" font-weight="400" fill="#727C9C" text-anchor="start" letter-spacing="0" opacity="1">Chrome 138+  ·  open source  ·  github.com/whitefoxx/web-agent</text></svg></div>
+    </section>
+<section class="card" id="card-promo-small-440x280">
+      <div class="meta"><h2>Promo tile · small</h2><span class="dim">promo-small-440x280.jpg · 440×280</span>
+      <button onclick="dl('promo-small-440x280',440,280)">Download JPG</button></div>
+      <div class="frame"><svg xmlns="http://www.w3.org/2000/svg" width="440" height="280" viewBox="0 0 440 280">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0B1020"/><stop offset="1" stop-color="#1A1236"/>
+    </linearGradient>
+    <linearGradient id="brand" gradientUnits="userSpaceOnUse" x1="10" y1="10" x2="118" y2="118">
+      <stop offset="0" stop-color="#4F6BFF"/><stop offset="1" stop-color="#A44DFF"/>
+    </linearGradient>
+    <!-- Same ramp in objectBoundingBox units, for UI drawn anywhere on the
+         canvas. The gradient above is pinned to the logo 128 box, so reusing
+         it on a 1280-wide card clamps to the end colour. -->
+    <linearGradient id="brandUI" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4F6BFF"/><stop offset="1" stop-color="#A44DFF"/>
+    </linearGradient>
+    <radialGradient id="glowB" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#4F6BFF" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#4F6BFF" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowP" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#A44DFF" stop-opacity="0.4"/>
+      <stop offset="1" stop-color="#A44DFF" stop-opacity="0"/>
+    </radialGradient>
+  </defs><rect width="440" height="280" fill="url(#bg)"/><circle cx="110" cy="60" r="240" fill="url(#glowB)"/><circle cx="350" cy="240" r="240" fill="url(#glowP)"/><g transform="translate(186 44) scale(0.53125)">
+    <rect width="128" height="128" rx="28" fill="url(#brand)"/>
+    <path d="M0 -1 C0.12 -0.34 0.34 -0.12 1 0 C0.34 0.12 0.12 0.34 0 1 C-0.12 0.34 -0.34 0.12 -1 0 C-0.34 -0.12 -0.12 -0.34 0 -1 Z"
+          transform="translate(58 56) scale(40)" fill="#fff"/>
+    <path d="M0 0 L0 16 L3.7 12.4 L6.2 18.5 L8.6 17.5 L6.1 11.5 L11 11.5 Z"
+          transform="translate(80 74) rotate(-20) scale(2.7)" fill="#F5A623"/>
+  </g><text x="220" y="168" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="36" font-weight="700" fill="#F5F7FF" text-anchor="middle" letter-spacing="0" opacity="1">Web Agent</text><text x="220" y="206" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="19" font-weight="400" fill="#AEB7D4" text-anchor="middle" letter-spacing="0" opacity="1">An AI agent that uses</text><text x="220" y="232" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="19" font-weight="400" fill="#AEB7D4" text-anchor="middle" letter-spacing="0" opacity="1">your own browser</text></svg></div>
+    </section>
+<section class="card" id="card-promo-marquee-1400x560">
+      <div class="meta"><h2>Promo tile · marquee</h2><span class="dim">promo-marquee-1400x560.jpg · 1400×560</span>
+      <button onclick="dl('promo-marquee-1400x560',1400,560)">Download JPG</button></div>
+      <div class="frame"><svg xmlns="http://www.w3.org/2000/svg" width="1400" height="560" viewBox="0 0 1400 560">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0B1020"/><stop offset="1" stop-color="#1A1236"/>
+    </linearGradient>
+    <linearGradient id="brand" gradientUnits="userSpaceOnUse" x1="10" y1="10" x2="118" y2="118">
+      <stop offset="0" stop-color="#4F6BFF"/><stop offset="1" stop-color="#A44DFF"/>
+    </linearGradient>
+    <!-- Same ramp in objectBoundingBox units, for UI drawn anywhere on the
+         canvas. The gradient above is pinned to the logo 128 box, so reusing
+         it on a 1280-wide card clamps to the end colour. -->
+    <linearGradient id="brandUI" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4F6BFF"/><stop offset="1" stop-color="#A44DFF"/>
+    </linearGradient>
+    <radialGradient id="glowB" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#4F6BFF" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#4F6BFF" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowP" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#A44DFF" stop-opacity="0.4"/>
+      <stop offset="1" stop-color="#A44DFF" stop-opacity="0"/>
+    </radialGradient>
+  </defs><rect width="1400" height="560" fill="url(#bg)"/><circle cx="260" cy="120" r="520" fill="url(#glowB)"/><circle cx="1150" cy="460" r="520" fill="url(#glowP)"/><g transform="translate(96 208) scale(1.21875)">
+    <rect width="128" height="128" rx="28" fill="url(#brand)"/>
+    <path d="M0 -1 C0.12 -0.34 0.34 -0.12 1 0 C0.34 0.12 0.12 0.34 0 1 C-0.12 0.34 -0.34 0.12 -1 0 C-0.34 -0.12 -0.12 -0.34 0 -1 Z"
+          transform="translate(58 56) scale(40)" fill="#fff"/>
+    <path d="M0 0 L0 16 L3.7 12.4 L6.2 18.5 L8.6 17.5 L6.1 11.5 L11 11.5 Z"
+          transform="translate(80 74) rotate(-20) scale(2.7)" fill="#F5A623"/>
+  </g><text x="304" y="246" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="76" font-weight="700" fill="#F5F7FF" text-anchor="start" letter-spacing="0" opacity="1">Web Agent</text><text x="304" y="308" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="30" font-weight="400" fill="#AEB7D4" text-anchor="start" letter-spacing="0" opacity="1">An AI agent in your side panel that uses your own browser.</text><text x="304" y="354" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="30" font-weight="400" fill="#AEB7D4" text-anchor="start" letter-spacing="0" opacity="1">Signed in already. 50+ tools. Bring your own model.</text><text x="304" y="412" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="24" font-weight="700" fill="#F5A623" text-anchor="start" letter-spacing="0" opacity="1">Every write stops for your confirmation.</text></svg></div>
+    </section></main>
+<script>
+const cards=[{"id":"screenshot-1-hero","w":1280,"h":800},{"id":"screenshot-2-how","w":1280,"h":800},{"id":"screenshot-3-tools","w":1280,"h":800},{"id":"screenshot-4-learn","w":1280,"h":800},{"id":"screenshot-5-start","w":1280,"h":800},{"id":"promo-small-440x280","w":440,"h":280},{"id":"promo-marquee-1400x560","w":1400,"h":560}];
+function dl(id,w,h){
+  const svgEl=document.querySelector('#card-'+id+' svg');
+  const xml=new XMLSerializer().serializeToString(svgEl);
+  const url='data:image/svg+xml;base64,'+btoa(unescape(encodeURIComponent(xml)));
+  const img=new Image();
+  img.onload=()=>{
+    const c=document.createElement('canvas');c.width=w;c.height=h;
+    const x=c.getContext('2d');x.fillStyle='#0B1020';x.fillRect(0,0,w,h);x.drawImage(img,0,0,w,h);
+    c.toBlob(b=>{const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=id+'.jpg';a.click();},'image/jpeg',0.94);
+  };
+  img.src=url;
+}
+</script></body></html>

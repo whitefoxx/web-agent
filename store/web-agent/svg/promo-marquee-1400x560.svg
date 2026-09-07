@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="560" viewBox="0 0 1400 560">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0B1020"/><stop offset="1" stop-color="#1A1236"/>
+    </linearGradient>
+    <linearGradient id="brand" gradientUnits="userSpaceOnUse" x1="10" y1="10" x2="118" y2="118">
+      <stop offset="0" stop-color="#4F6BFF"/><stop offset="1" stop-color="#A44DFF"/>
+    </linearGradient>
+    <!-- Same ramp in objectBoundingBox units, for UI drawn anywhere on the
+         canvas. The gradient above is pinned to the logo 128 box, so reusing
+         it on a 1280-wide card clamps to the end colour. -->
+    <linearGradient id="brandUI" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4F6BFF"/><stop offset="1" stop-color="#A44DFF"/>
+    </linearGradient>
+    <radialGradient id="glowB" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#4F6BFF" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#4F6BFF" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowP" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#A44DFF" stop-opacity="0.4"/>
+      <stop offset="1" stop-color="#A44DFF" stop-opacity="0"/>
+    </radialGradient>
+  </defs><rect width="1400" height="560" fill="url(#bg)"/><circle cx="260" cy="120" r="520" fill="url(#glowB)"/><circle cx="1150" cy="460" r="520" fill="url(#glowP)"/><g transform="translate(96 208) scale(1.21875)">
+    <rect width="128" height="128" rx="28" fill="url(#brand)"/>
+    <path d="M0 -1 C0.12 -0.34 0.34 -0.12 1 0 C0.34 0.12 0.12 0.34 0 1 C-0.12 0.34 -0.34 0.12 -1 0 C-0.34 -0.12 -0.12 -0.34 0 -1 Z"
+          transform="translate(58 56) scale(40)" fill="#fff"/>
+    <path d="M0 0 L0 16 L3.7 12.4 L6.2 18.5 L8.6 17.5 L6.1 11.5 L11 11.5 Z"
+          transform="translate(80 74) rotate(-20) scale(2.7)" fill="#F5A623"/>
+  </g><text x="304" y="246" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="76" font-weight="700" fill="#F5F7FF" text-anchor="start" letter-spacing="0" opacity="1">Web Agent</text><text x="304" y="308" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="30" font-weight="400" fill="#AEB7D4" text-anchor="start" letter-spacing="0" opacity="1">An AI agent in your side panel that uses your own browser.</text><text x="304" y="354" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="30" font-weight="400" fill="#AEB7D4" text-anchor="start" letter-spacing="0" opacity="1">Signed in already. 50+ tools. Bring your own model.</text><text x="304" y="412" font-family="-apple-system,'SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif" font-size="24" font-weight="700" fill="#F5A623" text-anchor="start" letter-spacing="0" opacity="1">Every write stops for your confirmation.</text></svg>

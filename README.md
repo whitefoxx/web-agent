@@ -100,6 +100,9 @@ and the reasoning behind decisions that look arbitrary from the outside.
 - `docs/adapter-hot-plug.md` §10.x — the long-running bug log.
 - `docs/tests/` — what has actually been verified in a real browser, and
   `findings.md`, the running record of what went wrong and why.
+- `store/web-agent/` — the Chrome Web Store listing copy, the privacy-form
+  answers, and a generator for the promo images (`render.mjs` → `raster.mjs`).
+  Nothing has been submitted yet.
 
 ## Credits & history
 

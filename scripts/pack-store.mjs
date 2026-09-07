@@ -1,7 +1,9 @@
 // Package a built shell into a Chrome Web Store upload zip.
 //
-//   node scripts/pack-store.mjs webcli      → /tmp/webcli-<version>.zip
-//   node scripts/pack-store.mjs localmd     → /tmp/localmd-connect-<version>.zip
+//   node scripts/pack-store.mjs full        → /tmp/web-agent-<version>.zip
+//
+// This repo builds ONE shell. The webcli / localmd targets this file used to
+// document moved to the web-tools repo in the P4 split and are packed there.
 //
 // Exists because zipping `dist-*/` directly produces a package the dashboard
 // REJECTS: "key field is not allowed in manifest." Our manifests carry `key` on
