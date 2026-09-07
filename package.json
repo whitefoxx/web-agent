@@ -1,0 +1,52 @@
+{
+  "name": "web-agent",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "An AI agent in your side panel that drives your real, signed-in Chrome — reads pages, clicks, fills forms, learns new sites.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "build:all": "npm run build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "check": "npm run typecheck && npm run lint && npm run format:check && npm run test",
+    "import-adapter": "node scripts/import-adapter.mjs"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "^4.0.15",
+    "@ai-sdk/deepseek": "^3.0.11",
+    "@ai-sdk/google": "^4.0.17",
+    "@ai-sdk/groq": "^4.0.11",
+    "@ai-sdk/openai": "^4.0.15",
+    "@ai-sdk/openai-compatible": "^3.0.11",
+    "@ai-sdk/xai": "^4.0.14",
+    "ai": "^7.0.29",
+    "dompurify": "^3.4.2",
+    "marked": "^18.0.3",
+    "preact": "^10.24.3",
+    "turndown": "^7.2.0"
+  },
+  "devDependencies": {
+    "@crxjs/vite-plugin": "^2.0.0-beta.28",
+    "@eslint/js": "^10.0.1",
+    "@preact/preset-vite": "^2.9.1",
+    "@types/chrome": "^0.0.287",
+    "@types/dompurify": "^3.0.5",
+    "@types/node": "^25.7.0",
+    "@types/turndown": "^5.0.5",
+    "eslint": "^10.3.0",
+    "globals": "^17.6.0",
+    "jsdom": "^29.1.1",
+    "prettier": "^3.8.3",
+    "typescript": "^5.6.3",
+    "typescript-eslint": "^8.59.3",
+    "vite": "^5.4.10",
+    "vitest": "^4.1.6"
+  }
+}

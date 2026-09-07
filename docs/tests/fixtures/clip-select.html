@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Selection Fixture</title>
+    <meta name="author" content="Sel Fixture" />
+  </head>
+  <body>
+    <p id="before">Context before the selection, thirty characters of it at least.</p>
+    <div id="target">
+      <h2>SELECTED_HEADING</h2>
+      <p>SELECTED_BODY with a <a href="/deep/link.html">SELECTED_LINK</a> inside it.</p>
+    </div>
+    <p id="after">Context after the selection, thirty characters of it at least.</p>
+    <script>
+      // Auto-select #target on load: a real user selection is a gesture the
+      // bridge cannot make, so the fixture makes it for us.
+      const r = document.createRange();
+      r.selectNodeContents(document.getElementById('target'));
+      const s = getSelection();
+      s.removeAllRanges();
+      s.addRange(r);
+      document.title = 'Selection Fixture (selected)';
+    </script>
+  </body>
+</html>

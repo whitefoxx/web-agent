@@ -1,0 +1,6 @@
+[submodule "marketplace"]
+	path = marketplace
+	url = ../web-agent-marketplace
+[submodule "web-tools"]
+	path = web-tools
+	url = ../web-tools

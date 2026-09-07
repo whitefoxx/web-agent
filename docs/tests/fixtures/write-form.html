@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="csrf-token" content="tok_from_meta_9f3" />
+    <title>write-form fixture — capture_submission (①)</title>
+    <style>
+      body {
+        font:
+          14px/1.5 system-ui,
+          sans-serif;
+        margin: 2rem;
+        max-width: 40rem;
+      }
+      button {
+        display: block;
+        margin: 0.4rem 0;
+        padding: 0.4rem 0.8rem;
+      }
+      #status {
+        margin-top: 1rem;
+        padding: 0.6rem;
+        border: 1px solid #ccc;
+        background: #f6f6f6;
+        white-space: pre-wrap;
+        font-family: ui-monospace, monospace;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>capture_submission fixture</h1>
+    <p>
+      Each button issues a request and writes the outcome into
+      <code>#status</code>. When <code>capture_submission</code> is armed, WRITES are
+      intercepted+aborted → outcome <code>neterror</code> (neutralized, never sent); READS pass
+      through → outcome <code>sent status=NNN</code>. The local static server returns 404 (GET) /
+      501 (POST) for these paths — so a "sent" outcome means the request really left the page (no
+      side effect on localhost), which is exactly what capture must PREVENT for writes.
+    </p>
+
+    <!-- WRITE: fetch POST with a JSON body + a secret header (redaction target) -->
+    <button id="write-fetch" type="button">write: fetch POST /api/comment</button>
+    <!-- WRITE: GraphQL mutation (POST) — must be blocked -->
+    <button id="gql-mutation" type="button">write: GraphQL mutation /graphql</button>
+    <!-- READ: GraphQL query (POST) — must pass through -->
+    <button id="gql-query" type="button">read: GraphQL query /graphql</button>
+    <!-- READ: fetch GET — must pass through -->
+    <button id="read-fetch" type="button">read: fetch GET /api/list</button>
+
+    <!-- WRITE: native form POST (Document navigation) — must be blocked -->
+    <form id="native-form" method="POST" action="/native-submit">
+      <input name="title" value="hello" />
+      <button id="native-submit" type="submit">write: native form POST</button>
+    </form>
+
+    <div id="status">status: (idle)</div>
+
+    <script>
+      const statusEl = document.getElementById('status');
+      const setStatus = (t) => {
+        statusEl.textContent = 'status: ' + t;
+      };
+
+      async function run(label, url, init) {
+        try {
+          const r = await fetch(url, init);
+          setStatus(`${label}:sent status=${r.status}`);
+        } catch (e) {
+          // An aborted (neutralized) request rejects here.
+          setStatus(`${label}:neterror ${String(e && e.name)}`);
+        }
+      }
+
+      document.getElementById('write-fetch').addEventListener('click', () => {
+        const csrf = document.querySelector('meta[name=csrf-token]')?.getAttribute('content') || '';
+        run('write-fetch', '/api/comment', {
+          method: 'POST',
+          credentials: 'include',
+          headers: {
+            'content-type': 'application/json',
+            'x-csrf-token': csrf,
+            cookie: 'session=SECRET_SHOULD_BE_REDACTED',
+          },
+          body: JSON.stringify({ comment: 'hello world', target: 42 }),
+        });
+      });
+
+      document.getElementById('gql-mutation').addEventListener('click', () => {
+        run('gql-mutation', '/graphql', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            operationName: 'AddStar',
+            query: 'mutation AddStar($id: ID!) { addStar(id: $id) { ok } }',
+            variables: { id: 'abc' },
+          }),
+        });
+      });
+
+      document.getElementById('gql-query').addEventListener('click', () => {
+        run('gql-query', '/graphql', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            operationName: 'GetList',
+            query: 'query GetList { list { id } }',
+          }),
+        });
+      });
+
+      document.getElementById('read-fetch').addEventListener('click', () => {
+        run('read-fetch', '/api/list?page=1', { method: 'GET' });
+      });
+    </script>
+  </body>
+</html>

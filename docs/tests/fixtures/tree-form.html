@@ -1,0 +1,90 @@
+<!doctype html>
+<!-- ⑨ format:'tree' 夹具(page-agent-comparison §4.2):ERP 风格表单——两个区块各有
+     多个「长相相同」的 input,只有靠版式结构(区块标题 / 挨着的 label / 说明文字)才能
+     区分。flat 列表下这些 input 几乎无法分辨;tree 视图应把结构呈现出来。
+     可观测约定:#status 记录最近一次 input 的 name,便于「操作→效果→读回确认」。 -->
+<html lang="zh">
+  <head>
+    <meta charset="utf-8" />
+    <title>tree fixture — 收货与发票</title>
+    <style>
+      body {
+        font: 14px/1.6 system-ui;
+        margin: 24px;
+        max-width: 640px;
+      }
+      fieldset {
+        margin-bottom: 20px;
+      }
+      label {
+        display: block;
+        margin-top: 8px;
+      }
+      input,
+      select {
+        width: 240px;
+      }
+      .hint {
+        color: #666;
+        font-size: 12px;
+      }
+      .card {
+        border: 1px solid #ccc;
+        padding: 12px;
+        margin-top: 12px;
+        cursor: pointer;
+      }
+      #hidden-tpl {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>订单结算</h1>
+    <p class="hint">请分别填写收货信息与发票信息(两块的字段名完全相同,只有区块能区分)。</p>
+
+    <fieldset id="shipping">
+      <legend>收货信息</legend>
+      <label>姓名 <input name="ship-name" type="text" /></label>
+      <label>电话 <input name="ship-phone" type="text" placeholder="11 位手机号" /></label>
+      <span class="hint">快递员联系用,不会公开</span>
+      <label
+        >城市
+        <select name="ship-city">
+          <option>北京</option>
+          <option>上海</option>
+          <option>广州</option>
+        </select>
+      </label>
+    </fieldset>
+
+    <fieldset id="invoice">
+      <legend>发票信息</legend>
+      <label>姓名 <input name="inv-name" type="text" /></label>
+      <label>电话 <input name="inv-phone" type="text" placeholder="11 位手机号" /></label>
+      <span class="hint">开票联系用</span>
+      <label><input name="inv-personal" type="checkbox" checked /> 个人抬头</label>
+    </fieldset>
+
+    <div class="card" id="promo" tabindex="0">
+      <b>会员日促销</b>
+      <span>下单立减 20 元</span>
+    </div>
+
+    <div id="hidden-tpl">这段文字 display:none,tree 里不应出现</div>
+
+    <button id="submit-btn" type="button">提交订单</button>
+    <div id="status">status:idle</div>
+
+    <script>
+      for (const el of document.querySelectorAll('input, select')) {
+        el.addEventListener('input', () => {
+          document.getElementById('status').textContent = 'status:input:' + el.name;
+        });
+      }
+      document.getElementById('submit-btn').addEventListener('click', () => {
+        document.getElementById('status').textContent = 'status:submitted';
+      });
+    </script>
+  </body>
+</html>

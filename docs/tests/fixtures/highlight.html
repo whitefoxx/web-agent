@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Highlighter fixture</title>
+    <style>
+      body {
+        font: 16px/1.7 system-ui;
+        max-width: 720px;
+        margin: 40px auto;
+      }
+      #status {
+        position: sticky;
+        top: 0;
+        background: #ffd;
+        border: 1px solid #cc0;
+        padding: 6px;
+        font: 13px monospace;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="status">status:idle</div>
+    <h1>Highlighter fixture</h1>
+    <p id="p1">
+      PASSAGE_ONE is the sentence the test selects, long enough to anchor against and distinct
+      enough that a re-anchor cannot land anywhere else on this page.
+    </p>
+    <p id="p2">
+      PASSAGE_TWO exists so a second highlight has somewhere to go, and so the first one has a
+      neighbour it must not be confused with.
+    </p>
+    <p>
+      Filler so the two passages are not the only text on the page, which is what makes the
+      TextQuote prefix and suffix worth anything at all.
+    </p>
+    <script>
+      // A real user selection is a gesture the bridge cannot make, so the page
+      // makes it: select a passage, then dispatch the mouseup the highlighter
+      // listens for. `?p=2` selects the second passage instead.
+      function selectPassage(id) {
+        const el = document.getElementById(id);
+        const r = document.createRange();
+        r.selectNodeContents(el);
+        const s = getSelection();
+        s.removeAllRanges();
+        s.addRange(r);
+        const box = el.getBoundingClientRect();
+        document.dispatchEvent(
+          new MouseEvent('mouseup', {
+            bubbles: true,
+            clientX: box.left + box.width / 2,
+            clientY: box.top + box.height / 2,
+          }),
+        );
+        document.getElementById('status').textContent = 'status:selected:' + id;
+      }
+      const which = new URLSearchParams(location.search).get('p') === '2' ? 'p2' : 'p1';
+      // After document_idle, so the highlighter's listeners are attached.
+      setTimeout(() => selectPassage(which), 800);
+      window.selectPassage = selectPassage;
+    </script>
+  </body>
+</html>

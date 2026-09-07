@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>web test — WebMCP</title>
+    <style>
+      body {
+        font:
+          14px system-ui,
+          sans-serif;
+        margin: 16px;
+        max-width: 760px;
+      }
+      #status {
+        position: sticky;
+        top: 0;
+        background: #ffd;
+        border: 1px solid #cc0;
+        padding: 6px;
+        font: 13px monospace;
+        z-index: 10;
+        white-space: pre-wrap;
+      }
+      code {
+        background: #f2f2f2;
+        padding: 1px 4px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="status">status:ready</div>
+
+    <h2>WebMCP fixture</h2>
+    <p>
+      Registers two page tools through <code>navigator.modelContext</code>. If the
+      browser has no native implementation, a minimal shim is installed
+      <strong>on this page only</strong> — enough to exercise
+      <code>list_webmcp_tools</code> / <code>call_webmcp_tool</code>. Which one is
+      in play is reported in <code>#status</code>, so a run always says whether it
+      tested against the real API or the shim.
+    </p>
+    <p>
+      <code>echo</code> returns its input. <code>add_item</code> has a side effect —
+      it appends to the list below and updates <code>#status</code> — so a test can
+      assert the call really ran in the page rather than trusting the return value.
+    </p>
+
+    <h3>items</h3>
+    <ul id="items"></ul>
+
+    <script>
+      const statusEl = document.getElementById('status');
+      const marks = [];
+      function mark(m) {
+        marks.push(m);
+        statusEl.textContent = 'status:' + marks.join(' ');
+      }
+
+      // Minimal shim ONLY when the browser has none. Shape mirrors the current
+      // draft: registerTool/unregisterTool plus an enumerable `tools`, which is
+      // the accessor our probe looks for first after listTools/getTools.
+      let impl = 'native';
+      if (!('modelContext' in navigator)) {
+        impl = 'shim';
+        const registry = [];
+        Object.defineProperty(navigator, 'modelContext', {
+          configurable: true,
+          value: {
+            get tools() {
+              return registry.slice();
+            },
+            listTools() {
+              return registry.slice();
+            },
+            registerTool(tool) {
+              if (registry.some((t) => t.name === tool.name)) {
+                throw new Error('duplicate tool: ' + tool.name);
+              }
+              registry.push(tool);
+            },
+            unregisterTool(name) {
+              const i = registry.findIndex((t) => t.name === name);
+              if (i >= 0) registry.splice(i, 1);
+            },
+          },
+        });
+      }
+      mark('impl=' + impl);
+
+      navigator.modelContext.registerTool({
+        name: 'echo',
+        description: 'Return the text you pass in, unchanged.',
+        inputSchema: {
+          type: 'object',
+          properties: { text: { type: 'string', description: 'anything' } },
+          required: ['text'],
+        },
+        async execute(input) {
+          mark('echo:' + (input && input.text));
+          return {
+            status: 'success',
+            output: { echoed: input && input.text },
+          };
+        },
+      });
+
+      navigator.modelContext.registerTool({
+        name: 'add_item',
+        description: 'Append an item to the visible list on this page.',
+        inputSchema: {
+          type: 'object',
+          properties: { label: { type: 'string' } },
+          required: ['label'],
+        },
+        async execute(input) {
+          const li = document.createElement('li');
+          li.textContent = String((input && input.label) ?? '');
+          document.getElementById('items').appendChild(li);
+          mark('added:' + li.textContent);
+          return {
+            status: 'success',
+            output: { count: document.getElementById('items').children.length },
+          };
+        },
+      });
+
+      mark('registered=2');
+    </script>
+  </body>
+</html>

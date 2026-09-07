@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>web test — relay client</title>
+    <style>
+      body {
+        font:
+          14px system-ui,
+          sans-serif;
+        margin: 16px;
+        max-width: 760px;
+      }
+      #status {
+        position: sticky;
+        top: 0;
+        background: #ffd;
+        border: 1px solid #cc0;
+        padding: 6px;
+        font: 13px monospace;
+        z-index: 10;
+        white-space: pre-wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="status">status:waiting-for-relay</div>
+
+    <h2>Web-app relay client</h2>
+    <p>
+      Speaks the shared relay page protocol (postMessage ↔ relay ↔ SW). Which
+      SHELL it talks to is picked by the <code>?marker=</code> query param:
+      <code>localmdConnect</code> (default — the localmd Connect extension, the
+      protocol's only carrier since WebCLI 0.3.0) or <code>webcliRelay</code>
+      (WebCLI ≤0.2.0 / dev builds) — both serve the same
+      <code>webcli:'mcp'</code> envelope, distinguished only by their DOM
+      marker / <code>ext</code> id. If this page's origin is in that
+      extension's popup <b>Web app access</b> list, the flow below runs by
+      itself on load: relay ready → <code>initialize</code> → <code>tools/list</code>
+      → one read-only <code>tools/call</code>. Every step lands in
+      <code>#status</code>; if the relay never announces (origin not added, or
+      removed), that is recorded too — the negative case is as observable as the
+      positive one.
+    </p>
+
+    <script>
+      const statusEl = document.getElementById('status');
+      const marks = [];
+      function mark(m) {
+        marks.push(m);
+        statusEl.textContent = 'status:' + marks.join(' ');
+      }
+
+      // Which shell's relay to address (dataset key). With TWO shells serving
+      // the same envelope, frames must be targeted at exactly one ext id — the
+      // marker is the synchronous, unambiguous source of that id.
+      const markerKey = new URLSearchParams(location.search).get('marker') || 'localmdConnect';
+      mark('markerKey:' + markerKey);
+
+      let ext = null;
+      let nextId = 1;
+      let started = false;
+      const pending = new Map();
+
+      // ① SYNCHRONOUS presence check — the relay stamps its marker on <html>
+      // at document_start, so this separates "not injected" from every later
+      // failure (origin refused, SW down) before any messaging happens. The
+      // marker VALUE is the ext id: adopt it immediately so every frame we send
+      // is targeted (never executed by the other shell's relay on this page).
+      const marker = document.documentElement.dataset[markerKey];
+      if (marker) ext = String(marker);
+      mark('marker:' + (marker ? String(marker).slice(0, 6) : 'none'));
+
+      function rpc(method, params) {
+        return new Promise((resolve, reject) => {
+          const id = nextId++;
+          pending.set(id, resolve);
+          setTimeout(() => {
+            if (pending.delete(id)) reject(new Error(method + ' timed out'));
+          }, 15000);
+          // Echo the ext id once known, so a dev build and the store build
+          // installed together can't both execute the same frame.
+          window.postMessage(
+            { webcli: 'mcp', dir: 'to-ext', ext, msg: { jsonrpc: '2.0', id, method, params } },
+            window.location.origin,
+          );
+        });
+      }
+
+      window.addEventListener('message', (e) => {
+        const d = e.data;
+        if (!d || d.webcli !== 'mcp' || d.dir !== 'to-page') return;
+        // Ignore the OTHER shell's frames once we know who we're talking to
+        // (both shells' relays share this envelope on a dual-install page).
+        if (ext && d.ext && d.ext !== ext) return;
+        if (!ext && d.ext) ext = d.ext; // marker missed (no-marker fallback path)
+        if (d.ready) {
+          mark('relay-ready:' + String(d.ext).slice(0, 6));
+          start();
+          return;
+        }
+        const m = d.msg;
+        // Server→client NOTIFICATIONS carry no id (the capture inbox's poke,
+        // docs/localmd-connect.md §14.2). Record them: this fixture is the only
+        // observer of the push half, and a dropped notification is otherwise
+        // indistinguishable from one that was never sent.
+        if (m && m.method && m.id === undefined) {
+          const c = m.params && m.params.count;
+          const name = m.method.replace(/^notifications\//, '');
+          mark('notify:' + name + (c === undefined ? '' : ':' + c));
+          return;
+        }
+        if (m && pending.has(m.id)) {
+          const resolve = pending.get(m.id);
+          pending.delete(m.id);
+          resolve(m);
+        }
+      });
+
+      // A notification is fire-and-forget: no id, no reply to wait for.
+      function notify(method, params) {
+        window.postMessage(
+          { webcli: 'mcp', dir: 'to-ext', ext, msg: { jsonrpc: '2.0', method, params } },
+          window.location.origin,
+        );
+      }
+
+      function start() {
+        if (started) return; // one run per load, however we detected the relay
+        started = true;
+        run();
+      }
+
+      async function run() {
+        try {
+          const init = await rpc('initialize', {});
+          mark('init:' + (init.result ? init.result.serverInfo.name : 'error'));
+          // The MCP ack, which localmd sends too — and which is what puts this
+          // page into the extension's broadcast audience (§14.2). Without it the
+          // page gets replies but never a notification.
+          notify('notifications/initialized');
+          const list = await rpc('tools/list', {});
+          mark('tools:' + (list.result ? list.result.tools.length : 'error'));
+          const call = await rpc('tools/call', {
+            name: 'generic__list_tabs',
+            arguments: {},
+          });
+          mark('call:' + (call.result && !call.result.isError ? 'ok' : 'error'));
+        } catch (e) {
+          mark('fail:' + e.message);
+        }
+      }
+
+      // ② The DOM marker does not race, so it can start the run without waiting
+      // for `ready` (whose postMessage may dispatch before our listener existed).
+      if (marker) start();
+
+      // ③ The negative case must be observable too.
+      setTimeout(() => {
+        if (!started) mark('no-relay');
+      }, 3000);
+    </script>
+  </body>
+</html>

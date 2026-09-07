@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>site-scripts 测试夹具</title>
+  </head>
+  <body style="font-family: system-ui, sans-serif; padding: 2rem">
+    <h1>site-scripts 测试夹具</h1>
+    <p>用来验证常驻站点脚本(去广告)是否真的在页面加载时注入并隐藏元素。</p>
+
+    <!-- 目标"广告"元素:site-script 用 .ss-ad 隐藏它 -->
+    <div class="ss-ad" id="ad" style="padding: 1rem; background: #fdd; border: 2px solid #c00">
+      🔴 AD BANNER(应被 site-script 隐藏)
+    </div>
+    <div id="content" style="padding: 1rem; background: #dfd">✅ 正常内容(不该被隐藏)</div>
+
+    <!-- 观测点:加载后把 .ss-ad 的 computed display + 注入 style 是否存在写进这里 -->
+    <pre
+      id="ss-status"
+      style="margin-top: 1rem; padding: 0.6rem; background: #f2f2f2"
+    >
+pending</pre
+    >
+
+    <script>
+      function report() {
+        var ad = document.getElementById('ad');
+        var disp = ad ? getComputedStyle(ad).display : 'no-el';
+        var injected = document.querySelector('style[data-web-site-script]') ? 'yes' : 'no';
+        document.getElementById('ss-status').textContent =
+          'ad-display:' + disp + ' | injected:' + injected;
+      }
+      addEventListener('DOMContentLoaded', function () {
+        setTimeout(report, 250);
+      });
+    </script>
+  </body>
+</html>

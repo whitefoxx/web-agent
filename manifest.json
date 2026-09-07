@@ -1,0 +1,54 @@
+{
+  "manifest_version": 3,
+  "name": "Web Agent",
+  "version": "0.0.1",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA6pGydjqqVXtjkpoi02Qyn9VV643sL304Xw6PbOqzamnUTLHOCDz96/t2EQEnPo66jX7TCW6zkhsJpcJlQiGg08qsiT2szKgY4RHM+56arU9wj9xPZCUIiXVYEI/ZqfkPvPsWLjvAtWTdZ5a004wcpaRDvLjrfc5bKquPvPgW0nIAftPMnTrViXdmjdyHqHglrQa5VjdH8t47sr/CZtusOBesVShEic9o+6ioEbtZ9+c1efw8pUOwlsktBZaEhwVYoCYk9GSZHEyzLmVg4Zw2PirPLL2Cp4K169Kea342f/1AqNlW9b4iw69g4JIfX6KNuAKZEGG69kMEO6QhLaQWwQIDAQAB",
+  "description": "An AI agent in your side panel that drives your real, signed-in Chrome — reads pages, clicks, fills forms, learns new sites.",
+  "permissions": [
+    "sidePanel",
+    "debugger",
+    "tabs",
+    "tabGroups",
+    "scripting",
+    "storage",
+    "cookies",
+    "downloads",
+    "userScripts",
+    "offscreen",
+    "notifications",
+    "alarms"
+  ],
+  "host_permissions": ["<all_urls>"],
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "background": {
+    "service_worker": "src/background/service-worker.ts",
+    "type": "module"
+  },
+  "side_panel": {
+    "default_path": "src/sidepanel/index.html"
+  },
+  "action": {
+    "default_title": "Web Agent",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
+  },
+  "externally_connectable": {
+    "matches": ["http://localhost:5173/*"]
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["userscript-runner.js"],
+      "matches": ["<all_urls>"]
+    }
+  ],
+  "minimum_chrome_version": "138"
+}

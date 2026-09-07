@@ -1,0 +1,10 @@
+dist
+node_modules
+package-lock.json
+
+# Adapter files imported from xiaohongshu-operator — kept byte-identical with upstream
+# so re-sync is just a cp. Don't reformat them here.
+src/tools/**/*.js
+
+# Captured DeepSeek HTML samples used as connector-selector references.
+deepseek-*.html

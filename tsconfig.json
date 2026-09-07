@@ -1,0 +1,55 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "types": [
+      "chrome",
+      "node"
+    ],
+    "jsx": "react-jsx",
+    "jsxImportSource": "preact",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "verbatimModuleSyntax": false,
+    "isolatedModules": true,
+    "allowJs": true,
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      "@base/*": [
+        "web-tools/src/*"
+      ],
+      "@jackwener/opencli/registry": [
+        "web-tools/src/runtime/registry.js"
+      ],
+      "@jackwener/opencli/errors": [
+        "web-tools/src/runtime/errors.js"
+      ],
+      "@jackwener/opencli/utils": [
+        "src/runtime/opencli/utils.ts"
+      ],
+      "@jackwener/opencli/logger": [
+        "src/runtime/opencli/logger.ts"
+      ],
+      "@jackwener/opencli/types": [
+        "src/runtime/opencli/types.ts"
+      ],
+      "@jackwener/opencli/pipeline": [
+        "src/runtime/opencli/pipeline.ts"
+      ]
+    }
+  },
+  "include": [
+    "src"
+  ]
+}

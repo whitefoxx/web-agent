@@ -1,0 +1,149 @@
+#!/usr/bin/env node
+/**
+ * Import opencli adapter files into this repo as fully-independent copies.
+ * Rewrites `@jackwener/opencli/*` imports to local runtime shims so the
+ * copied files have zero dependency on the opencli package.
+ *
+ * Usage:
+ *   node scripts/import-adapter.mjs <adapter.js> [adapter.js ...]
+ *
+ * Example:
+ *   node scripts/import-adapter.mjs \
+ *     ../opencli/clis/xiaohongshu/search.js \
+ *     ../opencli/clis/xiaohongshu/note.js \
+ *     ../opencli/clis/xiaohongshu/comments.js \
+ *     ../opencli/clis/xiaohongshu/user.js
+ *
+ * Each adapter file is dropped into `src/tools/<site>/<file>.js`. Any
+ * sibling `*-helpers.js` referenced via relative import is copied alongside.
+ * `src/tools/<site>/_all.ts` is regenerated to import every adapter (any
+ * .js file that calls cli(...)), which triggers their top-level
+ * registration on side-panel startup.
+ */
+
+import { readFile, writeFile, mkdir, readdir } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { basename, dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+
+// As of the opencli-compat work, adapter files are copied VERBATIM — their
+// `@jackwener/opencli/<subpath>` imports resolve at build time through the
+// Vite `resolve.alias` (and tsconfig `paths`) entries pointing at our local
+// browser-safe shims (src/runtime/registry.js, errors.js, opencli/utils.ts,
+// opencli/logger.ts, opencli/types.ts). No import rewriting needed — keep the
+// copy byte-identical so re-imports diff cleanly against upstream.
+const REWRITES = [];
+
+// opencli subpaths we provide a browser shim for. Anything OUTSIDE this set
+// (download/*, browser/*, pipeline, …) has no shim and the adapter will fail
+// to resolve — flag it so the importer knows manual work is required.
+const SHIMMED_SUBPATHS = new Set(['registry', 'errors', 'utils', 'logger', 'types', 'pipeline']);
+
+// Imports that signal the adapter needs manual surgery before it can run in an
+// extension (node-only APIs, or opencli subpaths without a browser shim yet).
+const HARD_BLOCKS = [
+  /\bnode:fs\b/,
+  /\bnode:os\b/,
+  /\bnode:path\b/,
+  /\bnode:child_process\b/,
+];
+
+const touchedSites = new Set();
+
+async function importOne(srcPath) {
+  const src = resolve(srcPath);
+  if (!existsSync(src)) throw new Error(`not found: ${src}`);
+  const text = await readFile(src, 'utf8');
+
+  // Infer (site) from .../clis/<site>/<file>
+  const parts = src.split('/');
+  const clisIdx = parts.lastIndexOf('clis');
+  if (clisIdx < 0 || clisIdx + 2 > parts.length - 1) {
+    throw new Error(`cannot infer site from path: ${src} (expected .../clis/<site>/<file.js>)`);
+  }
+  const site = parts[clisIdx + 1];
+  const file = parts[parts.length - 1];
+  touchedSites.add(site);
+
+  const warnings = [];
+  for (const block of HARD_BLOCKS) {
+    if (block.test(text)) warnings.push(block.source);
+  }
+  // Flag any @jackwener/opencli/<subpath> we don't have a browser shim for.
+  for (const m of text.matchAll(/@jackwener\/opencli\/([a-zA-Z][a-zA-Z/-]*)/g)) {
+    const sub = m[1].split('/')[0];
+    if (!SHIMMED_SUBPATHS.has(sub)) warnings.push(`@jackwener/opencli/${m[1]} (no shim)`);
+  }
+  if (warnings.length) {
+    console.warn(
+      `⚠️  ${file}: needs attention [${[...new Set(warnings)].join(', ')}] — copying anyway, manual fix may be required`,
+    );
+  }
+
+  let rewritten = text;
+  for (const [from, to] of REWRITES) rewritten = rewritten.replace(from, to);
+
+  const destDir = join(ROOT, 'src', 'tools', site);
+  await mkdir(destDir, { recursive: true });
+  const dest = join(destDir, file);
+  await writeFile(dest, rewritten);
+  console.log(`✓ ${site}/${file}`);
+
+  // Pull in sibling helpers referenced by relative imports.
+  const relImports = [...rewritten.matchAll(/from\s+['"](\.\/[^'"]+)['"]/g)].map((m) => m[1]);
+  for (const rel of relImports) {
+    const helperSrc = resolve(dirname(src), rel);
+    if (!existsSync(helperSrc)) continue;
+    const helperBase = basename(helperSrc);
+    const helperDest = join(destDir, helperBase);
+    if (existsSync(helperDest)) continue;
+    const helperText = await readFile(helperSrc, 'utf8');
+    let helperRewritten = helperText;
+    for (const [from, to] of REWRITES) helperRewritten = helperRewritten.replace(from, to);
+    await writeFile(helperDest, helperRewritten);
+    console.log(`  ✓ ${site}/${helperBase} (helper)`);
+  }
+}
+
+async function regenerateAllForSite(site) {
+  const dir = join(ROOT, 'src', 'tools', site);
+  const entries = await readdir(dir);
+  const adapters = [];
+  for (const f of entries) {
+    if (!f.endsWith('.js')) continue;
+    if (f.startsWith('_')) continue;
+    const body = await readFile(join(dir, f), 'utf8');
+    if (/\bcli\s*\(\s*\{/.test(body)) adapters.push(f);
+  }
+  adapters.sort();
+  const lines = [
+    '// AUTO-GENERATED by scripts/import-adapter.mjs',
+    '// Importing each adapter triggers its top-level cli({...}) registration.',
+    '',
+    ...adapters.map((f) => `import './${f}';`),
+    '',
+  ];
+  await writeFile(join(dir, '_all.ts'), lines.join('\n'));
+  console.log(`✓ ${site}/_all.ts (${adapters.length} adapters)`);
+}
+
+const argv = process.argv.slice(2);
+if (argv.length === 0) {
+  console.error('Usage: node scripts/import-adapter.mjs <adapter.js> [adapter.js ...]');
+  process.exit(1);
+}
+
+for (const arg of argv) {
+  try {
+    await importOne(arg);
+  } catch (e) {
+    console.error(`✗ ${arg}: ${e.message}`);
+    process.exit(1);
+  }
+}
+
+for (const site of touchedSites) {
+  await regenerateAllForSite(site);
+}

@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>primitives fixture</title>
+    <style>
+      body {
+        font: 14px system-ui, sans-serif;
+        padding: 16px;
+        max-width: 640px;
+      }
+      .box {
+        padding: 12px;
+        margin: 10px 0;
+        border: 1px solid #ccc;
+        border-radius: 6px;
+      }
+      .box h3 {
+        margin: 0 0 8px;
+        font-size: 13px;
+        color: #555;
+      }
+      #dragSrc {
+        display: inline-block;
+        padding: 8px 14px;
+        background: #cde;
+        cursor: grab;
+        user-select: none;
+      }
+      #dropZone {
+        min-height: 44px;
+        margin-top: 8px;
+        padding: 8px;
+        background: #fafafa;
+        border: 2px dashed #aaa;
+      }
+      #rcTarget,
+      #dcTarget {
+        display: inline-block;
+        padding: 8px 14px;
+        margin-right: 8px;
+        background: #efe;
+        user-select: none;
+        cursor: pointer;
+      }
+      #status {
+        margin-top: 14px;
+        padding: 10px;
+        background: #eef;
+        font-family: ui-monospace, monospace;
+        white-space: pre-wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>primitives test fixture</h1>
+    <p>Each action writes its effect into <code>#status</code> so a read tool can confirm it end-to-end.</p>
+
+    <!-- handle_dialog: these BLOCK the tab unless handle_dialog is armed first -->
+    <div class="box">
+      <h3>handle_dialog — arm BEFORE clicking, or the native dialog blocks the tab</h3>
+      <button id="confirmBtn">confirm()</button>
+      <button id="promptBtn">prompt()</button>
+      <button id="alertBtn">alert()</button>
+    </div>
+
+    <!-- file_upload -->
+    <div class="box">
+      <h3>file_upload — set a file into this input</h3>
+      <input id="fileInput" type="file" />
+    </div>
+
+    <!-- drag_and_drop -->
+    <div class="box">
+      <h3>drag_and_drop — drag #dragSrc onto #dropZone</h3>
+      <div id="dragSrc" draggable="true">DRAG ME (#dragSrc)</div>
+      <div id="dropZone">DROP HERE (#dropZone)</div>
+    </div>
+
+    <!-- click button / count -->
+    <div class="box">
+      <h3>click — right-click / double-click</h3>
+      <div id="rcTarget">right-click me (#rcTarget)</div>
+      <div id="dcTarget">double-click me (#dcTarget)</div>
+    </div>
+
+    <div id="status">status: (idle)</div>
+
+    <script>
+      const statusEl = document.getElementById('status');
+      const say = (t) => (statusEl.textContent = 'status: ' + t);
+
+      // handle_dialog targets. If handle_dialog isn't armed, these show a real
+      // blocking dialog (the deadlock the tool exists to prevent).
+      document.getElementById('confirmBtn').addEventListener('click', () => {
+        say('confirm:' + window.confirm('proceed?'));
+      });
+      document.getElementById('promptBtn').addEventListener('click', () => {
+        say('prompt:' + window.prompt('your name?', 'default'));
+      });
+      document.getElementById('alertBtn').addEventListener('click', () => {
+        window.alert('hello');
+        say('alert:shown');
+      });
+
+      // file_upload target.
+      document.getElementById('fileInput').addEventListener('change', function () {
+        const f = this.files && this.files[0];
+        say(f ? 'file:' + f.name + ':' + f.size : 'file:none');
+      });
+
+      // drag_and_drop targets (HTML5 DnD). The shared DataTransfer round-trips the payload.
+      const src = document.getElementById('dragSrc');
+      const zone = document.getElementById('dropZone');
+      src.addEventListener('dragstart', (e) => {
+        e.dataTransfer.setData('text/plain', 'dragSrc');
+        say('dragstart');
+      });
+      zone.addEventListener('dragover', (e) => e.preventDefault());
+      zone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        say('dropped:' + (e.dataTransfer.getData('text/plain') || '?'));
+      });
+
+      // click button/count targets.
+      document.getElementById('rcTarget').addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        say('contextmenu:rcTarget');
+      });
+      document.getElementById('dcTarget').addEventListener('dblclick', () => {
+        say('dblclick:dcTarget');
+      });
+    </script>
+  </body>
+</html>

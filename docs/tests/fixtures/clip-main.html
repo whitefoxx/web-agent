@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Declared Main</title>
+  </head>
+  <body>
+    <nav>NAV_DROPPED</nav>
+    <div class="side">SIDEBAR_OUTSIDE_MAIN</div>
+    <!-- A page that DECLARES its main content. The density scorer must not run
+         inside it: an early version did, and on MDN it kept the long list and
+         threw away the short intro (findings F-51). INTRO_KEPT is the tripwire. -->
+    <main>
+      <h1>Declared Main</h1>
+      <p>INTRO_KEPT. A short introduction, the kind a density scorer loses to a long list.</p>
+      <div class="methods">
+        <ul>
+          <li>
+            LIST_ITEM_ONE with enough text to count toward a density score, comfortably past the
+            twenty-five character floor that the scorer applies.
+          </li>
+          <li>
+            LIST_ITEM_TWO with enough text to count toward a density score, comfortably past the
+            twenty-five character floor that the scorer applies.
+          </li>
+          <li>
+            LIST_ITEM_THREE with enough text to count toward a density score, comfortably past the
+            twenty-five character floor that the scorer applies.
+          </li>
+        </ul>
+      </div>
+    </main>
+    <footer>FOOTER_DROPPED</footer>
+  </body>
+</html>

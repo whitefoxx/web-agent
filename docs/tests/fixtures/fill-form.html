@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>web test — fill_form</title>
+    <style>
+      body {
+        font:
+          14px system-ui,
+          sans-serif;
+        margin: 16px;
+        max-width: 760px;
+      }
+      h2 {
+        margin: 20px 0 6px;
+      }
+      .row {
+        margin: 8px 0;
+      }
+      label {
+        display: inline-block;
+        min-width: 150px;
+      }
+      /* Sticky so effects stay observable via get_page_text after an action. */
+      #status {
+        position: sticky;
+        top: 0;
+        background: #ffd;
+        border: 1px solid #cc0;
+        padding: 6px;
+        font: 13px monospace;
+        z-index: 10;
+        white-space: pre-wrap;
+      }
+      #note {
+        border: 1px solid #99f;
+        padding: 6px;
+        min-height: 22px;
+      }
+      #dump {
+        background: #f4f4f4;
+        border: 1px solid #ccc;
+        padding: 6px;
+        font: 12px monospace;
+        white-space: pre-wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="status">status:ready</div>
+
+    <h2>fill_form fixture</h2>
+    <p>
+      Every field records the events it received into <code>#status</code>, and
+      <code>#dump</code> mirrors the live values — so a test can assert
+      <em>fill → effect → read back</em> rather than just <code>filled:3</code>.
+    </p>
+
+    <form id="theForm" onsubmit="onSubmit(event)">
+      <div class="row">
+        <label for="name">text</label>
+        <input id="name" name="name" type="text" placeholder="name" />
+      </div>
+      <div class="row">
+        <label for="email">email</label>
+        <input id="email" name="email" type="email" placeholder="email" />
+      </div>
+      <div class="row">
+        <label for="bio">textarea</label>
+        <textarea id="bio" name="bio" rows="2" cols="30"></textarea>
+      </div>
+      <div class="row">
+        <label for="country">select</label>
+        <select id="country" name="country">
+          <option value="">— pick one —</option>
+          <option value="cn">China</option>
+          <option value="us">United States</option>
+          <option value="jp">Japan</option>
+        </select>
+      </div>
+      <div class="row">
+        <label for="tos">checkbox</label>
+        <input id="tos" name="tos" type="checkbox" />
+      </div>
+      <div class="row">
+        <label for="ship">radio</label>
+        <input id="ship" name="speed" type="radio" value="ship" />
+        <label for="air" style="min-width: 0">air</label>
+        <input id="air" name="speed" type="radio" value="air" />
+      </div>
+      <div class="row">
+        <label for="note">contenteditable</label>
+        <div id="note" contenteditable="true"></div>
+      </div>
+      <div class="row">
+        <!-- Mimics React's value tracker: an OWN `value` accessor shadowing the
+             prototype's. A naive `el.value = x` goes through this and the app
+             would see it; the prototype-setter path fill_form uses bypasses it,
+             which is exactly what makes controlled inputs work. `#status` records
+             which path wrote, so the test can tell them apart. -->
+        <label for="tracked">tracked (React-like)</label>
+        <input id="tracked" name="tracked" type="text" />
+      </div>
+      <div class="row">
+        <button type="submit" id="submitBtn">Submit</button>
+      </div>
+    </form>
+
+    <h2>live values</h2>
+    <pre id="dump">—</pre>
+
+    <script>
+      const statusEl = document.getElementById('status');
+      const marks = [];
+      function mark(m) {
+        marks.push(m);
+        statusEl.textContent = 'status:' + marks.join(' ');
+        // Refresh the mirror SYNCHRONOUSLY here, never only on a timer: this page
+        // is normally read in a BACKGROUND tab, where Chrome throttles
+        // setInterval to roughly once a minute — a timer-driven #dump reads one
+        // fill stale and looks exactly like a tool that didn't write. Same family
+        // as findings F-27 (background tab + rAF). The interval below is only a
+        // backstop for state changed without an event.
+        if (typeof dump === 'function') dump();
+      }
+
+      // Install the React-style own-property tracker on #tracked.
+      (function trackValue() {
+        const el = document.getElementById('tracked');
+        const proto = Object.getPrototypeOf(el);
+        const desc = Object.getOwnPropertyDescriptor(proto, 'value');
+        let current = el.value;
+        Object.defineProperty(el, 'value', {
+          configurable: true,
+          get() {
+            return desc.get.call(el);
+          },
+          set(v) {
+            // Reached only by a NAIVE write (el.value = x). fill_form must not
+            // land here — it calls the prototype setter directly.
+            mark('tracked:own-setter');
+            desc.set.call(el, v);
+            current = v;
+          },
+        });
+        el.addEventListener('input', () => {
+          const seen = desc.get.call(el);
+          mark('tracked:input=' + seen + (seen !== current ? ':bypassed-tracker' : ''));
+          current = seen;
+        });
+      })();
+
+      for (const id of ['name', 'email', 'bio']) {
+        const el = document.getElementById(id);
+        el.addEventListener('input', () => mark(id + ':input'));
+        el.addEventListener('change', () => mark(id + ':change'));
+      }
+      document
+        .getElementById('country')
+        .addEventListener('change', (e) => mark('country:change=' + e.target.value));
+      document
+        .getElementById('tos')
+        .addEventListener('change', (e) => mark('tos:change=' + e.target.checked));
+      for (const id of ['ship', 'air']) {
+        document
+          .getElementById(id)
+          .addEventListener('change', (e) => mark(id + ':change=' + e.target.checked));
+      }
+      document.getElementById('note').addEventListener('input', () => mark('note:input'));
+
+      function dump() {
+        const g = (id) => document.getElementById(id);
+        document.getElementById('dump').textContent = [
+          'name=' + g('name').value,
+          'email=' + g('email').value,
+          'bio=' + g('bio').value,
+          'country=' + g('country').value,
+          'tos=' + g('tos').checked,
+          'ship=' + g('ship').checked,
+          'air=' + g('air').checked,
+          'note=' + g('note').innerText,
+          'tracked=' + Object.getOwnPropertyDescriptor(
+            Object.getPrototypeOf(g('tracked')),
+            'value',
+          ).get.call(g('tracked')),
+        ].join('\n');
+      }
+      setInterval(dump, 250);
+      dump();
+
+      // Do NOT navigate — a submit that reloads would wipe #status mid-assertion.
+      function onSubmit(e) {
+        e.preventDefault();
+        mark('form:submitted');
+      }
+    </script>
+  </body>
+</html>

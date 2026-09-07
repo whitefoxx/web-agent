@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>web test — scroll</title>
+    <style>
+      body {
+        font:
+          14px system-ui,
+          sans-serif;
+        margin: 0;
+      }
+      .tall {
+        min-height: 4000px;
+        background: linear-gradient(#fff, #dde);
+        padding: 16px;
+      }
+      /* An inner overflow container (chat-message-list shape) for ⑤b. */
+      #inner {
+        overflow: auto;
+        height: 220px;
+        width: 340px;
+        border: 2px solid #44a;
+        margin: 16px 0;
+      }
+      #inner .content {
+        height: 1600px;
+        background: repeating-linear-gradient(#eef, #eef 40px, #dde 40px, #dde 80px);
+        padding: 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="tall">
+      <h2 id="top">scroll fixture — window is ~4000px tall</h2>
+      <p>
+        Tests ⑤ window scroll-state (get_interactives.scroll) + scroll_page window mode, and ⑤b the
+        inner overflow container below (get_interactives.scrollables + scroll_page {ref}).
+      </p>
+      <div id="inner" aria-label="inner scroll panel">
+        <div class="content">
+          <div id="inner-top">inner container — top</div>
+          <div id="inner-bottom" style="margin-top: 1500px">inner container — bottom</div>
+        </div>
+      </div>
+      <div id="midmarker" style="margin-top: 1800px">window middle marker</div>
+    </div>
+    <div id="bottommarker">window bottom marker</div>
+  </body>
+</html>

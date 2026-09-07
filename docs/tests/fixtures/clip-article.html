@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fallback Title — Should Lose To OG</title>
+    <link rel="canonical" href="http://localhost:8123/clip-article.html?canonical=1" />
+    <meta property="og:title" content="The Density Scorer Article" />
+    <meta property="og:site_name" content="Fixture Press" />
+    <meta property="og:image" content="hero.png" />
+    <meta name="description" content="A fixture article for the clipper." />
+    <meta name="author" content="Ada Fixture" />
+    <meta property="article:published_time" content="2026-01-02T03:04:05Z" />
+    <script type="application/ld+json">
+      { "@type": "Article", "dateModified": "2026-02-03", "keywords": "clip,test" }
+    </script>
+    <style>
+      body {
+        font: 15px/1.6 system-ui;
+        max-width: 900px;
+        margin: 20px auto;
+      }
+      .side,
+      .comments {
+        color: #666;
+      }
+    </style>
+  </head>
+  <body>
+    <nav id="nav"><a href="/nav.html">NAVLINK_SHOULD_BE_DROPPED</a></nav>
+    <header>HEADER_SHOULD_BE_DROPPED</header>
+    <!-- NO semantic root on purpose: that is the only shape the density scorer
+         applies to (a page that declares <main> is taken at its word — see
+         findings F-51). It must narrow to .article, dropping the sidebar and
+         the comment chrome; mode:"full" keeps both. -->
+    <div id="layout">
+      <div class="side">
+        <ul>
+          <li>Related: <a href="/a.html">SIDEBAR_LINK_A</a></li>
+          <li>More: <a href="/b.html">SIDEBAR_LINK_B</a></li>
+          <li>Also: <a href="/c.html">SIDEBAR_LINK_C</a></li>
+        </ul>
+      </div>
+      <div class="article">
+        <h1>The Density Scorer Article</h1>
+        <p>
+          ARTICLE_BODY_ONE. This paragraph is long enough to count toward the density score, which
+          needs at least twenty-five characters before it credits the parent element at all.
+        </p>
+        <p>
+          ARTICLE_BODY_TWO with a <a href="/item?id=7">RELATIVE_LINK</a> that must come back
+          absolute, and an <a href="http://example.com/x">ABSOLUTE_LINK</a> that must stay as it is.
+        </p>
+        <p>
+          ARTICLE_BODY_THREE closes it out with enough prose to keep the article block well ahead of
+          the sidebar and the comments in the scoring pass.
+        </p>
+        <img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" data-src="hero.png" alt="Hero" />
+        <p hidden>HIDDEN_SHOULD_BE_DROPPED</p>
+        <blockquote>QUOTED_LINE</blockquote>
+        <pre><code>const x = 1;</code></pre>
+        <table>
+          <tr>
+            <th>K</th>
+            <th>V</th>
+          </tr>
+          <tr>
+            <td>1</td>
+            <td>2</td>
+          </tr>
+        </table>
+      </div>
+      <div class="comments"><p>COMMENT_SHOULD_BE_DROPPED — nice post!</p></div>
+    </div>
+    <footer>FOOTER_SHOULD_BE_DROPPED</footer>
+  </body>
+</html>

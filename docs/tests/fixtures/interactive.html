@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>web test — interactive</title>
+    <style>
+      body {
+        font:
+          14px system-ui,
+          sans-serif;
+        margin: 16px;
+        max-width: 760px;
+      }
+      h2 {
+        margin: 20px 0 6px;
+      }
+      .row {
+        margin: 8px 0;
+      }
+      /* Sticky so effects are visible/observable via get_page_text after an action. */
+      #status {
+        position: sticky;
+        top: 0;
+        background: #ffd;
+        border: 1px solid #cc0;
+        padding: 6px;
+        font: 13px monospace;
+        z-index: 10;
+      }
+      button,
+      a,
+      .ctl {
+        margin-right: 8px;
+      }
+      .ctl {
+        display: inline-block;
+        cursor: pointer;
+        border: 1px solid #88f;
+        padding: 4px 8px;
+        border-radius: 4px;
+      }
+      #card {
+        cursor: pointer;
+        border: 1px solid #4a4;
+        padding: 8px;
+        display: inline-block;
+      }
+      .modal {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.45);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 100;
+      }
+      .modal.open {
+        display: flex;
+      }
+      .modal .box {
+        background: #fff;
+        padding: 20px;
+        border-radius: 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- The last interaction is written here as `status: <event>:<id>` so a real-tool
+         test can read it back (get_page_text / get_html) and assert the effect actually
+         fired — not merely that the tool returned found:true. -->
+    <div id="status">status: (idle)</div>
+
+    <h2>native controls</h2>
+    <div class="row">
+      <button id="nb">Native Button</button>
+      <a id="na" href="#na-target">Native Link</a>
+    </div>
+    <div class="row">
+      <input id="ni" type="text" placeholder="native input" aria-label="native input" />
+      <select id="ns" aria-label="native select">
+        <option>one</option>
+        <option>two</option>
+      </select>
+    </div>
+    <div class="row">
+      <div
+        id="ce"
+        contenteditable="true"
+        aria-label="rich editor"
+        style="border: 1px solid #999; min-height: 22px; padding: 4px"
+      >
+        edit me
+      </div>
+    </div>
+
+    <h2>custom clickables (① cursor / role / onclick / tabindex)</h2>
+    <div class="row">
+      <!-- only reacts to mousedown / pointerdown → proves the ② real event sequence -->
+      <span id="md" class="ctl">mousedown-only</span>
+      <span id="po" class="ctl">pointerdown-only</span>
+      <span id="oc" class="ctl">onclick div</span>
+      <span id="rm" role="menuitem" class="ctl">role=menuitem</span>
+      <span id="tb" tabindex="0" class="ctl">tabindex</span>
+      <div id="card"><span id="cspan">clickable card (inner span)</span></div>
+    </div>
+
+    <h2>occlusion (H10-P1) — open the modal, then get_interactives</h2>
+    <div class="row">
+      <button id="under">Covered Button</button>
+      <button id="openModal">Open Modal</button>
+    </div>
+    <div id="modal" class="modal">
+      <div class="box">
+        <button id="inModal">Button inside modal</button>
+        <button id="closeModal">Close</button>
+      </div>
+    </div>
+
+    <a id="na-target"></a>
+    <script>
+      const status = document.getElementById('status');
+      const say = (ev, id) => (status.textContent = 'status: ' + ev + ':' + id);
+      const on = (id, ev) => document.getElementById(id).addEventListener(ev, () => say(ev, id));
+      on('nb', 'click');
+      on('na', 'click');
+      on('md', 'mousedown'); // NOT click — bare el.click() would miss this
+      on('po', 'pointerdown'); // NOT click — same
+      on('oc', 'click');
+      on('rm', 'click');
+      on('tb', 'click');
+      document.getElementById('card').addEventListener('click', () => say('click', 'card'));
+      document
+        .getElementById('ni')
+        .addEventListener('input', (e) => say('input', 'ni=' + e.target.value));
+      document
+        .getElementById('ce')
+        .addEventListener('input', () =>
+          say('input', 'ce=' + document.getElementById('ce').innerText),
+        );
+      document.getElementById('under').addEventListener('click', () => say('click', 'under'));
+      document.getElementById('inModal').addEventListener('click', () => say('click', 'inModal'));
+      document
+        .getElementById('openModal')
+        .addEventListener('click', () => document.getElementById('modal').classList.add('open'));
+      document
+        .getElementById('closeModal')
+        .addEventListener('click', () => document.getElementById('modal').classList.remove('open'));
+    </script>
+  </body>
+</html>

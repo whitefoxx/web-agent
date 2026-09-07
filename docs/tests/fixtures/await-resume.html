@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>③b await_user_action 自动续跑测试</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        padding: 2rem;
+        max-width: 40rem;
+        line-height: 1.6;
+      }
+      button {
+        font-size: 1rem;
+        padding: 0.6rem 1rem;
+        cursor: pointer;
+      }
+      #slot:not(:empty) {
+        margin-top: 1rem;
+        color: green;
+        font-weight: bold;
+      }
+      code {
+        background: #f2f2f2;
+        padding: 0 0.3rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>③b 自动续跑测试夹具</h1>
+    <p>
+      对本页调用
+      <code>await_user_action(objective, tab_id, wait_for_selector: "#logged-in")</code>
+      后,系统会每 ~700ms 轮询本页。点下面的按钮让 <code>#logged-in</code> 出现 →
+      接手应<b>自动续跑</b>(无需点「我已完成」)。这就是"登录后头像出现即续跑"的确定性等价。
+    </p>
+    <button id="fake-login">模拟登录(让 #logged-in 出现)</button>
+    <div id="slot"></div>
+    <!-- disappear 变体:也可对 #login-box 用 wait_until:"disappear",点按钮后它会被移除。 -->
+    <div id="login-box" style="display: none">登录框(disappear 变体用)</div>
+    <script>
+      document.getElementById('fake-login').addEventListener('click', function () {
+        document.getElementById('slot').innerHTML =
+          '<div id="logged-in">✅ #logged-in 已出现 —— 接手应自动续跑</div>';
+        var box = document.getElementById('login-box');
+        if (box) box.remove();
+      });
+    </script>
+  </body>
+</html>

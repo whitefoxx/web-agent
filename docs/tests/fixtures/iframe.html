@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>iframe fixture — frame ref semantics</title>
+    <style>
+      body {
+        font:
+          14px/1.5 system-ui,
+          sans-serif;
+        margin: 2rem;
+      }
+      iframe {
+        display: block;
+        margin-top: 1rem;
+        border: 2px solid #888;
+      }
+      #tstatus {
+        margin: 0.5rem 0;
+        font-family: ui-monospace, monospace;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>iframe parent (top frame)</h1>
+    <p>
+      Top-frame controls plus a same-origin child iframe. `get_interactives` must return BOTH — the
+      child's elements with a frame-prefixed ref (`f&lt;id&gt;…`) — and `click` / `type_into` must
+      reach into the child frame. (Even a same-origin iframe is invisible to top-frame-only
+      injection: its content is a separate document.)
+    </p>
+
+    <button id="topbtn">TOP BUTTON</button>
+    <div id="tstatus">top:idle</div>
+
+    <iframe src="iframe-child.html" width="520" height="240" title="child frame"></iframe>
+
+    <script>
+      document.getElementById('topbtn').addEventListener('click', () => {
+        document.getElementById('tstatus').textContent = 'top:clicked';
+      });
+    </script>
+  </body>
+</html>

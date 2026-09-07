@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>iframe child</title>
+    <style>
+      body {
+        font:
+          13px/1.5 system-ui,
+          sans-serif;
+        margin: 0.8rem;
+        background: #f6f8ff;
+      }
+      #cstatus {
+        margin-top: 0.5rem;
+        font-family: ui-monospace, monospace;
+      }
+    </style>
+  </head>
+  <body>
+    <h2>child frame content</h2>
+    <button id="cbtn">IFRAME BUTTON</button>
+    <input id="cinput" placeholder="type into the iframe" />
+    <div id="cstatus">child:idle</div>
+    <script>
+      document.getElementById('cbtn').addEventListener('click', () => {
+        document.getElementById('cstatus').textContent = 'child:clicked';
+      });
+      // input events (from type_into) surface into the status so the parent can
+      // read the effect via the same-origin contentDocument pivot.
+      document.getElementById('cinput').addEventListener('input', (e) => {
+        document.getElementById('cstatus').textContent = 'child:typed:' + e.target.value;
+      });
+    </script>
+  </body>
+</html>

@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Web Agent — adapter sandbox</title>
+  </head>
+  <body>
+    <!-- Hidden, headless sandbox. Embedded as an iframe by the SidePanel.
+         Its only purpose is to eval untrusted adapter source in an isolated,
+         chrome-API-less, opaque-origin context (MV3 sandbox.pages). -->
+    <script type="module" src="./eval-host.ts"></script>
+  </body>
+</html>

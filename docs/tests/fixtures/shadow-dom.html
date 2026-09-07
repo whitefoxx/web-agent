@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<title>shadow-dom fixture — open shadow / hover / 遮挡 / 键盘</title>
+<style>
+  body { font: 14px/1.5 system-ui; margin: 24px; }
+  #status { padding: 8px; background: #f5f5f5; border: 1px solid #ccc; min-height: 1.5em; }
+  /* CSS :hover 菜单(合成 mouseover 触发不了 :hover;只有 trusted 指针能) */
+  .hovermenu { position: relative; display: inline-block; margin-top: 16px; }
+  .hovermenu .menu { display: none; position: absolute; left: 0; top: 100%; background: #fff;
+    border: 1px solid #888; padding: 4px; z-index: 10; }
+  .hovermenu:hover .menu { display: block; }
+  /* 遮挡横幅:盖住下面的按钮 */
+  #banner { position: fixed; left: 0; right: 0; bottom: 0; height: 120px; background: rgba(20,20,60,.92);
+    color: #fff; display: flex; align-items: center; justify-content: center; gap: 12px; z-index: 100; }
+</style>
+</head>
+<body>
+<h1>shadow-dom fixture</h1>
+<p>每次交互把标记追加到 <code>#status</code>,读工具可端到端断言。</p>
+<div id="status">ready</div>
+
+<!-- ① 单层 open shadow:按钮 / 自定义可点 / select / 输入框 -->
+<div id="host1"></div>
+
+<!-- ② 两层嵌套 shadow:链接 + 按钮 -->
+<div id="host2"></div>
+
+<!-- ③ CSS :hover 菜单(light DOM)-->
+<div class="hovermenu" id="hovertrigger">
+  <span style="cursor:pointer">hover 我展开菜单</span>
+  <div class="menu"><button id="menuitem">菜单项A</button></div>
+</div>
+
+<!-- ④ 键盘:Escape / ArrowDown 监听 -->
+<div style="margin-top:16px">
+  <input id="kbd" placeholder="focus 后按 Escape / ArrowDown" />
+</div>
+
+<!-- ⑤ 被固定横幅遮挡的按钮(blocked_by)-->
+<div style="position:fixed;left:24px;bottom:40px;z-index:50">
+  <button id="covered">被横幅盖住的按钮</button>
+</div>
+<div id="banner">
+  <span>模拟 cookie 横幅(盖住左下按钮)</span>
+  <button id="banner-close">关闭横幅</button>
+</div>
+
+<script>
+  const mark = (t) => { document.getElementById('status').textContent += ' ' + t; };
+
+  // ① host1: open shadow root
+  const r1 = document.getElementById('host1').attachShadow({ mode: 'open' });
+  r1.innerHTML = `
+    <h3>shadow L1</h3>
+    <button id="sbtn">shadow按钮</button>
+    <div id="scard" style="cursor:pointer;padding:4px;border:1px dashed #999;width:180px">shadow可点卡片</div>
+    <select id="ssel">
+      <option value="">选一个</option>
+      <option value="a">选项A</option>
+      <option value="b">选项B</option>
+    </select>
+    <input id="sinput" placeholder="shadow输入框" />
+    <label for="sinput">shadow标签</label>
+  `;
+  r1.getElementById('sbtn').addEventListener('click', () => mark('s1-click'));
+  r1.getElementById('scard').addEventListener('mousedown', () => mark('s1-card-md'));
+  r1.getElementById('ssel').addEventListener('change', (e) => mark('s1-sel:' + e.target.value));
+  r1.getElementById('sinput').addEventListener('input', (e) => mark('s1-input:' + e.target.value));
+
+  // ② host2: nested shadow (L1 → L2)
+  const r2 = document.getElementById('host2').attachShadow({ mode: 'open' });
+  r2.innerHTML = `<h3>shadow L1(嵌套外层)</h3><div id="inner"></div>`;
+  const r3 = r2.getElementById('inner').attachShadow({ mode: 'open' });
+  r3.innerHTML = `
+    <a id="slink" href="#deep">深层shadow链接</a>
+    <button id="sdeepbtn">深层shadow按钮</button>
+  `;
+  r3.getElementById('sdeepbtn').addEventListener('click', () => mark('s2-deep-click'));
+  r3.getElementById('slink').addEventListener('click', (e) => { e.preventDefault(); mark('s2-link'); });
+
+  // ③ hover 菜单项
+  document.getElementById('menuitem').addEventListener('click', () => mark('menuA'));
+
+  // ④ 键盘(kbd 层 + document 层各记一份,可区分「没投递」和「投递到了别处」)
+  const kbd = document.getElementById('kbd');
+  kbd.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') mark('kbd-esc');
+    if (e.key === 'ArrowDown') mark('kbd-down');
+    if (e.key === 'Enter' && e.ctrlKey) mark('kbd-ctrl-enter');
+    mark('kbd:' + e.key);
+  });
+  document.addEventListener('keydown', (e) => mark('doc:' + e.key));
+
+  // ⑤ 遮挡
+  document.getElementById('covered').addEventListener('click', () => mark('covered-click'));
+  document.getElementById('banner-close').addEventListener('click', () => {
+    document.getElementById('banner').remove();
+    mark('banner-closed');
+  });
+</script>
+</body>
+</html>
