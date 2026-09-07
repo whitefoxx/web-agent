@@ -21,5 +21,5 @@
   <path d="M0 -1 C0.12 -0.34 0.34 -0.12 1 0 C0.34 0.12 0.12 0.34 0 1 C-0.12 0.34 -0.34 0.12 -1 0 C-0.34 -0.12 -0.12 -0.34 0 -1 Z"
         transform="translate(58 56) scale(40)" fill="#fff"/>
   <path d="M0 0 L0 16 L3.7 12.4 L6.2 18.5 L8.6 17.5 L6.1 11.5 L11 11.5 Z"
-        transform="translate(88 78) rotate(-20) scale(2.2)" fill="#F5A623"/>
+        transform="translate(80 74) rotate(-20) scale(2.7)" fill="#F5A623"/>
 </svg>
