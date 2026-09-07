@@ -2072,3 +2072,56 @@ build says it is *current*.
 Two of the rounds here were spent on output from a sweep whose `|| echo 0`
 fallback manufactured failures. Check the checker before trusting a surprising
 result from it.
+
+## F-69 — going public: two licence holes, and a README overwritten because a glob failed
+
+**Context**: 2026-09-07, opening `web-agent` (MIT, clean single-commit history)
+and licensing the repos. Three findings, one of them mine.
+
+**Symptom 1 — a public repo nobody could legally use.** `web-tools` had been
+public since the P4 extraction and carried **no LICENSE**. Both store listings
+already told reviewers and users the code was open. Without a licence file the
+default is all-rights-reserved: reading it is fine, using, modifying or
+redistributing it is not. The gap was invisible because "the repo is public"
+feels like the whole of open-sourcing, and nothing errors.
+
+**Symptom 2 — Apache-2.0 code redistributed with no licence and no credit.**
+`web-agent-marketplace` is public and all **294** of its adapters derive from
+[opencli](https://github.com/jackwener/opencli) (Apache-2.0) — every file imports
+`@jackwener/opencli/registry`, and one still carries the harvest path in a
+comment. The repo had no LICENSE, no NOTICE, and mentioned opencli exactly once,
+in a parenthesis, in a section about editing files. Apache-2.0 §4 asks for the
+licence text, retained attribution, and a statement that files were modified;
+we were providing none of it.
+
+**Root cause (both)**: licence obligations attach to *distribution*, and a git
+push is distribution. Nothing in the toolchain checks this — not the build, not
+the tests, not the store review — so it stays invisible until someone looks.
+Making a repo public and licensing a repo are separate acts, and only one of
+them has a button.
+
+**Fix**: MIT on `web-agent` + `web-tools` (permissive matches the upstream and
+the strategy — this is a base other people are meant to build on, installed with
+`npx`). Apache-2.0 LICENSE + a NOTICE on the marketplace recording the
+derivation, the modifications (bundled to stand alone, corrected against live
+sites, extended, in places rewritten) and that it is not synced upstream, so a
+defect here is reported here. Verified the way it will actually be consumed: an
+anonymous `git clone --recursive https://…`, then `npm ci && npm run build` —
+both submodules resolved and the service worker came out byte-identical to the
+locally tested one (2,137,149 bytes).
+
+**Symptom 3 (my own)** — I overwrote the repo's existing 150-line README with a
+new one, having concluded it had none.
+
+**Root cause**: `ls -la LICENSE* README*` in zsh. With no `LICENSE*` match zsh
+aborts the **whole command** before `README*` is ever expanded, printing only
+`no matches found: LICENSE*`. I read that as "neither exists". The overwrite
+nearly destroyed the opencli attribution — the very thing Symptom 2 is about.
+
+**Lesson**: **a shell that reports nothing is not a shell that found nothing.**
+zsh's default `nomatch` kills the command on the first failed glob, so one
+missing file silently answers a question about a different file. Check each path
+on its own (`ls X || echo none; ls Y || echo none`), and never let a *negative*
+result from a compound command authorize an overwrite. The standing rule already
+covers it: look at the target before overwriting it — recovering it from git
+afterwards is luck, not process.
