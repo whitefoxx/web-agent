@@ -1711,10 +1711,11 @@ marketplace adapter 一律按需 `load_adapter`。
 **症状**(用户长期反馈,提示词修过多轮始终复发):①agent 收到任务经常**不先查 adapter**,直接
 open_url + 通用工具硬抓——「动手前先 find_adapters」写在 system prompt(§10.39 的策略注入)也只是
 概率性生效;②已注册 adapter 一多,**每次 LLM 调用都携带全量 tool schema**——`selectTools` v1 只在
->40 个工具**且任务文本含英文站点 token**时才收窄,中文任务(「帮我看看小红书…」)永远匹配不上
-`xiaohongshu`,fallback 又是「不认识就全保留」→ 实际从不收窄;③`find_adapters` v1 打分是
-「query 按空格切词 + substring」——中文查询天然**不分词**(「微博热搜」是一个 token),别名表/同义词
-组都挂在整词精确 lookup 上 → 中文查询大面积 0 分。
+
+> 40 个工具**且任务文本含英文站点 token**时才收窄,中文任务(「帮我看看小红书…」)永远匹配不上
+> `xiaohongshu`,fallback 又是「不认识就全保留」→ 实际从不收窄;③`find_adapters` v1 打分是
+> 「query 按空格切词 + substring」——中文查询天然**不分词**(「微博热搜」是一个 token),别名表/同义词
+> 组都挂在整词精确 lookup 上 → 中文查询大面积 0 分。
 
 **根因**(共同主题):把「adapters 优先」当成**要模型记住的规则**,而不是**发生在系统里的事实**;
 把「目录太大」交给**一次性的、以英文 token 为键的**文本匹配。规则会被遗忘,匹配键对不上就静默失效。
@@ -1727,13 +1728,13 @@ open_url + 通用工具硬抓——「动手前先 find_adapters」写在 system
    展开),未注册的给出精确的 `load_adapter{site,name}` 调用。**搜索在模型第一个 token 之前就已发生**,
    「记得去搜」变成「照着列表用」。explore 模式跳过(交付物本来就是新 adapter)。
 2. **open_url 即时提示(`adapter-hints.ts`,dispatcher 挂钩)**:模型真的开始用通用工具驾驶某站点时
-   (generic__open_url 成功),若该站点**有 marketplace adapter 且一个都没注册**,在**工具结果里**附
+   (generic\_\_open_url 成功),若该站点**有 marketplace adapter 且一个都没注册**,在**工具结果里**附
    `adapter_hint`(每 origin+site 只提示一次)。工具结果是模型注意力的焦点——在犯错的当口提醒,比
    system prompt 里的第 40 行有效得多。
 3. **`find_adapters` 打分 v2(命中率)**:①**词表抽取**代替纯空格切词——站点 token+别名+任务同义词
    (≥2 字)凡**包含于** query 就算词项,「微博热搜」→ [微博, 热搜],「zhihu热榜」也拆得开;query 里的
    URL 提取 `siteFromHost` 站点名;②**加权**:站点/别名/域名命中 3 分 ≫ 命令名 2 分 ≫ 描述 1 分,
-   「微博 搜索」必然把 weibo__search 排在 twitter__search 和 weibo__like 前面;③语料 = marketplace
+   「微博 搜索」必然把 weibo**search 排在 twitter**search 和 weibo\_\_like 前面;③语料 = marketplace
    index **∪ 注册表**(用户自探/自装的也可发现),返回加 `status`(已加载:直接调用 / 未加载:先
    load_adapter);④`my-` explored 命名空间按 baseSite 参与别名匹配。纯函数(`extractTerms` /
    `scoreAdapter` / `rankAdapters`)供 ①/单测复用;别名表抽到 `src/tools/site-aliases.ts` 共享。
@@ -1743,7 +1744,7 @@ open_url + 通用工具硬抓——「动手前先 find_adapters」写在 system
    后续轮不丢工具;③**没点名任何站点时也收窄**(v1 是全量 fallback):隐藏站点的工具压成**每站一行
    的 digest**(`site: name(arg, opt?)`)注进 system prompt——隐藏≠不可用,工具**仍在注册表**里,
    照 digest 的名字+参数**直接调用也能执行**;要完整 schema 就 find_adapters 一下,下一轮自动展开。
-   >15 站再退化为「站点(数量)」。子 agent 同规则(按子任务文本收窄;显式 allowed_tools 则不动)。
+   > 15 站再退化为「站点(数量)」。子 agent 同规则(按子任务文本收窄;显式 allowed_tools 则不动)。
 
 **量级**:290 个 adapter 若全注册,全量 schema ≈ 数万 token/次;digest 每站一行 ≈ 几百 token,
 generic 基础目录(~37 个)不变。阈值仍 40:轻用户(少量 adapter)完全无感。
@@ -1854,8 +1855,8 @@ find_in_page / get_text_from_tab——不经过 open_url,①修好也提示不�
 `get_page_text`(args.url)与 `get_text_from_tab`(tab_id → chrome.tabs.get 取 url):**打开**和**读取**
 是 generic 硬抓的两个入口,都要设卡;仍每 origin+site 一次、explore 跳过。
 
-**③「在我的 x首页查找…」被执行成全站 twitter__search**。用户要的是**自己登录后的 feed**
-(twitter__timeline 就在市场里),搜索结果 ≠ 他首页上看到的内容——任务语义被静默偷换。两手修:
+**③「在我的 x首页查找…」被执行成全站 twitter\_\_search**。用户要的是**自己登录后的 feed**
+(twitter\_\_timeline 就在市场里),搜索结果 ≠ 他首页上看到的内容——任务语义被静默偷换。两手修:
 find-adapters 的 feed 同义词组补 `首页/timeline/home`(「推特 首页」现在把 timeline 排在 search 前,
 有单测);system prompt 加一条「别偷换任务语义:我的首页/时间线/feed=用户自己的 feed,用 timeline/feed
 类适配器或打开首页读,不要换成全站搜索」。PROMPT_VERSION → 2026-07-10.3。
@@ -1890,9 +1891,9 @@ origin=explore 的行)」与「探索产物(躺在 session 里)」之间没有�
   origin manual+healedFrom,不能 re-home 成 `my-` 新副本)。`UserMessageReq`/`SessionState` 增加
   `healTarget`(**单轮语义**:每条 USER_MESSAGE set/clear),SW 端按面板原「安装」的同一张映射表定 origin。
 - **面板**:探索卡片删「安装」按钮;**手动试跑通过 → 同样自动入库**(import/backstop/repair 行的通路)
-  + 试跑真失败时把库里行的验证状态如实改 failed(**拒绝≠失败**:write 拒跑 / tool not found 不降级,
-  按 handleRunTool 的两个错误串守卫);「已安装」徽标改「已保存」。删 `reconcileInstalledFlags`
-  (installed 标志现在由 SW 事件如实带来)。
+  - 试跑真失败时把库里行的验证状态如实改 failed(**拒绝≠失败**:write 拒跑 / tool not found 不降级,
+    按 handleRunTool 的两个错误串守卫);「已安装」徽标改「已保存」。删 `reconcileInstalledFlags`
+    (installed 标志现在由 SW 事件如实带来)。
 - **试跑 fallback 修正(顺手修的旧 bug)**:原「tool not found → 自动安装再跑」对 explore origin
   **从来跑不通**——安装会 re-home 成 `my-<site>__<name>`,重跑的还是无前缀名,照样 not found。改为新消息
   `REGISTER_SESSION_ADAPTER`(SW offscreen eval → `registerSessionDefs`,不落盘),语义与「会话级注册」
@@ -1965,7 +1966,7 @@ tab id.
   `bridge` skill all teach "read = one call, read-then-act = `keep_open`, `open_url` only when you want
   the tab without its text"; the system prompt gains the same rule (PROMPT_VERSION → 2026-07-26.1).
 
-**Lesson**: ① **having the capability ≠ the model using it** — a tool description *is* its UI, and the
+**Lesson**: ① **having the capability ≠ the model using it** — a tool description _is_ its UI, and the
 first path shown in the examples becomes the canonical one. When asking "why does the model call it this
 way", go read the text it actually reads (tool description / instructions / skill) before touching code.
 ② **Never return a handle you are about to destroy**; either keep it alive or say plainly that it is
@@ -2057,3 +2058,50 @@ built by copying another shell's module inherits its behaviour minus whatever th
 bug. ③ **An anti-churn measure is a bet on how often the next thing happens**; the same placeholder that
 saves a window-open per task in an interactive shell is hours of clutter in a headless one. Re-ask the
 question per shell instead of inheriting the constant.
+
+### 10.49 `max_tokens` could be saved but never read back (2026-09-21)
+
+**Symptom.** Setting "Output limit max_tokens" in an LLM profile did nothing.
+The agent kept hitting the old 4096 ceiling, and reopening the profile form
+showed the box empty again.
+
+**Root cause.** `normalize()` in `src/config/llm-config.ts` rebuilds every stored
+profile FIELD BY FIELD:
+
+```ts
+const cfg: LlmConfig = {
+  provider: …, baseUrl: …, apiKey: …, model: …,
+};
+```
+
+`maxTokens` was added to the `LlmConfig` interface and to the form, but never to
+that list — and `normalize()` runs on every READ (`loadProfiles` →
+`resolveSlots` → `loadLlmConfig`). So the write worked and landed in
+`chrome.storage.local` intact; the value was dropped the instant anything read
+it back.
+
+It was worse than a display bug, because `upsertProfile()` reads the store
+before writing it: saving ANY profile re-persisted every other profile through
+the same lossy rebuild, so one edit wiped the setting off all of them.
+
+**Fix.** Carry it (`cleanMaxTokens`, which also sanitises: a positive integer, or
+nothing — a stored `"8192"` from an older build now parses, a `0` or a `NaN`
+means "engine default"). Same for the three legacy single-config shapes in
+`normalizeSingle`. Four tests in `tests/llm-config.test.ts` pin it, including the
+second-write case; all four fail with the line removed — checked, not assumed.
+
+**And the default moved 4096 → 32768** (`DEFAULT_MAX_TOKENS`, one constant
+instead of four literals in `api-engine.ts`). 4096 is a 2023 number: it cuts a
+long final answer mid-sentence and the user only learns from the truncation
+notice. `max_tokens` is a CEILING — providers bill what is generated, so an
+unused one costs nothing. The ceiling a provider will ACCEPT is per-model
+though, and some reject a request whose `max_tokens` exceeds the model's own
+output limit, which is why the field stays editable and the hint now says to
+LOWER it for such a model rather than only to raise it.
+
+**Lesson.** A normalizer that rebuilds an object field by field is a second,
+invisible definition of the type — and TypeScript agrees with it completely: the
+object it builds satisfies `LlmConfig` because the missing field is optional.
+Every optional field added to a config type from now on has to be added in two
+places, and the only thing that catches the second one is a save→load round-trip
+test. The comment now sits in `normalize()` saying so.

@@ -23,7 +23,7 @@ import {
   systemPromptSubagent,
   PROMPT_VERSION,
 } from './api-system-prompt';
-import { resolveSlots, needsBaseUrl } from '../config/llm-config';
+import { resolveSlots, needsBaseUrl, DEFAULT_MAX_TOKENS } from '../config/llm-config';
 import { getActiveExploreSession } from '../explore/session';
 import { visionDescribe, imageUrlForProvider, providerAcceptsHttpImageUrl } from './specialist';
 import { appendTurn, saveSession } from './session';
@@ -486,7 +486,7 @@ export async function runApiSession(ctx: EngineContext, deps: ApiEngineDeps = {}
             ],
             tools,
             tool_choice: 'auto',
-            max_tokens: cfg.maxTokens ?? 4096,
+            max_tokens: cfg.maxTokens ?? DEFAULT_MAX_TOKENS,
           },
         });
       } catch (e) {
@@ -745,7 +745,7 @@ export async function runApiSession(ctx: EngineContext, deps: ApiEngineDeps = {}
             messages: [{ role: 'system', content: systemPromptSubagent() }, ...subMessages],
             tools: subTools,
             tool_choice: 'auto',
-            max_tokens: cfg.maxTokens ?? 4096,
+            max_tokens: cfg.maxTokens ?? DEFAULT_MAX_TOKENS,
           },
         });
       } catch (e) {
@@ -1054,7 +1054,7 @@ export async function runApiSession(ctx: EngineContext, deps: ApiEngineDeps = {}
             ],
             tools,
             tool_choice: 'auto',
-            max_tokens: cfg.maxTokens ?? 4096,
+            max_tokens: cfg.maxTokens ?? DEFAULT_MAX_TOKENS,
           },
         });
       } catch (e) {
@@ -1085,7 +1085,7 @@ export async function runApiSession(ctx: EngineContext, deps: ApiEngineDeps = {}
         ctx.emit({
           type: 'notice',
           level: 'warning',
-          text: `This output hit the max_tokens ceiling (${cfg.maxTokens ?? 4096}) and was truncated, so the content may be incomplete — you can raise the "output limit" for this model in "LLM configuration"`,
+          text: `This output hit the max_tokens ceiling (${cfg.maxTokens ?? DEFAULT_MAX_TOKENS}) and was truncated, so the content may be incomplete — you can raise the "output limit" for this model in "LLM configuration"`,
         });
       }
       const msg = choice.message;

@@ -64,6 +64,92 @@ beforeEach(() => {
   stub.reset();
 });
 
+/* ───────── maxTokens survives a round trip ───────── */
+
+describe('maxTokens', () => {
+  // `normalize()` rebuilds every profile field by field and runs on every READ,
+  // so a field it forgets is one the user can save and never see again. That is
+  // exactly what happened here: the form wrote it, storage held it, and the
+  // next read dropped it — so the agent always ran on the engine default and
+  // reopening the form showed an empty box.
+  it('survives save → load, so the setting actually reaches the engine', async () => {
+    await saveLlmConfig({
+      provider: 'openai',
+      baseUrl: 'https://api.openai.com/v1',
+      apiKey: 'sk-test',
+      model: 'gpt-4o',
+      maxTokens: 16000,
+    });
+    expect((await loadLlmConfig()).maxTokens).toBe(16000);
+    expect((await loadProfiles()).profiles[0].maxTokens).toBe(16000);
+  });
+
+  it('survives a SECOND write through upsertProfile', async () => {
+    // upsertProfile reads the store before writing it, so a read that drops the
+    // field also wipes it off every OTHER profile on the next save.
+    await saveLlmConfig({
+      provider: 'openai',
+      baseUrl: 'https://api.openai.com/v1',
+      apiKey: 'sk-a',
+      model: 'gpt-4o',
+      maxTokens: 12345,
+    });
+    const first = (await loadProfiles()).profiles[0];
+    await upsertProfile({
+      id: newProfileId(),
+      label: 'second',
+      provider: 'deepseek',
+      baseUrl: 'https://api.deepseek.com',
+      apiKey: 'sk-b',
+      model: 'deepseek-chat',
+    });
+    const after = (await loadProfiles()).profiles.find((p) => p.id === first.id);
+    expect(after?.maxTokens).toBe(12345);
+  });
+
+  it('drops a stored value that is not a usable cap, rather than sending it', async () => {
+    for (const bad of [0, -1, 'lots', null, undefined, NaN]) {
+      await chrome.storage.local.set({
+        [STORAGE_KEY]: {
+          profiles: [
+            {
+              id: 'p1',
+              label: 'x',
+              provider: 'openai',
+              baseUrl: 'https://api.openai.com/v1',
+              apiKey: 'k',
+              model: 'gpt-4o',
+              maxTokens: bad,
+            },
+          ],
+          slots: { primary: 'p1' },
+        },
+      });
+      expect((await loadLlmConfig()).maxTokens, `for ${String(bad)}`).toBeUndefined();
+    }
+  });
+
+  it('accepts a numeric string from an older build', async () => {
+    await chrome.storage.local.set({
+      [STORAGE_KEY]: {
+        profiles: [
+          {
+            id: 'p1',
+            label: 'x',
+            provider: 'openai',
+            baseUrl: 'https://api.openai.com/v1',
+            apiKey: 'k',
+            model: 'gpt-4o',
+            maxTokens: '8192',
+          },
+        ],
+        slots: { primary: 'p1' },
+      },
+    });
+    expect((await loadLlmConfig()).maxTokens).toBe(8192);
+  });
+});
+
 /* ───────── primary resolver (consumed by api-engine) ───────── */
 
 describe('loadLlmConfig (primary resolver)', () => {

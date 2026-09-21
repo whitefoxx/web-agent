@@ -238,6 +238,7 @@ import {
   autoLabel,
   providerById,
   needsBaseUrl,
+  DEFAULT_MAX_TOKENS,
   type Capability,
   type LlmConfig,
   type LlmProfile,
@@ -6972,11 +6973,11 @@ function ProfileEditForm({
           <input
             type="number"
             value={maxTokens}
-            placeholder="4096 (default)"
+            placeholder={`${DEFAULT_MAX_TOKENS} (default)`}
             onInput={(e) => setMaxTokens((e.target as HTMLInputElement).value)}
           />
           <span class="field-hint">
-            The output-token cap per reply. Increase it if answers are often cut off (shown as "output reached the limit"); the model itself must support longer output
+            The output-token cap per reply — a ceiling, not a reservation, so an unused one costs nothing. Lower it for a model whose own output limit is smaller and that rejects the request outright.
           </span>
         </div>
       </div>

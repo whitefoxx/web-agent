@@ -55,6 +55,20 @@ export const CAPABILITIES: CapabilityMeta[] = [
   },
 ];
 
+/**
+ * The per-request output cap used when a profile does not set one.
+ *
+ * Was 4096, which is a 2023 number: it cuts a long final answer mid-sentence,
+ * and the user only finds out from the truncation notice. Modern models take
+ * far more, and `max_tokens` is a CEILING — an unused one costs nothing, since
+ * providers bill the tokens actually generated.
+ *
+ * The ceiling a provider will ACCEPT is per-model, though, and some reject a
+ * request whose max_tokens exceeds the model's own output limit. That is why
+ * the field stays user-editable and the truncation notice names it.
+ */
+export const DEFAULT_MAX_TOKENS = 32768;
+
 export interface LlmConfig {
   /** Preset id (or 'custom'); informational, the call uses baseUrl. */
   provider: string;
@@ -62,9 +76,9 @@ export interface LlmConfig {
   apiKey: string;
   model: string;
   /** Per-request output cap (`max_tokens`) for the agent loops. Optional —
-   * absent = engine default (4096). Long final answers hitting the cap get cut
-   * by the PROVIDER (finish_reason 'length'); raise this for models that
-   * support more output. */
+   * absent = `DEFAULT_MAX_TOKENS`. Long final answers hitting the cap get cut
+   * by the PROVIDER (finish_reason 'length'); lower this for a model whose own
+   * output limit is smaller and that rejects the request outright. */
   maxTokens?: number;
 }
 
@@ -364,6 +378,13 @@ export function autoLabel(c: LlmConfig): string {
  *      and wrap.
  *
  * Empty/unrecognized → empty store. */
+/** A stored `maxTokens` worth keeping: a positive integer. Anything else (a
+ *  string from an old build, 0, NaN, a negative) means "engine default". */
+function cleanMaxTokens(raw: unknown): { maxTokens?: number } {
+  const n = Math.floor(Number(raw));
+  return Number.isFinite(n) && n > 0 ? { maxTokens: n } : {};
+}
+
 function normalize(raw: unknown): LlmProfileStore {
   if (!raw || typeof raw !== 'object') return { profiles: [], slots: {} };
   const obj = raw as Record<string, unknown>;
@@ -379,6 +400,12 @@ function normalize(raw: unknown): LlmProfileStore {
         baseUrl: String(pp.baseUrl ?? DEFAULT_CONFIG.baseUrl),
         apiKey: String(pp.apiKey ?? ''),
         model: String(pp.model ?? DEFAULT_CONFIG.model),
+        // NOT optional to carry: this function rebuilds a profile field by
+        // field, and it runs on every READ. A field missing here is a field the
+        // user can save and never see again — which is exactly what happened to
+        // `maxTokens` (docs/adapter-hot-plug.md §10.x). Add new LlmConfig fields
+        // HERE as well as to the interface.
+        ...cleanMaxTokens(pp.maxTokens),
       };
       const id = typeof pp.id === 'string' && pp.id ? pp.id : newProfileId();
       const label =
@@ -430,6 +457,7 @@ function normalizeSingle(obj: Record<string, unknown>): LlmConfig {
       baseUrl: String(a.baseUrl ?? DEFAULT_CONFIG.baseUrl),
       apiKey: String(a.apiKey ?? ''),
       model: String(a.model ?? DEFAULT_CONFIG.model),
+      ...cleanMaxTokens(a.maxTokens),
     };
   }
   // Discriminated-union api shape.
@@ -439,6 +467,7 @@ function normalizeSingle(obj: Record<string, unknown>): LlmConfig {
       baseUrl: String(obj.baseUrl ?? DEFAULT_CONFIG.baseUrl),
       apiKey: String(obj.apiKey ?? ''),
       model: String(obj.model ?? DEFAULT_CONFIG.model),
+      ...cleanMaxTokens(obj.maxTokens),
     };
   }
   // Current-single shape (pre-multi-profile build).
@@ -448,6 +477,7 @@ function normalizeSingle(obj: Record<string, unknown>): LlmConfig {
       baseUrl: obj.baseUrl,
       apiKey: String(obj.apiKey ?? ''),
       model: String(obj.model ?? ''),
+      ...cleanMaxTokens(obj.maxTokens),
     };
   }
   // Legacy connector-only or anything else: empty (no api creds to recover).
